@@ -493,6 +493,29 @@ function Snake:updateLength(newLength)
 	end
 end
 
+function Snake:grow(amount)
+	-- Increase length by amount (default 1)
+	amount = amount or 1
+	local newLength = self.length + amount
+	
+	-- Update length (will create new segments if needed)
+	self:updateLength(newLength)
+	
+	-- Update leaderstats
+	local player = self.player
+	if player then
+		local leaderstats = player:FindFirstChild("leaderstats")
+		if leaderstats then
+			local lengthValue = leaderstats:FindFirstChild("Length")
+			if lengthValue then
+				lengthValue.Value = newLength
+			end
+		end
+	end
+	
+	print("Snake grew by", amount, "- New length:", newLength)
+end
+
 function Snake:sendNetworkUpdate()
 	-- Send position updates to server
 	if remoteEvents.positionUpdate then

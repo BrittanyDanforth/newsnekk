@@ -399,7 +399,7 @@ local function createSafeOrb(position, value, name, color, material)
 
 	local val = Instance.new("NumberValue")
 	val.Name = "Value"
-	val.Value = value or 1  -- REDUCED from 10 to 1
+	val.Value = value or 5  -- INCREASED from 1 to 5 for noticeable growth
 	val.Parent = orb
 
 	local light = Instance.new("PointLight")

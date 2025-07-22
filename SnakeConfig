@@ -39,7 +39,7 @@ return {
 	LODDistance = 120, -- Level of detail distance
 
 	-- GAMEPLAY SETTINGS
-	OrbValue = 1,           -- Each orb gives 1 segment
+	OrbValue = 5,           -- Each orb gives 5 segments (was 1)
 	BoostDrainRate = 3,     -- Boost drains faster
 
 	-- DEATH ORB VALUES (percentage of snake length returned as orbs)
