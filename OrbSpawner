@@ -1,27 +1,36 @@
--- THIS GOES INSIDE ServerScriptService AS A SCRIPT
--- OrbSpawner: Ultra-efficient, event-driven orb collection with LOD system
--- Features Slither.io-style orb fade-in/pop-up for massive FPS improvement
--- Supports thousands of orbs with minimal lag by only rendering nearby ones
--- FIXED: AI snakes can now eat orbs + NO ATTACHMENT ERRORS from death orbs
+-- Slither.io Orb Spawner Script with Performance Optimizations
 
---[[ -------------------------------------------------------------------------
-IMPORTANT:
-• All orbs (including death orbs) MUST be standalone Parts parented to Workspace.
-• NEVER parent orbs, attachments, or constraints to snake segments or heads.
-• All VFX (ParticleEmitters, etc) MUST be created on temporary Parts in Workspace.
-• Orbs now use LOD (Level of Detail) - only nearby orbs are fully visible
----------------------------------------------------------------------------- ]]
+local OUTER_RING_RADIUS = 500 -- Outer ring for spawn fade
+local SPAWN_RADIUS = 475 -- Where new orbs can spawn
+local FADE_RING_WIDTH = 25 -- Width of the fade ring
+local CELL_SIZE = 40 -- Size of each cell in the grid (increased for performance)
+local ORB_COUNT = 400 -- Maximum number of orbs (reduced from 600+ for better performance)
+local RESPAWN_DELAY = 0.5 -- Delay before respawning an orb (increased slightly)
+local BATCH_SIZE = 20 -- Number of orbs to process per frame
+local UPDATE_INTERVAL = 0.1 -- How often to update orb visibility
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace         = game:GetService("Workspace")
-local Players           = game:GetService("Players")
-local Debris            = game:GetService("Debris")
-local TweenService      = game:GetService("TweenService")
-local RunService        = game:GetService("RunService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+local orbs = {}
+local grid = {}
+local orbPool = {} -- Object pool for reusing orbs
+local activeOrbs = {} -- Track active orbs
+local lastUpdateTime = 0
+local currentBatch = 1
 
 -- Core helpers
 local OrbUtils      = require(ReplicatedStorage:WaitForChild("OrbUtils"))
 local SnakeUpgrades = require(ReplicatedStorage:WaitForChild("SnakeUpgrades"))
+
+-- Create Orbs folder if it doesn't exist
+local orbsFolder = workspace:FindFirstChild("Orbs")
+if not orbsFolder then
+	orbsFolder = Instance.new("Folder")
+	orbsFolder.Name = "Orbs"
+	orbsFolder.Parent = workspace
+end
 local VFXManager    = require(ReplicatedStorage:WaitForChild("VFXManager"))
 
 -- ⚠️  LAZY access to AISnake (breaks circular require)
@@ -49,8 +58,8 @@ if not OrbCollectedEvent then
 	OrbCollectedEvent.Parent = ReplicatedStorage
 end
 
-local ORB_SPAWN_INTERVAL  = 0.2  -- Faster orb respawn!
-local ORB_MAX             = 950  -- More orbs available!
+local ORB_SPAWN_INTERVAL  = 0.5  -- Slower respawn for better performance
+local ORB_MAX             = 600  -- Reduced orb count for better FPS
 local UPGRADE_ORB_CHANCE  = 0.13
 
 -- LOD (Level of Detail) settings for performance
@@ -60,7 +69,11 @@ local FAR_DISTANCE = 400     -- Increased from 300
 local FADE_DISTANCE = 100    -- Increased from 50
 local MIN_ORB_SIZE = 0.3
 local MAX_ORB_SIZE = 2.0
-local LOD_UPDATE_RATE = 0.1
+local LOD_UPDATE_RATE = 0.2  -- Slower updates for better performance
+
+-- Performance settings
+local BATCH_PROCESS_COUNT = 50  -- Process orbs in batches
+local ORB_POOL_SIZE = 100  -- Pre-create orbs for pooling
 
 ---------------------------------------------------------------------
 -- Dynamic spawn area
@@ -87,6 +100,10 @@ local upgradeOrbs = {}                      -- track upgrade orbs
 local orbDebounce = {}                      -- debounce table
 local orbTweens   = {}                      -- active tweens for orbs
 local orbStates   = {}                      -- track orb visibility states
+
+-- Object pooling for performance
+local orbPool = {}                          -- Pool of inactive orbs
+local pooledOrbCount = 0                    -- Track pool size
 
 -- OPTIMIZATION: Spatial grid for efficient collision detection
 local GRID_SIZE = 50  -- Size of each grid cell
@@ -475,6 +492,19 @@ local function removeOrb(orb)
 		orbTweens[orb]:Cancel()
 		orbTweens[orb] = nil
 	end
+	
+	-- Try to return orb to pool instead of destroying
+	if pooledOrbCount < ORB_POOL_SIZE then
+		-- Reset orb properties for pooling
+		orb.Parent = nil
+		orb.Transparency = 1
+		orb.Size = Vector3.new(0.1, 0.1, 0.1)
+		table.insert(orbPool, orb)
+		pooledOrbCount = pooledOrbCount + 1
+	else
+		-- Pool is full, destroy the orb
+		orb:Destroy()
+	end
 end
 
 ---------------------------------------------------------------------
@@ -713,13 +743,47 @@ end
 
 local function createOrb()
 	local orb
+	
+	-- Check if we should spawn an upgrade orb
 	if math.random() < UPGRADE_ORB_CHANCE then
-		orb = createSafeOrb(randomPosition(), 0, "UpgradeOrb",
-			Color3.fromRGB(0, 200, 255), Enum.Material.ForceField)
+		-- Try to get orb from pool first
+		if pooledOrbCount > 0 then
+			orb = table.remove(orbPool)
+			pooledOrbCount = pooledOrbCount - 1
+			-- Reset and configure as upgrade orb
+			orb.Name = "UpgradeOrb"
+			orb.Color = Color3.fromRGB(0, 200, 255)
+			orb.Material = Enum.Material.ForceField
+			orb.Position = randomPosition()
+			orb.Parent = workspace
+			local val = orb:FindFirstChild("Value")
+			if val then val.Value = 0 end
+		else
+			orb = createSafeOrb(randomPosition(), 0, "UpgradeOrb",
+				Color3.fromRGB(0, 200, 255), Enum.Material.ForceField)
+		end
 		upgradeOrbs[#upgradeOrbs + 1] = orb
 		orbs[#orbs + 1] = orb
 	else
-		orb = OrbUtils.spawnOrbAt(randomPosition(), 1)  -- REDUCED from 10 to 1
+		-- Regular orb - try pool first
+		if pooledOrbCount > 0 then
+			orb = table.remove(orbPool)
+			pooledOrbCount = pooledOrbCount - 1
+			-- Reset and configure as regular orb
+			orb.Name = "Orb"
+			orb.Color = Color3.fromRGB(255, 255, 0)
+			orb.Material = Enum.Material.Neon
+			orb.Position = randomPosition()
+			orb.Parent = workspace
+			local val = orb:FindFirstChild("Value")
+			if val then val.Value = 1 end
+			
+			-- Add to OrbUtils tracking
+			OrbUtils.registerOrb(orb)
+		else
+			orb = OrbUtils.spawnOrbAt(randomPosition(), 1)
+		end
+		
 		if orb then
 			-- CRITICAL FIX: Add regular orbs to the orbs array!
 			orbs[#orbs + 1] = orb
@@ -751,20 +815,79 @@ end
 -- Remove the server-side graphics handler - this should be client-side only!
 
 ---------------------------------------------------------------------
+-- Pre-populate orb pool for performance
+---------------------------------------------------------------------
+local function populateOrbPool()
+	print("Pre-creating orb pool...")
+	for i = 1, ORB_POOL_SIZE do
+		local orb = Instance.new("Part")
+		orb.Name = "PooledOrb"
+		orb.Shape = Enum.PartType.Ball
+		orb.Size = Vector3.new(0.1, 0.1, 0.1)
+		orb.Anchored = true
+		orb.CanCollide = false
+		orb.CanTouch = true
+		orb.TopSurface = Enum.SurfaceType.Smooth
+		orb.BottomSurface = Enum.SurfaceType.Smooth
+		orb.Transparency = 1
+		
+		local val = Instance.new("NumberValue")
+		val.Name = "Value"
+		val.Value = 1
+		val.Parent = orb
+		
+		local light = Instance.new("PointLight")
+		light.Parent = orb
+		light.Enabled = false
+		light.Shadows = false
+		
+		table.insert(orbPool, orb)
+		pooledOrbCount = pooledOrbCount + 1
+		
+		-- Yield every 10 orbs to prevent lag spike
+		if i % 10 == 0 then
+			task.wait()
+		end
+	end
+	print("Orb pool ready with", pooledOrbCount, "orbs")
+end
+
+-- Pre-populate pool before spawning orbs
+populateOrbPool()
+
+---------------------------------------------------------------------
 -- Initial fill & periodic spawn
 ---------------------------------------------------------------------
 task.spawn(function()
-	while #orbs < ORB_MAX do 
-		createOrb() 
+	-- Wait for pool to be ready
+	while pooledOrbCount < ORB_POOL_SIZE / 2 do
+		task.wait(0.1)
+	end
+	
+	-- Spawn initial orbs in batches
+	local batchSize = 50
+	while #orbs < ORB_MAX do
+		for i = 1, batchSize do
+			if #orbs < ORB_MAX then
+				createOrb()
+			end
+		end
+		task.wait(0.1) -- Small delay between batches
 	end
 end)
 
 task.spawn(function()
 	while true do 
 		task.wait(ORB_SPAWN_INTERVAL)
-		if #orbs < ORB_MAX then 
-			createOrb() 
-		end 
+		-- Batch spawn to reduce overhead
+		local orbsToSpawn = math.min(5, ORB_MAX - #orbs)
+		for i = 1, orbsToSpawn do
+			if #orbs < ORB_MAX then 
+				createOrb() 
+			else
+				break
+			end
+		end
 	end
 end)
 
