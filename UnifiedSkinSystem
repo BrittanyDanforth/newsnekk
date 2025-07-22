@@ -1,0 +1,321 @@
+-- THIS GOES INTO ServerScriptService AS A SCRIPT
+-- UNIFIED SKIN SYSTEM
+-- Handles all skin operations in one place to prevent conflicts
+
+print(" UnifiedSkinSystem starting up...")
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+
+-- Skin name mapping (Client name -> Server name)
+local SKIN_NAME_MAP = {
+	-- Basic skins
+	["Default"] = "Default",  -- Changed back to Default
+	["Crimson"] = "Crimson",
+	["Arctic"] = "Arctic",
+	["Emerald"] = "Emerald",
+	["Golden"] = "Golden",
+
+	-- Premium skins (from ShopUI)
+	["Void"] = "Void",
+	["Ocean"] = "Ocean",  -- Now we have Ocean skin
+	["Shadow"] = "Shadow",
+
+	-- Ultra Premium skins
+	["Plasma"] = "Plasma",  -- Now we have Plasma skin
+	["Galaxy"] = "Galaxy",
+	["Cyber"] = "Cyber",  -- Now we have Cyber skin
+	["Dragon"] = "Dragon",  -- Now we have Dragon skin
+	["Rainbow"] = "Rainbow",  -- Now we have Rainbow skin
+
+	-- VIP skins
+	["VIP Diamond"] = "VIP Diamond",
+	["VIP Inferno"] = "VIP Inferno",
+	["VIP Nebula"] = "VIP Nebula",  -- Now we have VIP Nebula
+	["VIP Crystal"] = "VIP Crystal",  -- Now we have VIP Crystal
+
+	-- New additions from ShopUI
+	["Phoenix"] = "Phoenix",  -- Now we have Phoenix skin
+	["Toxic"] = "Toxic",  -- Now we have Toxic skin
+	["Lightning"] = "Lightning",
+	["Quantum"] = "Quantum",  -- Now we have Quantum skin
+	["Prismatic"] = "Prismatic",  -- Now we have Prismatic skin
+
+	-- Direct mappings for server names
+	["Ocean Blue"] = "Ocean Blue",
+	["Electric Purple"] = "Electric Purple",
+	["Rainbow Prism"] = "Rainbow Prism",
+	["Cyberpunk"] = "Cyberpunk",
+	["Dragon Lord"] = "Dragon Lord",
+	["VIP Cosmic"] = "VIP Cosmic"
+}
+
+-- Reverse mapping (server -> client)
+local REVERSE_MAP = {}
+for client, server in pairs(SKIN_NAME_MAP) do
+	REVERSE_MAP[server] = client
+end
+
+-- Get or create RemoteEvents
+local function getOrCreateRemote(name)
+	local remote = ReplicatedStorage:FindFirstChild(name)
+	if not remote then
+		remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = ReplicatedStorage
+		print(" Created", name, "RemoteEvent")
+	end
+	return remote
+end
+
+local PurchaseItemRemote = getOrCreateRemote("PurchaseItem")
+local SelectSkinRemote = getOrCreateRemote("SelectSkin")
+local UpdateClientRemote = getOrCreateRemote("UpdateClientSkinData")
+local PurchaseSuccessRemote = getOrCreateRemote("PurchaseSuccess")
+
+-- Load SnakeSkins module
+local SnakeSkins = nil
+pcall(function()
+	-- Try direct server module first
+	SnakeSkins = require(script.Parent:WaitForChild("SnakeSkinsData", 2))
+	print(" UnifiedSkinSystem loaded skins from server module")
+end)
+
+if not SnakeSkins then
+	pcall(function()
+		SnakeSkins = require(ReplicatedStorage:WaitForChild("SnakeSkins", 5))
+		print(" UnifiedSkinSystem loaded skins from ReplicatedStorage")
+	end)
+end
+
+-- Player data storage
+local PlayerData = {}
+
+-- Get default player data
+local function getDefaultData()
+	return {
+		coins = 500,
+		ownedSkins = {"Default"},
+		selectedSkin = "Default",  -- Changed from "Classic" to "Default"
+		clientSelectedSkin = "Default"
+	}
+end
+
+-- Initialize player
+local function initializePlayer(player)
+	print(" Initializing player:", player.Name)
+
+	-- Try to load existing data first
+	local existingOwnedSkins = nil
+	local ownedSkinsJSON = player:GetAttribute("OwnedSkinsJSON")
+	if ownedSkinsJSON then
+		local success, decoded = pcall(function()
+			return HttpService:JSONDecode(ownedSkinsJSON)
+		end)
+		if success and decoded then
+			existingOwnedSkins = decoded
+			print(" Loaded existing owned skins:", table.concat(decoded, ", "))
+		end
+	end
+
+	-- Get or create data
+	local data = PlayerData[player] or getDefaultData()
+
+	-- If we have existing owned skins, use them instead of default
+	if existingOwnedSkins then
+		data.ownedSkins = existingOwnedSkins
+	end
+
+	-- Also check for existing coins
+	local existingCoins = player:GetAttribute("Coins")
+	if existingCoins then
+		data.coins = existingCoins
+	end
+
+	-- Check for existing selected skin
+	local existingSelectedSkin = player:GetAttribute("SelectedSkin")
+	local existingClientSkin = player:GetAttribute("ClientSelectedSkin")
+	if existingSelectedSkin then
+		data.selectedSkin = existingSelectedSkin
+	end
+	if existingClientSkin then
+		data.clientSelectedSkin = existingClientSkin
+	end
+
+	PlayerData[player] = data
+
+	-- Create leaderstats
+	local leaderstats = player:FindFirstChild("leaderstats") or Instance.new("Folder")
+	leaderstats.Name = "leaderstats"
+	leaderstats.Parent = player
+
+	local coins = leaderstats:FindFirstChild("Coins") or Instance.new("IntValue")
+	coins.Name = "Coins"
+	coins.Value = data.coins
+	coins.Parent = leaderstats
+
+	-- Set attributes
+	player:SetAttribute("Coins", data.coins)
+	player:SetAttribute("SelectedSkin", data.selectedSkin)
+	player:SetAttribute("ClientSelectedSkin", data.clientSelectedSkin)
+	player:SetAttribute("OwnedSkinsJSON", HttpService:JSONEncode(data.ownedSkins))
+
+	-- Send initial data to client
+	UpdateClientRemote:FireClient(player, {
+		coins = data.coins,
+		ownedSkins = data.ownedSkins,
+		selectedSkin = data.clientSelectedSkin
+	})
+
+	print(" Player initialized with skin:", data.clientSelectedSkin)
+end
+
+-- Handle skin purchase
+local function handlePurchase(player, itemName)
+	if not itemName then return end
+
+	-- Check if it's a Robux purchase
+	local isRobuxPurchase = itemName:match("^robux_skin_")
+	local skinName
+
+	if isRobuxPurchase then
+		skinName = itemName:sub(12) -- Remove "robux_skin_" prefix
+	elseif itemName:match("^skin_") then
+		skinName = itemName:sub(6) -- Remove "skin_" prefix
+	else
+		return
+	end
+
+	local serverSkinName = SKIN_NAME_MAP[skinName] or skinName
+
+	print("💰 Purchase request:", skinName, "->", serverSkinName)
+
+	-- Check if skin exists
+	if not SnakeSkins or not SnakeSkins[serverSkinName] then
+		warn("❌ Skin not found:", serverSkinName)
+		return
+	end
+
+	local data = PlayerData[player]
+	if not data then return end
+
+	-- Check if already owned
+	if table.find(data.ownedSkins, skinName) then
+		warn("❌ Already owned:", skinName)
+		return
+	end
+
+	local skinData = SnakeSkins[serverSkinName]
+
+	-- Handle different purchase types
+	if isRobuxPurchase or skinData.RobuxPrice then
+		-- For Robux purchases, we need to verify the purchase through MarketplaceService
+		-- This is a placeholder - in production, you'd use ProcessReceipt
+		print("💎 Robux purchase requested for:", skinName, "Price:", skinData.RobuxPrice or "Unknown")
+
+		-- For now, we'll just grant the skin (in production, this would be after payment verification)
+		table.insert(data.ownedSkins, skinName)
+
+		-- Log the Robux purchase
+		print("✅ Robux purchase completed for:", skinName)
+	elseif skinData.GamepassId then
+		-- Handle gamepass skins
+		print("🎮 Gamepass skin requested:", skinName, "GamepassId:", skinData.GamepassId)
+
+		-- Check gamepass ownership (placeholder - implement actual check)
+		table.insert(data.ownedSkins, skinName)
+		print("✅ Gamepass skin granted:", skinName)
+	else
+		-- Check price for coin purchase
+		local price = skinData.Price
+
+		if not price then
+			warn("❌ Skin has no price set:", serverSkinName)
+			return
+		end
+
+		if data.coins < price then
+			warn("❌ Not enough coins:", data.coins, "<", price)
+			return
+		end
+
+		-- Process coin purchase
+		data.coins = data.coins - price
+		table.insert(data.ownedSkins, skinName)
+		print("✅ Purchased:", skinName, "for", price, "coins")
+	end
+
+	-- Update player
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if leaderstats then
+		local coinsValue = leaderstats:FindFirstChild("Coins")
+		if coinsValue then
+			coinsValue.Value = data.coins
+		end
+	end
+
+	player:SetAttribute("Coins", data.coins)
+	player:SetAttribute("OwnedSkinsJSON", HttpService:JSONEncode(data.ownedSkins))
+	-- Make sure selected skin attributes are preserved
+	player:SetAttribute("SelectedSkin", data.selectedSkin)
+	player:SetAttribute("ClientSelectedSkin", data.clientSelectedSkin)
+
+	-- Notify client
+	PurchaseSuccessRemote:FireClient(player, skinName)
+	UpdateClientRemote:FireClient(player, {
+		coins = data.coins,
+		ownedSkins = data.ownedSkins,
+		selectedSkin = data.clientSelectedSkin -- Send the client skin name, not server name
+	})
+end
+
+-- Handle skin selection
+local function handleSkinSelection(player, skinName)
+	if not skinName then return end
+
+	local data = PlayerData[player]
+	if not data then return end
+
+	-- Check ownership
+	if not table.find(data.ownedSkins, skinName) then
+		warn("❌ Skin not owned:", skinName)
+		return
+	end
+
+	local serverSkinName = SKIN_NAME_MAP[skinName] or skinName
+
+	-- Update data
+	data.selectedSkin = serverSkinName
+	data.clientSelectedSkin = skinName
+
+	-- Set attributes
+	player:SetAttribute("SelectedSkin", serverSkinName)
+	player:SetAttribute("ClientSelectedSkin", skinName)
+
+	-- Update client
+	UpdateClientRemote:FireClient(player, {
+		coins = data.coins,
+		ownedSkins = data.ownedSkins,
+		selectedSkin = skinName
+	})
+
+	print(" Selected skin:", skinName, "->", serverSkinName)
+end
+
+-- Connect events
+PurchaseItemRemote.OnServerEvent:Connect(handlePurchase)
+SelectSkinRemote.OnServerEvent:Connect(handleSkinSelection)
+
+Players.PlayerAdded:Connect(initializePlayer)
+Players.PlayerRemoving:Connect(function(player)
+	PlayerData[player] = nil
+end)
+
+-- Initialize existing players
+for _, player in Players:GetPlayers() do
+	initializePlayer(player)
+end
+
+print(" Unified Skin System loaded")
