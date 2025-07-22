@@ -34,7 +34,7 @@ else
 		SegmentGap = 3.0, -- Slightly increased for less dense updates
 		PathSmoothness = 0.85, -- Slightly reduced for better performance
 		UpdateRate = 30, -- Reduced from 60 to 30 FPS
-		LODDistance = 120 -- Increased for better culling
+		LODDistance = 150 -- Increased for better culling
 	}
 end
 

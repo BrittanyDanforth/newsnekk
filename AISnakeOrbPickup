@@ -53,73 +53,99 @@ end
 
 -- Debug counter
 local frameCount = 0
+local updateInterval = 6 -- Update every 6 frames (10 times per second instead of 60)
 
 -- Heartbeat loop to check all tracked AI snakes
 RunService.Heartbeat:Connect(function()
 	frameCount = frameCount + 1
+	
+	-- Only update every N frames for performance
+	if frameCount % updateInterval ~= 0 then
+		return
+	end
 
 	-- ALWAYS check workspace directly for ALL orbs (including death orbs)
 	-- Death orbs spawn directly in workspace, not in containers!
 	-- Create a virtual container with all orbs
 	local allOrbs = {}
+	
+	-- Also check the Orbs folder if it exists
+	local orbsFolder = workspace:FindFirstChild("Orbs")
+	if orbsFolder then
+		for _, obj in pairs(orbsFolder:GetChildren()) do
+			if obj:IsA("BasePart") then
+				table.insert(allOrbs, obj)
+			end
+		end
+	end
+	
+	-- Check workspace root for loose orbs
 	for _, obj in pairs(workspace:GetChildren()) do
-		if obj:IsA("BasePart") and obj.Name == "Orb" then
+		if obj:IsA("BasePart") and (obj.Name == "Orb" or obj.Name == "DeathOrb" or obj.Name == "UpgradeOrb") then
 			table.insert(allOrbs, obj)
 		end
 	end
 
-	-- Debug print every 60 frames (1 second)
+	-- Debug print disabled for performance
+	--[[
 	if frameCount % 60 == 0 then
 		local snakeCount = 0
 		for _ in pairs(trackedSnakes) do snakeCount = snakeCount + 1 end
 		print("🔍 AI Orb Pickup: Found", #allOrbs, "orbs in workspace, tracking", snakeCount, "AI snakes")
-
-		-- Check if any orbs have Value child
-		local orbsWithValue = 0
-		for _, orb in pairs(allOrbs) do
-			if orb:FindFirstChild("Value") then
-				orbsWithValue = orbsWithValue + 1
-			end
-		end
-		print("   Orbs with Value child:", orbsWithValue)
 	end
+	--]]
 
 	-- Process each tracked snake
 	for snake, _ in pairs(trackedSnakes) do
 		if snake and snake.HeadParts and snake.HeadParts.head and snake.HeadParts.head.Parent then
 			local head = snake.HeadParts.head
+			local headPos = head.Position
+			
+			-- Early exit if snake is too far from any players (performance optimization)
+			local nearPlayer = false
+			for _, player in pairs(game.Players:GetPlayers()) do
+				if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+					if (player.Character.HumanoidRootPart.Position - headPos).Magnitude < 300 then
+						nearPlayer = true
+						break
+					end
+				end
+			end
+			
+			-- Skip orb checking if snake is too far from players
+			if not nearPlayer then
+				continue
+			end
 
-			-- Check each orb
+			-- Check each orb (with early distance culling)
+			local orbsChecked = 0
 			for _, orb in pairs(allOrbs) do
 				if orb and orb.Parent then
+					-- Quick distance check first
+					local quickDist = math.abs(orb.Position.X - headPos.X) + math.abs(orb.Position.Z - headPos.Z)
+					if quickDist > ORB_PICKUP_RADIUS * 2 then
+						continue -- Skip this orb, too far
+					end
+					
 					local dist = (orb.Position - head.Position).Magnitude
 					local horizontalDist = ((orb.Position - head.Position) * Vector3.new(1, 0, 1)).Magnitude
 					local heightDiff = math.abs(orb.Position.Y - head.Position.Y)
-
-					-- Debug for close orbs
-					if dist <= ORB_PICKUP_RADIUS * 2 then
-						print("🎯 AI snake near orb - Total dist:", dist, "Horizontal:", horizontalDist, "Height diff:", heightDiff)
-						print("   Orb Y:", orb.Position.Y, "Head Y:", head.Position.Y)
+					
+					orbsChecked = orbsChecked + 1
+					if orbsChecked > 20 then -- Limit orbs checked per snake
+						break
 					end
 
-					if dist <= ORB_PICKUP_RADIUS then
-						print("💥 AI snake SHOULD collect orb! Distance:", dist)
+					-- No debug prints for performance
 
+					if dist <= ORB_PICKUP_RADIUS then
 						-- Get orb value
 						local valueObj = orb:FindFirstChild("Value")
 						local orbValue = valueObj and valueObj.Value or 1
 
-						print("   Orb has Value?", valueObj ~= nil, "Value:", orbValue)
-						print("   Snake has grow function?", snake.grow ~= nil)
-						print("   Orb Parent:", orb.Parent)
-						print("   Orb Anchored:", orb.Anchored, "CanCollide:", orb.CanCollide)
-
 						-- Grow the snake
 						if snake.grow then
 							snake:grow(orbValue)
-							print("🍴 AI Snake collected", orb.Name, "worth", orbValue, "at position", orb.Position)
-						else
-							warn("❌ Snake has no grow function!")
 						end
 
 						-- Destroy the orb

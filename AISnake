@@ -116,6 +116,33 @@ local MAX_POOL_SIZE = 1000 -- Increased pool size
 local SEGMENT_PARENT = Workspace:FindFirstChild("AISegmentContainer") or Instance.new("Folder", Workspace)
 SEGMENT_PARENT.Name = "AISegmentContainer"
 
+-- Pre-populate segment pool for better performance
+task.spawn(function()
+	print("Pre-populating AI segment pool...")
+	for i = 1, 200 do
+		local segment = Instance.new("Part")
+		segment.Name = "PooledAISegment"
+		segment.Shape = Enum.PartType.Ball
+		segment.TopSurface = Enum.SurfaceType.Smooth
+		segment.BottomSurface = Enum.SurfaceType.Smooth
+		segment.CanCollide = false
+		segment.CanQuery = false
+		segment.CanTouch = false
+		segment.Anchored = true
+		segment.Material = Enum.Material.Neon
+		segment.Size = Vector3.new(3.5, 3.5, 4)
+		segment.Transparency = 1
+		segment.Parent = SEGMENT_PARENT
+		PoolSize = PoolSize + 1
+		SegmentPool[PoolSize] = segment
+		
+		if i % 20 == 0 then
+			task.wait() -- Yield every 20 segments
+		end
+	end
+	print("AI segment pool ready with", PoolSize, "segments")
+end)
+
 local function resetSegment(segment, config)
 	segment.Anchored = true
 	segment.CanCollide = false

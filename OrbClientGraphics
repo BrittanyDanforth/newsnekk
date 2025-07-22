@@ -17,52 +17,55 @@ local TweenService = game:GetService("TweenService")
 local workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- Graphics presets with enhanced settings
+-- Graphics presets optimized for better performance
 local GRAPHICS_PRESETS = {
 	Low = {
 		-- Orb settings
-		RENDER_DISTANCE = 80,
+		RENDER_DISTANCE = 60,  -- Reduced from 80
 		MATERIAL = Enum.Material.SmoothPlastic,
 		DISABLE_LIGHTS = true,
-		PARTICLE_RATE_MULTIPLIER = 0.3,
+		PARTICLE_RATE_MULTIPLIER = 0.2,  -- Reduced from 0.3
 		DISABLE_SHADOWS = true,
-		ORB_TRANSPARENCY_MODIFIER = 0.2,
+		ORB_TRANSPARENCY_MODIFIER = 0.3,  -- Increased transparency
 		-- Snake settings
 		SNAKE_GLOW_ENABLED = false,
 		SNAKE_MATERIAL = Enum.Material.SmoothPlastic,
-		SNAKE_RENDER_DISTANCE = 100,  -- Hide distant snakes
+		SNAKE_RENDER_DISTANCE = 80,  -- Reduced from 100
 		-- Performance
-		UPDATE_RATE = 0.2,  -- Slower updates for better FPS
+		UPDATE_RATE = 0.3,  -- Even slower updates
+		MAX_ORBS_PER_FRAME = 10,  -- Process limited orbs
 	},
 	Medium = {
 		-- Orb settings
-		RENDER_DISTANCE = 120,
+		RENDER_DISTANCE = 100,  -- Reduced from 120
 		MATERIAL = Enum.Material.Neon,
 		DISABLE_LIGHTS = false,
-		PARTICLE_RATE_MULTIPLIER = 0.7,
-		DISABLE_SHADOWS = false,
-		ORB_TRANSPARENCY_MODIFIER = 0,
+		PARTICLE_RATE_MULTIPLIER = 0.5,  -- Reduced from 0.7
+		DISABLE_SHADOWS = true,  -- Disable shadows for medium too
+		ORB_TRANSPARENCY_MODIFIER = 0.1,
 		-- Snake settings
-		SNAKE_GLOW_MULTIPLIER = 0.5,
+		SNAKE_GLOW_MULTIPLIER = 0.3,  -- Reduced from 0.5
 		SNAKE_MATERIAL = Enum.Material.Neon,
-		SNAKE_RENDER_DISTANCE = 150,
+		SNAKE_RENDER_DISTANCE = 120,  -- Reduced from 150
 		-- Performance
-		UPDATE_RATE = 0.15,
+		UPDATE_RATE = 0.2,  -- Slower updates
+		MAX_ORBS_PER_FRAME = 20,
 	},
 	High = {
 		-- Orb settings
-		RENDER_DISTANCE = 150,
+		RENDER_DISTANCE = 130,  -- Reduced from 150
 		MATERIAL = Enum.Material.Neon,
 		DISABLE_LIGHTS = false,
-		PARTICLE_RATE_MULTIPLIER = 1,
+		PARTICLE_RATE_MULTIPLIER = 0.8,  -- Reduced from 1
 		DISABLE_SHADOWS = false,
 		ORB_TRANSPARENCY_MODIFIER = 0,
 		-- Snake settings
-		SNAKE_GLOW_MULTIPLIER = 1,
+		SNAKE_GLOW_MULTIPLIER = 0.7,  -- Reduced from 1
 		SNAKE_MATERIAL = Enum.Material.Neon,
-		SNAKE_RENDER_DISTANCE = 200,
+		SNAKE_RENDER_DISTANCE = 160,  -- Reduced from 200
 		-- Performance
-		UPDATE_RATE = 0.1,
+		UPDATE_RATE = 0.15,  -- Slightly slower
+		MAX_ORBS_PER_FRAME = 30,
 	}
 }
 
@@ -285,9 +288,36 @@ RunService.Heartbeat:Connect(function()
 
 	frameCount = frameCount + 1
 
-	-- Update orbs
+	-- Update orbs in batches
+	local orbs = {}
+	local orbsFolder = workspace:FindFirstChild("Orbs")
+	
+	-- Collect orbs from folder
+	if orbsFolder then
+		for _, obj in ipairs(orbsFolder:GetChildren()) do
+			if obj:IsA("BasePart") then
+				table.insert(orbs, obj)
+			end
+		end
+	end
+	
+	-- Also check workspace for loose orbs
 	for _, obj in ipairs(workspace:GetChildren()) do
 		if obj:IsA("BasePart") and (obj.Name == "Orb" or obj.Name == "UpgradeOrb" or obj.Name == "DeathOrb") then
+			table.insert(orbs, obj)
+		end
+	end
+	
+	-- Sort orbs by distance for prioritized rendering
+	table.sort(orbs, function(a, b)
+		return (a.Position - playerPos).Magnitude < (b.Position - playerPos).Magnitude
+	end)
+	
+	-- Process only a limited number of orbs per frame
+	local maxOrbs = currentPreset.MAX_ORBS_PER_FRAME or 30
+	for i = 1, math.min(#orbs, maxOrbs) do
+		local obj = orbs[i]
+		if obj and obj.Parent then
 			local distance = (obj.Position - playerPos).Magnitude
 			applyOrbGraphics(obj, distance)
 		end
