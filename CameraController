@@ -1,0 +1,139 @@
+-- CameraController: SLITHER.IO STYLE CAMERA
+-- LOCALSCRIPT INSIDE STARTERPLAYERSCRIPTS
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local camera = workspace.CurrentCamera
+local player = Players.LocalPlayer
+
+-- Strict mobile detection
+local function isMobileDevice()
+	-- Check if we have touch but NO mouse (most reliable)
+	if UserInputService.TouchEnabled and not UserInputService.MouseEnabled then
+		return true
+	end
+
+	-- Check for mobile-specific sensors
+	if UserInputService.GyroscopeEnabled or UserInputService.AccelerometerEnabled then
+		return true
+	end
+
+	-- Additional check for touch-only devices
+	local hasMouse = UserInputService.MouseEnabled
+	local hasKeyboard = UserInputService.KeyboardEnabled
+	local hasTouch = UserInputService.TouchEnabled
+
+	-- If we only have touch and nothing else, it's likely mobile
+	if hasTouch and not hasMouse and not hasKeyboard then
+		return true
+	end
+
+	return false
+end
+
+local isMobile = isMobileDevice()
+
+-- Camera settings - like slither.io
+local BASE_HEIGHT = isMobile and 45 or 40  -- Base height - more zoomed for mobile
+local MAX_HEIGHT = isMobile and 100 or 120  -- Maximum zoom out - less zoom out on mobile
+local FOV = 70  -- Back to 70 for better view
+local SMOOTH_FACTOR = 0.15  -- Camera smoothing
+
+-- Current camera values for smooth interpolation
+local currentHeight = BASE_HEIGHT
+local targetHeight = BASE_HEIGHT
+
+-- 🔒 LOCK CAMERA COMPLETELY
+camera.CameraType = Enum.CameraType.Scriptable
+camera.CameraSubject = nil
+
+-- Prevent ANY camera manipulation
+UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+player.CameraMinZoomDistance = 128
+player.CameraMaxZoomDistance = 128
+
+-- Function to get snake length for dynamic zoom
+local function getSnakeLength()
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if leaderstats then
+		local length = leaderstats:FindFirstChild("Length")
+		if length then
+			return length.Value
+		end
+	end
+	return 0
+end
+
+-- Main camera update loop - SLITHER.IO STYLE
+RunService.RenderStepped:Connect(function(dt)
+	local character = player.Character
+	if not character then return end
+
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+
+	-- Get snake position
+	local snakePos = rootPart.Position
+
+	-- Dynamic zoom based on snake length (like slither.io)
+	local snakeLength = getSnakeLength()
+	targetHeight = math.min(BASE_HEIGHT + (snakeLength / 10), MAX_HEIGHT)
+
+	-- Smooth camera height transition
+	currentHeight = currentHeight + (targetHeight - currentHeight) * SMOOTH_FACTOR
+
+	-- Camera position with smooth follow
+	local cameraPos = snakePos + Vector3.new(0, currentHeight, 0)
+
+	-- Look straight down at snake with slight forward bias
+	local lookAtPos = snakePos + Vector3.new(0, 0, 0.1)
+
+	-- Set camera - FIXED ORIENTATION
+	camera.CFrame = CFrame.lookAt(cameraPos, lookAtPos, Vector3.new(0, 0, -1))
+
+	-- Fixed FOV
+	camera.FieldOfView = FOV
+
+	-- Ensure camera stays scriptable
+	camera.CameraType = Enum.CameraType.Scriptable
+end)
+
+-- Add vignette effect for slither.io feel
+local function addVignetteEffect()
+	local playerGui = player:WaitForChild("PlayerGui")
+
+	-- Check if vignette already exists
+	if playerGui:FindFirstChild("SlitherVignette") then return end
+
+	local vignetteGui = Instance.new("ScreenGui")
+	vignetteGui.Name = "SlitherVignette"
+	vignetteGui.ResetOnSpawn = false
+	vignetteGui.IgnoreGuiInset = true
+	vignetteGui.Parent = playerGui
+
+	local vignetteFrame = Instance.new("ImageLabel")
+	vignetteFrame.Name = "Vignette"
+	vignetteFrame.Size = UDim2.new(1, 0, 1, 0)
+	vignetteFrame.Position = UDim2.new(0, 0, 0, 0)
+	vignetteFrame.BackgroundTransparency = 1
+	vignetteFrame.Image = "rbxasset://textures/ui/LuaApp/graphic/gr-radial-shadow-1024x1024.png"
+	vignetteFrame.ImageColor3 = Color3.fromRGB(0, 0, 0)
+	vignetteFrame.ImageTransparency = 0.3
+	vignetteFrame.ZIndex = 100
+	vignetteFrame.Parent = vignetteGui
+end
+
+-- Apply vignette after character loads
+player.CharacterAdded:Connect(function()
+	task.wait(0.5)
+	addVignetteEffect()
+end)
+
+-- Apply immediately if character exists
+if player.Character then
+	addVignetteEffect()
+end
+
+print("Camera Controller: SLITHER.IO style camera initialized!")
