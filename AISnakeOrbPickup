@@ -114,12 +114,20 @@ RunService.Heartbeat:Connect(function()
 						print("   Orb Parent:", orb.Parent)
 						print("   Orb Anchored:", orb.Anchored, "CanCollide:", orb.CanCollide)
 
-						-- Grow the snake
-						if snake.grow then
-							snake:grow(orbValue)
-							print("🍴 AI Snake collected", orb.Name, "worth", orbValue, "at position", orb.Position)
+						-- Handle different orb types
+						if orb.Name == "UpgradeOrb" then
+							-- Give speed boost
+							local SnakeUpgrades = require(game.ReplicatedStorage:WaitForChild("SnakeUpgrades"))
+							SnakeUpgrades.GiveUpgrade(snake)
+							print("⚡ AI Snake collected UpgradeOrb - speed boost activated!")
 						else
-							warn("❌ Snake has no grow function!")
+							-- Regular orb - grow the snake
+							if snake.grow then
+								snake:grow(orbValue)
+								print("🍴 AI Snake collected", orb.Name, "worth", orbValue, "at position", orb.Position)
+							else
+								warn("❌ Snake has no grow function!")
+							end
 						end
 
 						-- Destroy the orb

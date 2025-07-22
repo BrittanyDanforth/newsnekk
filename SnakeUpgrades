@@ -37,44 +37,47 @@ function SnakeUpgrades.GiveUpgrade(snake)
                 end
             end
         end)
-    elseif snake.segments and snake.headParts then
-        -- Player snake upgrade: temporary WalkSpeed boost
+    elseif snake.head then
+        -- Player snake upgrade (OptimizedSnakeSystem): temporary speed boost
         if snake._isSpeedBoosted then return end
         snake._isSpeedBoosted = true
 
-        -- Try to find the player's character and humanoid
-        local player = nil
-        for p, s in pairs(_G.PlayerSnakes or {}) do
-            if s == snake then
-                player = p
-                break
+        -- Find the player
+        local player = snake.player
+        if not player or not player.Character then return end
+        
+        -- Apply speed boost via attribute
+        local currentSpeedMult = player:GetAttribute("SpeedMultiplier") or 1
+        player:SetAttribute("TempSpeedMultiplier", SPEED_BOOST_AMOUNT)
+        
+        -- Visual feedback - change head color to orange
+        if snake.head then
+            local originalColor = snake.head.Color
+            snake.head.Color = Color3.fromRGB(255, 100, 0)
+            
+            -- Add glow effect
+            local headGlow = snake.head:FindFirstChild("PointLight")
+            if headGlow then
+                headGlow.Brightness = headGlow.Brightness * 2
+                headGlow.Range = headGlow.Range * 1.5
             end
+            
+            task.delay(SPEED_BOOST_DURATION, function()
+                if snake and snake.head then
+                    snake.head.Color = originalColor
+                    snake._isSpeedBoosted = false
+                    
+                    if headGlow then
+                        headGlow.Brightness = headGlow.Brightness / 2
+                        headGlow.Range = headGlow.Range / 1.5
+                    end
+                end
+                
+                if player then
+                    player:SetAttribute("TempSpeedMultiplier", 1)
+                end
+            end)
         end
-        local humanoid = nil
-        if player and player.Character then
-            humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-        end
-
-        local origWalkSpeed = humanoid and humanoid.WalkSpeed or 16
-
-        if humanoid then
-            humanoid.WalkSpeed = origWalkSpeed * SPEED_BOOST_AMOUNT
-        end
-
-        -- Optional: Visual feedback (change head color)
-        if snake.headParts and snake.headParts.head then
-            snake.headParts.head.Color = Color3.fromRGB(255, 100, 0)
-        end
-
-        task.delay(SPEED_BOOST_DURATION, function()
-            if humanoid then
-                humanoid.WalkSpeed = origWalkSpeed
-            end
-            snake._isSpeedBoosted = false
-            if snake.headParts and snake.headParts.head then
-                snake.headParts.head.Color = Color3.fromRGB(57, 255, 20)
-            end
-        end)
     end
 end
 

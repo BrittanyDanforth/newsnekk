@@ -62,7 +62,7 @@ end
 
 local ORB_SPAWN_INTERVAL  = 0.5  -- Slower respawn for better performance
 local ORB_MAX             = 600  -- Reduced orb count for better FPS
-local UPGRADE_ORB_CHANCE  = 0.13
+local UPGRADE_ORB_CHANCE  = 0.05  -- Reduced from 13% to 5%
 
 -- LOD (Level of Detail) settings for performance
 -- Server uses default high settings, clients handle their own graphics
