@@ -1455,6 +1455,8 @@ local function createAnimatedBackground(parent)
 	bgFrame.Size = UDim2.new(1, 0, 1, 0)
 	bgFrame.BackgroundColor3 = SHOP_CONFIG.COLORS.BACKGROUND
 	bgFrame.Parent = parent
+	-- FIXED: Ensure background stays behind content
+	bgFrame.ZIndex = 1
 
 	-- Create animated mesh gradient background
 	local meshGradient = Instance.new("Frame")
@@ -1591,6 +1593,10 @@ local function createMainShop()
 	contentWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
 	contentWindow.AnchorPoint = Vector2.new(0.5, 0.5)
 	contentWindow.Parent = mainFrame
+	-- FIXED: Ensure contentWindow starts visible
+	contentWindow.Visible = true
+	contentWindow.BackgroundTransparency = 0 -- Start fully opaque
+	contentWindow.ZIndex = 5 -- Ensure it's above background
 
 	createCorner(contentWindow, 24)
 	createGlassPanel(contentWindow, 0.85)
@@ -3861,31 +3867,48 @@ end
 function ShopUI.open()
 	if not uiState.isShopOpen then
 		local gui = ShopUI.init()
+		if not gui then
+			warn("Failed to initialize shop GUI")
+			return
+		end
+		
 		gui.Enabled = true
 
 		local contentWindow = ShopUI.uiElements.contentWindow
+		if not contentWindow then
+			warn("Content window not found!")
+			return
+		end
+		
+		-- FIXED: Ensure window is visible and not using GroupTransparency
+		contentWindow.Visible = true
 		contentWindow.Position = UDim2.new(0.5, 0, 1.5, 0)
 		contentWindow.Size = UDim2.new(0.8, 0, 0.8, 0)
-		contentWindow.GroupTransparency = 0.3
+		-- Remove GroupTransparency and use regular transparency
+		contentWindow.BackgroundTransparency = 0.3
 
 		-- Animate entrance
 		TweenService:Create(contentWindow, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 			Position = UDim2.new(0.5, 0, 0.5, 0),
 			Size = UDim2.new(0.9, 0, 0.85, 0),
-			GroupTransparency = 0
+			BackgroundTransparency = 0
 		}):Play()
 
-		-- Animate blur
-		TweenService:Create(ShopUI.uiElements.blur, TweenInfo.new(0.3), {
-			Size = 24
-		}):Play()
+		-- Animate blur if it exists
+		if ShopUI.uiElements.blur then
+			TweenService:Create(ShopUI.uiElements.blur, TweenInfo.new(0.3), {
+				Size = 24
+			}):Play()
+		end
 
-		-- Animate color correction
-		TweenService:Create(ShopUI.uiElements.colorCorrection, TweenInfo.new(0.3), {
-			Brightness = -0.05,
-			Contrast = 0.2,
-			Saturation = 0.2
-		}):Play()
+		-- Animate color correction if it exists
+		if ShopUI.uiElements.colorCorrection then
+			TweenService:Create(ShopUI.uiElements.colorCorrection, TweenInfo.new(0.3), {
+				Brightness = -0.05,
+				Contrast = 0.2,
+				Saturation = 0.2
+			}):Play()
+		end
 
 		playSound("WHOOSH", 0.3)
 	end
