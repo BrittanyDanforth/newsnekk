@@ -1962,36 +1962,63 @@ function AISnake:updateMovement(dt)
 	self.HeadParts.head.AssemblyLinearVelocity = self.Direction * self.Speed
 	
 	-- CHECK FOR ORB PICKUPS (including upgrade orbs)
-	local orbFolder = Workspace:FindFirstChild("OrbFolder")
+	-- Look for orbs in workspace directly (OrbSpawner puts them there)
+	local headPos = self.HeadParts.head.Position
+	local pickupRadius = 8  -- Increased for better upgrade orb pickup (they're bigger)
+	
+	-- Check both workspace and any orb folders
+	local orbsToCheck = {}
+	
+	-- Add orbs from workspace
+	for _, obj in pairs(Workspace:GetChildren()) do
+		if obj:IsA("BasePart") and (obj.Name == "Orb" or obj.Name == "UpgradeOrb" or obj.Name == "DeathOrb") then
+			table.insert(orbsToCheck, obj)
+		end
+	end
+	
+	-- Also check OrbFolder if it exists
+	local orbFolder = Workspace:FindFirstChild("OrbFolder") or Workspace:FindFirstChild("Orbs")
 	if orbFolder then
-		local headPos = self.HeadParts.head.Position
-		local pickupRadius = 8  -- Increased for better upgrade orb pickup (they're bigger)
-		
 		for _, orb in pairs(orbFolder:GetChildren()) do
-			if orb:IsA("BasePart") and orb.Parent then
-				local dist = (orb.Position - headPos).Magnitude
-
-				
-				if dist <= pickupRadius then
-					-- All orbs handled the same way
-					local valueObj = orb:FindFirstChild("Value")
-					local orbValue = valueObj and valueObj.Value or 1
-					
-					if orb.Name == "UpgradeOrb" then
-						-- Apply upgrade directly
-						if SnakeUpgrades then
-							print("🎯 AI Snake collecting upgrade orb!")
-							SnakeUpgrades.GiveUpgrade(self)
-						end
-					else
-						-- Regular orb - grow the snake
-						self:grow(orbValue)
-					end
-					
-					-- Destroy the orb
-					orb:Destroy()
-					break  -- Only pick up one orb per frame
+			if orb:IsA("BasePart") then
+				table.insert(orbsToCheck, orb)
+			end
+		end
+	end
+	
+	-- Now check all orbs
+	for _, orb in pairs(orbsToCheck) do
+		if orb:IsA("BasePart") and orb.Parent then
+			local dist = (orb.Position - headPos).Magnitude
+			
+			if dist <= pickupRadius then
+				-- Check if orb is already being collected
+				local isBeingCollected = orb:GetAttribute("BeingCollected")
+				if isBeingCollected then
+					continue -- Skip this orb
 				end
+				
+				-- Mark orb as being collected to prevent double collection
+				orb:SetAttribute("BeingCollected", true)
+				
+				-- Handle all orbs the same way
+				local valueObj = orb:FindFirstChild("Value")
+				local orbValue = valueObj and valueObj.Value or 1
+				
+				if orb.Name == "UpgradeOrb" then
+					-- Apply upgrade
+					if SnakeUpgrades then
+						print("🎯 AI Snake collecting upgrade orb!")
+						SnakeUpgrades.GiveUpgrade(self)
+					end
+				else
+					-- Regular orb - grow the snake
+					self:grow(orbValue)
+				end
+				
+				-- Destroy the orb
+				orb:Destroy()
+				break  -- Only pick up one orb per frame
 			end
 		end
 	end
