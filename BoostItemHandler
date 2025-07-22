@@ -1,0 +1,447 @@
+-- BoostItemHandler Module
+-- Handles consumable boost items and gamepass abilities
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+
+-- Create boost remotes
+local useBoostRemote = remotes:FindFirstChild("UseBoost") or Instance.new("RemoteEvent")
+useBoostRemote.Name = "UseBoost"
+useBoostRemote.Parent = remotes
+
+local boostStatusRemote = remotes:FindFirstChild("BoostStatus") or Instance.new("RemoteEvent")
+boostStatusRemote.Name = "BoostStatus"
+boostStatusRemote.Parent = remotes
+
+local BoostItemHandler = {}
+BoostItemHandler.__index = BoostItemHandler
+
+-- Boost types and configurations
+BoostItemHandler.BOOST_TYPES = {
+	["Speed Boost"] = {
+		name = "Speed Boost",
+		icon = "⚡",
+		duration = 30,
+		multiplier = 1.5,
+		color = Color3.fromRGB(100, 200, 255),
+		description = "50% faster speed for 30 seconds",
+		keybind = Enum.KeyCode.Q,
+		cooldown = 60,
+		stackable = false
+	},
+	["Mega Speed"] = {
+		name = "Mega Speed",
+		icon = "🚀",
+		duration = 20,
+		multiplier = 2.0,
+		color = Color3.fromRGB(255, 100, 100),
+		description = "Double speed for 20 seconds",
+		keybind = Enum.KeyCode.E,
+		cooldown = 120,
+		stackable = false
+	},
+	["Growth Boost"] = {
+		name = "Growth Boost",
+		icon = "🌟",
+		duration = 45,
+		multiplier = 2.0,
+		color = Color3.fromRGB(255, 215, 0),
+		description = "2x growth rate for 45 seconds",
+		keybind = Enum.KeyCode.R,
+		cooldown = 90,
+		stackable = false
+	},
+	["Ghost Mode"] = {
+		name = "Ghost Mode",
+		icon = "👻",
+		duration = 10,
+		multiplier = 1.0,
+		color = Color3.fromRGB(200, 100, 255),
+		description = "Pass through snakes for 10 seconds",
+		keybind = Enum.KeyCode.F,
+		cooldown = 180,
+		stackable = false
+	},
+	["Magnet"] = {
+		name = "Magnet",
+		icon = "🧲",
+		duration = 60,
+		multiplier = 2.0,
+		color = Color3.fromRGB(255, 100, 255),
+		description = "2x orb collection range for 60 seconds",
+		keybind = Enum.KeyCode.T,
+		cooldown = 120,
+		stackable = false
+	}
+}
+
+function BoostItemHandler.new(player)
+	local self = setmetatable({}, BoostItemHandler)
+
+	self.player = player
+	self.playerGui = player:WaitForChild("PlayerGui")
+	self.activeBoosts = {}
+	self.cooldowns = {}
+	self.inventory = {}
+
+	-- Create UI
+	self:CreateBoostUI()
+	self:SetupKeybinds()
+	self:ConnectRemotes()
+
+	return self
+end
+
+function BoostItemHandler:CreateBoostUI()
+	-- Main container
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "BoostUI"
+	screenGui.ResetOnSpawn = false
+	screenGui.Parent = self.playerGui
+
+	-- Active boosts container (top center)
+	local activeBoostFrame = Instance.new("Frame")
+	activeBoostFrame.Name = "ActiveBoosts"
+	activeBoostFrame.Size = UDim2.new(0, 400, 0, 80)
+	activeBoostFrame.Position = UDim2.new(0.5, -200, 0, 20)
+	activeBoostFrame.BackgroundTransparency = 1
+	activeBoostFrame.Parent = screenGui
+
+	local boostLayout = Instance.new("UIListLayout")
+	boostLayout.FillDirection = Enum.FillDirection.Horizontal
+	boostLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	boostLayout.Padding = UDim.new(0, 10)
+	boostLayout.Parent = activeBoostFrame
+
+	-- Inventory boosts (bottom right)
+	local inventoryFrame = Instance.new("Frame")
+	inventoryFrame.Name = "InventoryBoosts"
+	inventoryFrame.Size = UDim2.new(0, 300, 0, 400)
+	inventoryFrame.Position = UDim2.new(1, -320, 1, -420)
+	inventoryFrame.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
+	inventoryFrame.BackgroundTransparency = 0.1
+	inventoryFrame.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = inventoryFrame
+
+	-- Title
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 40)
+	title.BackgroundTransparency = 1
+	title.Text = "BOOST ITEMS"
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.TextScaled = true
+	title.Font = Enum.Font.GothamBold
+	title.Parent = inventoryFrame
+
+	-- Boost list
+	local scrollFrame = Instance.new("ScrollingFrame")
+	scrollFrame.Size = UDim2.new(1, -20, 1, -50)
+	scrollFrame.Position = UDim2.new(0, 10, 0, 45)
+	scrollFrame.BackgroundTransparency = 1
+	scrollFrame.ScrollBarThickness = 4
+	scrollFrame.Parent = inventoryFrame
+
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 8)
+	listLayout.Parent = scrollFrame
+
+	self.ui = {
+		screenGui = screenGui,
+		activeBoostFrame = activeBoostFrame,
+		inventoryFrame = inventoryFrame,
+		scrollFrame = scrollFrame
+	}
+end
+
+function BoostItemHandler:CreateBoostItem(boostType, count)
+	local boostConfig = self.BOOST_TYPES[boostType]
+	if not boostConfig then return end
+
+	local itemFrame = Instance.new("Frame")
+	itemFrame.Name = boostType
+	itemFrame.Size = UDim2.new(1, -10, 0, 60)
+	itemFrame.BackgroundColor3 = Color3.fromRGB(30, 35, 45)
+	itemFrame.Parent = self.ui.scrollFrame
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = itemFrame
+
+	-- Icon
+	local icon = Instance.new("TextLabel")
+	icon.Size = UDim2.new(0, 50, 0, 50)
+	icon.Position = UDim2.new(0, 5, 0, 5)
+	icon.BackgroundTransparency = 1
+	icon.Text = boostConfig.icon
+	icon.TextScaled = true
+	icon.Font = Enum.Font.Gotham
+	icon.Parent = itemFrame
+
+	-- Name and description
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.new(0.5, -60, 0, 25)
+	nameLabel.Position = UDim2.new(0, 60, 0, 5)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = boostConfig.name
+	nameLabel.TextColor3 = boostConfig.color
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.TextScaled = true
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.Parent = itemFrame
+
+	local descLabel = Instance.new("TextLabel")
+	descLabel.Size = UDim2.new(0.5, -60, 0, 20)
+	descLabel.Position = UDim2.new(0, 60, 0, 30)
+	descLabel.BackgroundTransparency = 1
+	descLabel.Text = boostConfig.description
+	descLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	descLabel.TextXAlignment = Enum.TextXAlignment.Left
+	descLabel.TextScaled = true
+	descLabel.Font = Enum.Font.Gotham
+	descLabel.Parent = itemFrame
+
+	-- Count
+	local countLabel = Instance.new("TextLabel")
+	countLabel.Size = UDim2.new(0, 40, 0, 30)
+	countLabel.Position = UDim2.new(0.65, 0, 0.5, -15)
+	countLabel.BackgroundTransparency = 1
+	countLabel.Text = "x" .. count
+	countLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	countLabel.TextScaled = true
+	countLabel.Font = Enum.Font.GothamBold
+	countLabel.Parent = itemFrame
+
+	-- Use button
+	local useButton = Instance.new("TextButton")
+	useButton.Size = UDim2.new(0, 60, 0, 30)
+	useButton.Position = UDim2.new(1, -70, 0.5, -15)
+	useButton.BackgroundColor3 = boostConfig.color
+	useButton.Text = string.upper(tostring(boostConfig.keybind.Name))
+	useButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	useButton.TextScaled = true
+	useButton.Font = Enum.Font.GothamBold
+	useButton.Parent = itemFrame
+
+	local buttonCorner = Instance.new("UICorner")
+	buttonCorner.CornerRadius = UDim.new(0, 6)
+	buttonCorner.Parent = useButton
+
+	-- Click to use
+	useButton.MouseButton1Click:Connect(function()
+		self:UseBoost(boostType)
+	end)
+
+	-- Hover effects
+	useButton.MouseEnter:Connect(function()
+		TweenService:Create(useButton, TweenInfo.new(0.2), {
+			BackgroundColor3 = boostConfig.color:Lerp(Color3.new(1, 1, 1), 0.2)
+		}):Play()
+	end)
+
+	useButton.MouseLeave:Connect(function()
+		TweenService:Create(useButton, TweenInfo.new(0.2), {
+			BackgroundColor3 = boostConfig.color
+		}):Play()
+	end)
+
+	return itemFrame
+end
+
+function BoostItemHandler:CreateActiveBoostDisplay(boostType, timeLeft)
+	local boostConfig = self.BOOST_TYPES[boostType]
+	if not boostConfig then return end
+
+	local displayFrame = Instance.new("Frame")
+	displayFrame.Name = boostType
+	displayFrame.Size = UDim2.new(0, 120, 0, 60)
+	displayFrame.BackgroundColor3 = boostConfig.color
+	displayFrame.BackgroundTransparency = 0.2
+	displayFrame.Parent = self.ui.activeBoostFrame
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = displayFrame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = boostConfig.color
+	stroke.Thickness = 2
+	stroke.Parent = displayFrame
+
+	-- Icon
+	local icon = Instance.new("TextLabel")
+	icon.Size = UDim2.new(0, 40, 0, 40)
+	icon.Position = UDim2.new(0, 5, 0, 5)
+	icon.BackgroundTransparency = 1
+	icon.Text = boostConfig.icon
+	icon.TextScaled = true
+	icon.Font = Enum.Font.Gotham
+	icon.Parent = displayFrame
+
+	-- Timer
+	local timer = Instance.new("TextLabel")
+	timer.Name = "Timer"
+	timer.Size = UDim2.new(0, 60, 0, 20)
+	timer.Position = UDim2.new(0, 50, 0, 10)
+	timer.BackgroundTransparency = 1
+	timer.Text = timeLeft .. "s"
+	timer.TextColor3 = Color3.fromRGB(255, 255, 255)
+	timer.TextScaled = true
+	timer.Font = Enum.Font.GothamBold
+	timer.Parent = displayFrame
+
+	-- Progress bar
+	local progressBar = Instance.new("Frame")
+	progressBar.Name = "Progress"
+	progressBar.Size = UDim2.new(1, -10, 0, 4)
+	progressBar.Position = UDim2.new(0, 5, 1, -8)
+	progressBar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	progressBar.Parent = displayFrame
+
+	local progressCorner = Instance.new("UICorner")
+	progressCorner.CornerRadius = UDim.new(0, 2)
+	progressCorner.Parent = progressBar
+
+	return displayFrame, timer, progressBar
+end
+
+function BoostItemHandler:UseBoost(boostType)
+	-- Check cooldown
+	if self.cooldowns[boostType] and tick() < self.cooldowns[boostType] then
+		local timeLeft = math.ceil(self.cooldowns[boostType] - tick())
+		self:ShowNotification("Cooldown: " .. timeLeft .. "s", Color3.fromRGB(255, 100, 100))
+		return
+	end
+
+	-- Check if player has the boost
+	if not self.inventory[boostType] or self.inventory[boostType] <= 0 then
+		self:ShowNotification("No " .. boostType .. " available!", Color3.fromRGB(255, 100, 100))
+		return
+	end
+
+	-- Use the boost
+	useBoostRemote:FireServer(boostType)
+end
+
+function BoostItemHandler:ShowNotification(text, color)
+	local notification = Instance.new("TextLabel")
+	notification.Size = UDim2.new(0, 300, 0, 50)
+	notification.Position = UDim2.new(0.5, -150, 0.5, -25)
+	notification.BackgroundColor3 = color or Color3.fromRGB(100, 200, 255)
+	notification.BackgroundTransparency = 0.2
+	notification.Text = text
+	notification.TextColor3 = Color3.fromRGB(255, 255, 255)
+	notification.TextScaled = true
+	notification.Font = Enum.Font.GothamBold
+	notification.Parent = self.ui.screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = notification
+
+	-- Animate
+	notification:TweenPosition(UDim2.new(0.5, -150, 0.5, -100), "Out", "Quad", 0.3)
+	wait(2)
+	notification:TweenPosition(UDim2.new(0.5, -150, 0.5, -200), "Out", "Quad", 0.3)
+	wait(0.3)
+	notification:Destroy()
+end
+
+function BoostItemHandler:SetupKeybinds()
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if processed then return end
+
+		for boostType, config in pairs(self.BOOST_TYPES) do
+			if input.KeyCode == config.keybind then
+				self:UseBoost(boostType)
+				break
+			end
+		end
+	end)
+end
+
+function BoostItemHandler:ConnectRemotes()
+	-- Receive boost status updates
+	boostStatusRemote.OnClientEvent:Connect(function(boostType, action, data)
+		if action == "activate" then
+			self:ActivateBoost(boostType, data.duration)
+		elseif action == "deactivate" then
+			self:DeactivateBoost(boostType)
+		elseif action == "update_inventory" then
+			self:UpdateInventory(data.inventory)
+		elseif action == "cooldown" then
+			self.cooldowns[boostType] = tick() + data.cooldown
+		end
+	end)
+end
+
+function BoostItemHandler:ActivateBoost(boostType, duration)
+	local config = self.BOOST_TYPES[boostType]
+	if not config then return end
+
+	-- Create active display
+	local display, timer, progress = self:CreateActiveBoostDisplay(boostType, duration)
+
+	-- Track active boost
+	self.activeBoosts[boostType] = {
+		display = display,
+		timer = timer,
+		progress = progress,
+		startTime = tick(),
+		duration = duration
+	}
+
+	-- Show activation effect
+	self:ShowNotification(config.name .. " Activated!", config.color)
+
+	-- Update timer
+	local startTime = tick()
+	local connection
+	connection = RunService.Heartbeat:Connect(function()
+		local elapsed = tick() - startTime
+		local timeLeft = math.max(0, duration - elapsed)
+
+		if timeLeft > 0 then
+			timer.Text = math.ceil(timeLeft) .. "s"
+			progress.Size = UDim2.new(timeLeft / duration, -10, 0, 4)
+		else
+			connection:Disconnect()
+			self:DeactivateBoost(boostType)
+		end
+	end)
+end
+
+function BoostItemHandler:DeactivateBoost(boostType)
+	local boost = self.activeBoosts[boostType]
+	if boost and boost.display then
+		boost.display:Destroy()
+	end
+	self.activeBoosts[boostType] = nil
+end
+
+function BoostItemHandler:UpdateInventory(inventory)
+	self.inventory = inventory
+
+	-- Clear existing items
+	for _, child in pairs(self.ui.scrollFrame:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+
+	-- Create items
+	for boostType, count in pairs(inventory) do
+		if count > 0 then
+			self:CreateBoostItem(boostType, count)
+		end
+	end
+end
+
+return BoostItemHandler
