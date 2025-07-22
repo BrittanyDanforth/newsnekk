@@ -1,0 +1,812 @@
+-- THIS GOES INSIDE ServerScriptService AS A SCRIPT
+-- OrbSpawner: Ultra-efficient, event-driven orb collection with LOD system
+-- Features Slither.io-style orb fade-in/pop-up for massive FPS improvement
+-- Supports thousands of orbs with minimal lag by only rendering nearby ones
+-- FIXED: AI snakes can now eat orbs + NO ATTACHMENT ERRORS from death orbs
+
+--[[ -------------------------------------------------------------------------
+IMPORTANT:
+• All orbs (including death orbs) MUST be standalone Parts parented to Workspace.
+• NEVER parent orbs, attachments, or constraints to snake segments or heads.
+• All VFX (ParticleEmitters, etc) MUST be created on temporary Parts in Workspace.
+• Orbs now use LOD (Level of Detail) - only nearby orbs are fully visible
+---------------------------------------------------------------------------- ]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace         = game:GetService("Workspace")
+local Players           = game:GetService("Players")
+local Debris            = game:GetService("Debris")
+local TweenService      = game:GetService("TweenService")
+local RunService        = game:GetService("RunService")
+
+-- Core helpers
+local OrbUtils      = require(ReplicatedStorage:WaitForChild("OrbUtils"))
+local SnakeUpgrades = require(ReplicatedStorage:WaitForChild("SnakeUpgrades"))
+local VFXManager    = require(ReplicatedStorage:WaitForChild("VFXManager"))
+
+-- ⚠️  LAZY access to AISnake (breaks circular require)
+local AISnakeModule -- cache after first successful load
+local function getAISnakeModule()
+	if AISnakeModule then return AISnakeModule end
+	local ok, mod = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("AISnake"))
+	end)
+	if ok then AISnakeModule = mod end
+	return AISnakeModule           -- may be nil during initial load
+end
+
+-- Forward declare attachOrbTouched
+local attachOrbTouched
+
+---------------------------------------------------------------------
+-- Config
+---------------------------------------------------------------------
+-- Create OrbCollected RemoteEvent if it doesn't exist
+local OrbCollectedEvent = ReplicatedStorage:FindFirstChild("OrbCollected")
+if not OrbCollectedEvent then
+	OrbCollectedEvent = Instance.new("RemoteEvent")
+	OrbCollectedEvent.Name = "OrbCollected"
+	OrbCollectedEvent.Parent = ReplicatedStorage
+end
+
+local ORB_SPAWN_INTERVAL  = 0.2  -- Faster orb respawn!
+local ORB_MAX             = 950  -- More orbs available!
+local UPGRADE_ORB_CHANCE  = 0.13
+
+-- LOD (Level of Detail) settings for performance
+-- Server uses default high settings, clients handle their own graphics
+local RENDER_DISTANCE = 250  -- Increased from 150
+local FAR_DISTANCE = 400     -- Increased from 300
+local FADE_DISTANCE = 100    -- Increased from 50
+local MIN_ORB_SIZE = 0.3
+local MAX_ORB_SIZE = 2.0
+local LOD_UPDATE_RATE = 0.1
+
+---------------------------------------------------------------------
+-- Dynamic spawn area
+---------------------------------------------------------------------
+local function getOrbSpawnArea()
+	local groundPart = Workspace:FindFirstChild("SlitherIOGround")
+	if groundPart and groundPart:IsA("BasePart") then
+		local size, pos = groundPart.Size, groundPart.Position
+		local hx, hz    = size.X / 2, size.Z / 2
+		return {
+			minX = math.floor(pos.X - hx) + 5, maxX = math.ceil(pos.X + hx) - 5,
+			minZ = math.floor(pos.Z - hz) + 5, maxZ = math.ceil(pos.Z + hz) - 5,
+			y    = pos.Y + size.Y / 2 + 2  -- Match death orb height
+		}
+	end
+	return {minX = -600, maxX = 150, minZ = -600, maxZ = 600, y = 5}  -- Also increased default
+end
+
+---------------------------------------------------------------------
+-- Shared state tables
+---------------------------------------------------------------------
+local orbs        = OrbUtils.orbs           -- master list from OrbUtils
+local upgradeOrbs = {}                      -- track upgrade orbs
+local orbDebounce = {}                      -- debounce table
+local orbTweens   = {}                      -- active tweens for orbs
+local orbStates   = {}                      -- track orb visibility states
+
+-- OPTIMIZATION: Spatial grid for efficient collision detection
+local GRID_SIZE = 50  -- Size of each grid cell
+local orbGrid = {}    -- Spatial partitioning grid
+
+local function getGridKey(position)
+	local x = math.floor(position.X / GRID_SIZE)
+	local z = math.floor(position.Z / GRID_SIZE)
+	return x .. "," .. z
+end
+
+local function addOrbToGrid(orb)
+	local key = getGridKey(orb.Position)
+	if not orbGrid[key] then
+		orbGrid[key] = {}
+	end
+	orbGrid[key][orb] = true
+end
+
+local function removeOrbFromGrid(orb)
+	local key = getGridKey(orb.Position)
+	if orbGrid[key] then
+		orbGrid[key][orb] = nil
+		if next(orbGrid[key]) == nil then
+			orbGrid[key] = nil
+		end
+	end
+end
+
+local function getOrbsNearPosition(position, radius)
+	local nearbyOrbs = {}
+	local cellRadius = math.ceil(radius / GRID_SIZE)
+	local centerX = math.floor(position.X / GRID_SIZE)
+	local centerZ = math.floor(position.Z / GRID_SIZE)
+
+	for dx = -cellRadius, cellRadius do
+		for dz = -cellRadius, cellRadius do
+			local key = (centerX + dx) .. "," .. (centerZ + dz)
+			if orbGrid[key] then
+				for orb, _ in pairs(orbGrid[key]) do
+					if orb and orb.Parent then
+						local dist = (orb.Position - position).Magnitude
+						if dist <= radius then
+							table.insert(nearbyOrbs, orb)
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return nearbyOrbs
+end
+
+---------------------------------------------------------------------
+-- Utility: get all player heads
+---------------------------------------------------------------------
+local function getPlayerHeads()
+	local heads = {}
+	for _, p in Players:GetPlayers() do
+		local root = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+		if root then table.insert(heads, {player = p, part = root}) end
+	end
+	return heads
+end
+
+---------------------------------------------------------------------
+-- Get all viewing positions (players + AI snakes)
+---------------------------------------------------------------------
+local function getAllViewingPositions()
+	local positions = {}
+
+	-- Player positions
+	for _, p in Players:GetPlayers() do
+		local root = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+		if root then table.insert(positions, root.Position) end
+	end
+
+	-- AI snake positions
+	local ASM = getAISnakeModule()
+	if ASM and ASM._activeSnakes then
+		for _, s in ASM._activeSnakes do
+			if s.HeadParts and s.HeadParts.head then
+				table.insert(positions, s.HeadParts.head.Position)
+			end
+		end
+	end
+
+	return positions
+end
+
+---------------------------------------------------------------------
+-- LOD system: Calculate orb visibility state
+---------------------------------------------------------------------
+local function calculateOrbLOD(orb, viewPositions)
+	if not orb or not orb.Parent then return "hidden" end
+
+	local orbPos = orb.Position
+	local closestDist = math.huge
+
+	for _, viewPos in viewPositions do
+		local dist = (orbPos - viewPos).Magnitude
+		if dist < closestDist then closestDist = dist end
+	end
+
+	if closestDist <= FADE_DISTANCE then
+		return "full", 1.0  -- Full visibility
+	elseif closestDist <= RENDER_DISTANCE then
+		-- Fade based on distance
+		local fade = 1 - ((closestDist - FADE_DISTANCE) / (RENDER_DISTANCE - FADE_DISTANCE))
+		return "fading", fade
+	elseif closestDist <= FAR_DISTANCE then
+		return "far", 0.3  -- Minimal visibility
+	else
+		return "hidden", 0  -- Too far, hide completely
+	end
+end
+
+---------------------------------------------------------------------
+-- Apply LOD state to orb with smooth transitions
+---------------------------------------------------------------------
+local function applyOrbLOD(orb, state, fadeValue)
+	if not orb or not orb.Parent then return end
+
+	local currentState = orbStates[orb] or {state = "hidden", fade = 0}
+
+	-- Skip if state hasn't changed significantly
+	if currentState.state == state and math.abs(currentState.fade - fadeValue) < 0.1 then
+		return
+	end
+
+	orbStates[orb] = {state = state, fade = fadeValue}
+
+	-- Cancel existing tween
+	if orbTweens[orb] then
+		orbTweens[orb]:Cancel()
+		orbTweens[orb] = nil
+	end
+
+	-- Calculate target properties
+	local targetSize
+	if orb.Name == "DeathOrb" then
+		-- Death orbs stay bigger for better collision
+		targetSize = Vector3.new(2.5, 2.5, 2.5) * fadeValue
+	else
+		targetSize = Vector3.new(1,1,1) * (MIN_ORB_SIZE + (MAX_ORB_SIZE - MIN_ORB_SIZE) * fadeValue)
+	end
+	local targetTransparency = 1 - fadeValue
+
+	-- Apply based on state
+	if state == "hidden" then
+		orb.Transparency = 1
+		orb.Size = Vector3.new(0.1, 0.1, 0.1)
+		local light = orb:FindFirstChild("PointLight")
+		if light then light.Enabled = false end
+	else
+		local light = orb:FindFirstChild("PointLight")
+		if light then 
+			light.Enabled = fadeValue > 0.1
+			light.Brightness = 2 * fadeValue
+			light.Range = 8 * fadeValue
+		end
+
+		-- Smooth tween for visible orbs
+		local tweenInfo = TweenInfo.new(
+			0.3,  -- Duration
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		)
+
+		local tween = TweenService:Create(orb, tweenInfo, {
+			Size = targetSize,
+			Transparency = targetTransparency
+		})
+
+		orbTweens[orb] = tween
+		tween:Play()
+
+		-- Add pop-in effect for newly visible orbs
+		if currentState.state == "hidden" and state ~= "hidden" then
+			orb.Size = Vector3.new(0.1, 0.1, 0.1)
+			local popTween = TweenService:Create(orb, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+				Size = targetSize
+			})
+			orbTweens[orb] = popTween
+			popTween:Play()
+		end
+	end
+end
+
+---------------------------------------------------------------------
+-- Growth / upgrade helpers  (all use getAISnakeModule)
+---------------------------------------------------------------------
+local function growAISnake(head, value)
+	local ASM = getAISnakeModule()
+	if not ASM or not ASM._activeSnakes then return end
+	for _, s in ASM._activeSnakes do
+		if s.HeadParts and s.HeadParts.head == head and s.grow then
+			s:grow(value or 10)
+		end
+	end
+end
+
+local function giveUpgradeToAISnake(head)
+	local ASM = getAISnakeModule()
+	if not ASM or not ASM._activeSnakes then return end
+	for _, s in ASM._activeSnakes do
+		if s.HeadParts and s.HeadParts.head == head then
+			SnakeUpgrades.GiveUpgrade(s)
+		end
+	end
+end
+
+local function growPlayerSnake(player, value)
+	if not player or not player.Character then return end
+	local snakeInst = _G.PlayerSnakes and _G.PlayerSnakes[player]
+	if not snakeInst and player.Character:FindFirstChild("__SnakeInstance") then
+		snakeInst = player.Character.__SnakeInstance.Value
+	end
+	if snakeInst and snakeInst.grow then 
+		-- Queue the growth instead of growing immediately
+		snakeInst.grow(value or 10) 
+	end
+end
+
+local function giveUpgradeToPlayerSnake(player)
+	local snakeInst = _G.PlayerSnakes and _G.PlayerSnakes[player]
+	if snakeInst then SnakeUpgrades.GiveUpgrade(snakeInst) end
+end
+
+---------------------------------------------------------------------
+-- VFX (no attachments) - FIXED: Completely standalone
+---------------------------------------------------------------------
+local function createOrbCollectVFX(pos, color)
+	-- Create a completely standalone part for VFX
+	local part = Instance.new("Part")
+	part.Name = "OrbVFX"
+	part.Size = Vector3.new(0.1, 0.1, 0.1)
+	part.Position = pos
+	part.Anchored = true
+	part.CanCollide = false
+	part.Transparency = 1
+	part.Parent = Workspace
+
+	-- Create particle emitter directly on the part (no attachments)
+	local pe = Instance.new("ParticleEmitter")
+	pe.Parent = part
+	pe.Color = ColorSequence.new(color or Color3.new(1, 1, 0))
+	pe.LightEmission = 1
+	pe.Size = NumberSequence.new{
+		NumberSequenceKeypoint.new(0, 0.5), 
+		NumberSequenceKeypoint.new(1, 2)
+	}
+	pe.Transparency = NumberSequence.new{
+		NumberSequenceKeypoint.new(0, 0), 
+		NumberSequenceKeypoint.new(0.7, 0.5),
+		NumberSequenceKeypoint.new(1, 1)
+	}
+	pe.Lifetime = NumberRange.new(0.4, 0.8)
+	pe.Speed = NumberRange.new(8, 15)
+	pe.Rate = 0
+	pe.SpreadAngle = Vector2.new(360, 360)
+	pe:Emit(25)
+
+	-- Clean up after 2 seconds
+	Debris:AddItem(part, 2)
+end
+
+---------------------------------------------------------------------
+-- Safe orb creation (no attachments/constraints) - Now starts hidden
+---------------------------------------------------------------------
+local function createSafeOrb(position, value, name, color, material)
+	-- Ensure minimum height to prevent unreachable orbs
+	local minHeight = 4  -- Increased from 3 to ensure orbs are grabbable
+	if position.Y < minHeight then
+		position = Vector3.new(position.X, minHeight, position.Z)
+	end
+
+	local orb = Instance.new("Part")
+	orb.Name = name or "Orb"
+	orb.Shape = Enum.PartType.Ball
+	orb.Size = Vector3.new(0.1, 0.1, 0.1)  -- Start tiny
+	orb.Anchored = true
+	orb.CanCollide = false
+	orb.CanTouch = true -- Explicitly enable touch detection
+	orb.Material = material or Enum.Material.Neon
+	orb.Color = color or Color3.new(1, 1, 0)
+	orb.Position = position
+	orb.TopSurface = Enum.SurfaceType.Smooth
+	orb.BottomSurface = Enum.SurfaceType.Smooth
+	orb.Transparency = 1  -- Start invisible
+	orb.Parent = Workspace
+
+	local val = Instance.new("NumberValue")
+	val.Name = "Value"
+	val.Value = value or 1  -- REDUCED from 10 to 1
+	val.Parent = orb
+
+	local light = Instance.new("PointLight")
+	light.Parent = orb
+	light.Color = orb.Color
+	light.Brightness = 0
+	light.Range = 0
+	light.Enabled = false  -- Start disabled
+
+	-- Initialize as hidden
+	orbStates[orb] = {state = "hidden", fade = 0}
+	addOrbToGrid(orb) -- Add to grid
+
+	-- Register with SpatialGrid for AI detection
+	pcall(function()
+		local SpatialGrid = require(game.ServerScriptService:FindFirstChild("SpatialGrid"))
+		if SpatialGrid then
+			SpatialGrid.RegisterEntity(orb, "ORB")
+		end
+	end)
+
+	return orb
+end
+
+---------------------------------------------------------------------
+-- Death-orb burst - FIXED: No attachments
+---------------------------------------------------------------------
+local function spawnDeathOrbs(pos, count)
+	local spawned = {}
+	for i = 1, count do
+		local angle, dist = math.random() * math.pi * 2, math.random(3, 8)
+		local off = Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
+		local orb = createSafeOrb(pos + off, 2, "DeathOrb", Color3.fromRGB(255, 100, 100))  -- REDUCED from 10 to 2
+
+		-- Make death orbs bigger for better collision detection
+		if orb then
+			orb.Size = Vector3.new(2.5, 2.5, 2.5) -- Bigger than normal orbs
+			-- Ensure they're at snake height
+			local yPos = math.max(4, pos.Y)
+			orb.Position = Vector3.new(orb.Position.X, yPos, orb.Position.Z)
+		end
+
+		table.insert(orbs, orb)
+		table.insert(spawned, orb)
+		attachOrbTouched(orb)
+
+		-- CRITICAL: Add death orbs to spatial grid so AI can find them!
+		addOrbToGrid(orb)
+
+		-- Death orbs should be immediately visible where they spawn
+		applyOrbLOD(orb, "full", 1.0)
+	end
+	return spawned
+end
+
+---------------------------------------------------------------------
+-- Remove orb from tables
+---------------------------------------------------------------------
+local function removeOrb(orb)
+	-- Remove from OrbUtils tracking
+	OrbUtils.removeOrb(orb)
+
+	-- CRITICAL FIX: Remove from OrbSpawner's main orbs array
+	for i = #orbs, 1, -1 do
+		if orbs[i] == orb then
+			table.remove(orbs, i)
+			break
+		end
+	end
+
+	-- Remove from upgrade orbs if applicable
+	for i = #upgradeOrbs, 1, -1 do 
+		if upgradeOrbs[i] == orb then 
+			table.remove(upgradeOrbs, i) 
+		end 
+	end
+
+	orbDebounce[orb] = nil
+	orbStates[orb] = nil
+	removeOrbFromGrid(orb) -- Remove from grid
+
+	-- Unregister from SpatialGrid
+	pcall(function()
+		local SpatialGrid = require(game.ServerScriptService:FindFirstChild("SpatialGrid"))
+		if SpatialGrid then
+			SpatialGrid.UnregisterEntity(orb)
+		end
+	end)
+	if orbTweens[orb] then
+		orbTweens[orb]:Cancel()
+		orbTweens[orb] = nil
+	end
+end
+
+---------------------------------------------------------------------
+-- Head identification helpers (players / AI)
+---------------------------------------------------------------------
+local function getPlayerFromTouchedPart(part)
+	-- Direct check for HumanoidRootPart
+	for _, h in getPlayerHeads() do
+		if h.part == part then return h.player end
+	end
+
+	-- Check if part belongs to a player's character
+	local character = part.Parent
+	if character then
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			local player = Players:GetPlayerFromCharacter(character)
+			if player then return player end
+		end
+	end
+
+	-- Check if it's a snake head or segment
+	if part.Name == "SnakeHead" or part:GetAttribute("IsSnakeSegment") then
+		-- Find the owner player
+		local model = part.Parent
+		while model and model.Parent do
+			local userId = model:GetAttribute("OwnerUserId")
+			if userId then
+				for _, player in Players:GetPlayers() do
+					if player.UserId == userId then
+						return player
+					end
+				end
+			end
+			model = model.Parent
+		end
+	end
+
+	return nil
+end
+
+local function isPartAISnakeHead(part)
+	if part.Name == "AISnakeHead" then return part end
+	if part.Parent then
+		local head = part.Parent:FindFirstChild("AISnakeHead")
+		if head then return head end
+	end
+	return nil
+end
+
+local function getAISnakeHeadFromPart(part)
+	local simple = isPartAISnakeHead(part)
+	if simple then return simple end
+
+	local ASM = getAISnakeModule()
+	if not ASM or not ASM._activeSnakes then return nil end
+
+	for _, s in ASM._activeSnakes do
+		local head = s.HeadParts and s.HeadParts.head
+		if head and (part == head or (head.Parent and part:IsDescendantOf(head.Parent))) then
+			return head
+		end
+	end
+	return nil
+end
+
+---------------------------------------------------------------------
+-- Atomic orb collection - FIXED: Safe remote event firing
+---------------------------------------------------------------------
+local function atomicCollectOrb(orb, collType, collObj)
+	if not orb or not orb.Parent or orbDebounce[orb] then return end
+	orbDebounce[orb] = true
+
+	createOrbCollectVFX(orb.Position, orb.Color)
+
+	if collType == "player" then
+		local p = collObj
+		-- FIXED: Only fire remote event if it exists and player is valid
+		if OrbCollectedEvent and p and p:IsA("Player") then
+			-- Use pcall to prevent errors if client doesn't handle it
+			pcall(function()
+				OrbCollectedEvent:FireClient(p, orb.Position, orb.Name)
+			end)
+		end
+		if orb.Name == "UpgradeOrb" then
+			giveUpgradeToPlayerSnake(p)
+		else
+			local valObj = orb:FindFirstChild("Value")
+			local val = (valObj and valObj.Value) or 10
+			growPlayerSnake(p, val)
+		end
+	else -- "ai"
+		local head = collObj
+		if orb.Name == "UpgradeOrb" then
+			giveUpgradeToAISnake(head)
+		else
+			local valObj = orb:FindFirstChild("Value")
+			local val = (valObj and valObj.Value) or 10
+			growAISnake(head, val)
+		end
+	end
+
+	removeOrb(orb)
+	if orb and orb.Parent then 
+		pcall(function() orb:Destroy() end) 
+	end
+end
+
+---------------------------------------------------------------------
+-- Attach .Touched listener
+---------------------------------------------------------------------
+attachOrbTouched = function(orb)
+	orb.Touched:Connect(function(hit)
+		if not orb or not orb.Parent or orbDebounce[orb] then return end
+
+
+
+		local player = getPlayerFromTouchedPart(hit)
+		if player then
+			atomicCollectOrb(orb, "player", player)
+			return
+		end
+
+		local aiHead = getAISnakeHeadFromPart(hit)
+		if aiHead then
+
+			atomicCollectOrb(orb, "ai", aiHead)
+			return
+		end
+
+		-- Clear debounce if no valid collector
+		orbDebounce[orb] = nil
+	end)
+end
+
+---------------------------------------------------------------------
+-- LOD Update Loop - Updates visibility of all orbs
+---------------------------------------------------------------------
+local lastLODUpdate = 0
+task.spawn(function()
+	RunService.Heartbeat:Connect(function()
+		local now = tick()
+		if now - lastLODUpdate < LOD_UPDATE_RATE then return end
+		lastLODUpdate = now
+
+		local viewPositions = getAllViewingPositions()
+		if #viewPositions == 0 then return end
+
+		-- Update LOD for all orbs
+		for i = #orbs, 1, -1 do
+			local orb = orbs[i]
+			if orb and orb.Parent then
+				local state, fade = calculateOrbLOD(orb, viewPositions)
+				applyOrbLOD(orb, state, fade)
+			end
+		end
+	end)
+end)
+
+---------------------------------------------------------------------
+-- Backup proximity scan (runs every 0.2 s) - only for visible orbs
+---------------------------------------------------------------------
+task.spawn(function()
+	while true do 
+		task.wait(0.2)
+		local aiHeads = {}
+		for _, obj in Workspace:GetDescendants() do
+			if obj:IsA("BasePart") and obj.Name == "AISnakeHead" then
+				aiHeads[#aiHeads + 1] = obj
+			end
+		end
+		local players = getPlayerHeads()
+
+		-- OPTIMIZATION: Use spatial grid for efficient proximity checks
+		for _, ph in ipairs(players) do
+			if ph and ph.Parent then
+				local nearbyOrbs = getOrbsNearPosition(ph.Position, 12)
+				for _, orb in ipairs(nearbyOrbs) do
+					if orb and orb.Parent and not orbDebounce[orb] then
+						local orbState = orbStates[orb]
+						if orbState and orbState.state ~= "hidden" then
+							local dist = (orb.Position - ph.Position).Magnitude
+							if dist < orb.Size.X * 0.8 + 3 then
+								local p = getPlayerFromTouchedPart(ph)
+								if p then atomicCollectOrb(orb, "player", p) end
+							end
+						end
+					end
+				end
+			end
+		end
+
+		for _, ah in ipairs(aiHeads) do
+			if ah and ah.Parent then
+				local nearbyOrbs = getOrbsNearPosition(ah.Position, 12)
+				for _, orb in ipairs(nearbyOrbs) do
+					if orb and orb.Parent and not orbDebounce[orb] then
+						local orbState = orbStates[orb]
+						if orbState and orbState.state ~= "hidden" then
+							local dist = (orb.Position - ah.Position).Magnitude
+							if dist < orb.Size.X * 0.8 + 3 then
+								atomicCollectOrb(orb, "ai", ah)
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end)
+
+---------------------------------------------------------------------
+-- Orb spawning helpers
+---------------------------------------------------------------------
+local function randomPosition()
+	local a = getOrbSpawnArea()
+
+	-- Try to find a gap area (up to 5 attempts)
+	for attempt = 1, 5 do
+		local testX = math.random(a.minX, a.maxX)
+		local testZ = math.random(a.minZ, a.maxZ)
+		local testPos = Vector3.new(testX, a.y, testZ)
+
+		-- Use the existing getOrbsNearPosition function
+		local nearbyOrbs = getOrbsNearPosition(testPos, 40) -- Check within 40 studs
+
+		-- If this area has few orbs, use it (fills gaps)
+		if #nearbyOrbs < 3 then
+			return testPos
+		end
+	end
+
+	-- Fallback to completely random position
+	return Vector3.new(math.random(a.minX, a.maxX), a.y, math.random(a.minZ, a.maxZ))
+end
+
+local function createOrb()
+	local orb
+	if math.random() < UPGRADE_ORB_CHANCE then
+		orb = createSafeOrb(randomPosition(), 0, "UpgradeOrb",
+			Color3.fromRGB(0, 200, 255), Enum.Material.ForceField)
+		upgradeOrbs[#upgradeOrbs + 1] = orb
+		orbs[#orbs + 1] = orb
+	else
+		orb = OrbUtils.spawnOrbAt(randomPosition(), 1)  -- REDUCED from 10 to 1
+		if orb then
+			-- CRITICAL FIX: Add regular orbs to the orbs array!
+			orbs[#orbs + 1] = orb
+
+			-- Start orbs visible at medium distance
+			orb.Transparency = 0.3
+			orb.Size = Vector3.new(1.5, 1.5, 1.5)
+			orbStates[orb] = {state = "far", fade = 0.7}
+			local light = orb:FindFirstChild("PointLight")
+			if light then 
+				light.Enabled = true
+				light.Brightness = 1.4
+				light.Range = 5.6
+			end
+			addOrbToGrid(orb) -- Add to grid
+		end
+	end
+	if orb then attachOrbTouched(orb) end
+	return orb
+end
+
+---------------------------------------------------------------------
+-- Death-orb entry point (for AISnake:Destroy)
+---------------------------------------------------------------------
+local function spawnDeathOrbsForSnake(pos, segCount)
+	return spawnDeathOrbs(pos, math.min(segCount, 50))
+end
+
+-- Remove the server-side graphics handler - this should be client-side only!
+
+---------------------------------------------------------------------
+-- Initial fill & periodic spawn
+---------------------------------------------------------------------
+task.spawn(function()
+	while #orbs < ORB_MAX do 
+		createOrb() 
+	end
+end)
+
+task.spawn(function()
+	while true do 
+		task.wait(ORB_SPAWN_INTERVAL)
+		if #orbs < ORB_MAX then 
+			createOrb() 
+		end 
+	end
+end)
+
+---------------------------------------------------------------------
+-- Module exports
+---------------------------------------------------------------------
+-- Function to register orbs created outside of OrbSpawner
+local function registerExternalOrb(orb)
+	if not orb or not orb.Parent then return end
+
+	-- Add to orbs table
+	table.insert(orbs, orb)
+
+	-- Add to spatial grid
+	addOrbToGrid(orb)
+
+	-- Initialize state - death orbs should be visible immediately
+	orbStates[orb] = {state = "full", fade = 1}
+	orb.Transparency = 0
+	orb.Size = orb.Size or Vector3.new(1.5, 1.5, 1.5)
+	local light = orb:FindFirstChild("PointLight")
+	if light then light.Enabled = true end
+
+	-- Attach our touch handler if not already attached
+	if not orbDebounce[orb] then
+		attachOrbTouched(orb)
+	end
+end
+
+local OrbSpawner = {
+	spawnDeathOrbsForSnake = spawnDeathOrbsForSnake,
+	createSafeOrb = createSafeOrb,
+	registerExternalOrb = registerExternalOrb,
+	-- New exports for LOD control
+	setRenderDistance = function(dist) RENDER_DISTANCE = dist end,
+	setFadeDistance = function(dist) FADE_DISTANCE = dist end,
+}
+
+-- Set the attachOrbTouched function for OrbUtils
+OrbUtils.attachOrbTouched = attachOrbTouched
+
+_G.OrbSpawner = OrbSpawner
+print("OrbSpawner loaded successfully - Fixed attachment and remote event issues")
+
+return OrbSpawner
