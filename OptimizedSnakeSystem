@@ -138,12 +138,14 @@ function Snake.new(character, config)
 	self.historyHead = 1
 	self.historyCount = 0
 	
-	-- Initialize history
+	-- Initialize history with enough points for the full snake
 	local initialPoint = {
 		position = self.rootPart.Position,
 		lookVector = self.rootPart.CFrame.LookVector
 	}
-	for i = 1, mathMin(100, maxHistorySize) do
+	-- Need enough history for the full length
+	local historyNeeded = mathMin(self.length * 2, maxHistorySize)  -- 2x for smooth following
+	for i = 1, historyNeeded do
 		self.positionHistory[i] = initialPoint
 		self.historyCount = i
 	end
@@ -280,15 +282,30 @@ function Snake:createInitialSegments()
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	
-	-- Create initial segments
-	for i = 1, visibleLength do
+	-- Calculate segment distribution across the full length
+	local segmentStep = mathMax(1, mathFloor(self.length / MAX_VISIBLE_SEGMENTS))
+	
+	-- Create initial segments spread across the snake's length
+	local segmentCount = 0
+	for i = 1, self.length, segmentStep do
+		segmentCount = segmentCount + 1
+		if segmentCount > MAX_VISIBLE_SEGMENTS then break end
+		
 		local segment = getSegmentFromPool()
 		if segment then
 			segment.Name = "Segment" .. i
 			
 			-- Position behind head with adjusted spacing for larger segments
 			local spacing = (self.config.SegmentSpacing or 3.2) * (growthFactor * 0.8)
-			local pos = startPos - self.rootPart.CFrame.LookVector * (i * spacing)
+			local totalDistance = i * spacing
+			
+			-- Create a longer initial trail
+			local direction = self.rootPart.CFrame.LookVector
+			local rightVector = self.rootPart.CFrame.RightVector
+			
+			-- Add some curve to make it look more natural
+			local curve = math.sin(i * 0.1) * 2
+			local pos = startPos - direction * totalDistance + rightVector * curve
 			
 			-- Apply color
 			local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
@@ -304,9 +321,11 @@ function Snake:createInitialSegments()
 				glow.Range = 5 * growthFactor  -- Scale glow with size
 			end
 			
-			self.segments[i] = segment
+			self.segments[segmentCount] = segment
 		end
 	end
+	
+	print("Created", segmentCount, "visible segments for length", self.length)
 end
 
 function Snake:setupNetworking()
