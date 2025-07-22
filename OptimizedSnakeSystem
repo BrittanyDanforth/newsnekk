@@ -8,9 +8,9 @@ local TweenService = game:GetService("TweenService")
 local CollectionService = game:GetService("CollectionService")
 
 -- Constants
-local SEGMENT_POOL_SIZE = 10000  -- Doubled from 5000
+local SEGMENT_POOL_SIZE = 20000  -- Increased from 10000
 local NETWORK_UPDATE_RATE = 30
-local MAX_VISIBLE_SEGMENTS = 500  -- Increased from 300
+local MAX_VISIBLE_SEGMENTS = 2000  -- Increased from 500 to eliminate gaps!
 
 -- Fast references
 local CFramenew = CFrame.new
@@ -284,28 +284,26 @@ function Snake:createInitialSegments()
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	
-	-- Adjusted spacing for growth
-	local spacing = (self.config.SegmentSpacing or 3.2) * growthFactor * 0.8
+	-- Calculate proper spacing to eliminate gaps
+	-- Segments should overlap slightly (0.9 = 10% overlap)
+	local segmentDiameter = currentSize.X
+	local spacing = segmentDiameter * 0.9
 	
-	-- Create all visible segments
+	-- Create all visible segments with no gaps
+	local currentPos = startPos
 	for i = 1, visibleSegments do
 		local segment = getSegmentFromPool()
 		if segment then
 			segment.Name = "Segment" .. i
 			
-			-- Calculate position for this segment
-			-- Spread them evenly across the snake's total length
-			local positionRatio = i / visibleSegments
-			local totalSnakeLength = self.length * spacing
-			local distanceFromHead = totalSnakeLength * positionRatio
-			
-			-- Create a curved trail
+			-- Position segments tightly behind each other
 			local direction = self.rootPart.CFrame.LookVector
-			local rightVector = self.rootPart.CFrame.RightVector
+			local offset = direction * (i * spacing)
 			
-			-- Add curve for natural look
-			local curve = math.sin(i * 0.05) * (10 * growthFactor)
-			local pos = startPos - direction * distanceFromHead + rightVector * curve
+			-- Add slight curve for natural look
+			local curve = math.sin(i * 0.02) * 2
+			local rightVector = self.rootPart.CFrame.RightVector
+			local pos = startPos - offset + rightVector * curve
 			
 			-- Apply color
 			local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
@@ -325,7 +323,7 @@ function Snake:createInitialSegments()
 		end
 	end
 	
-	print("Snake spawned: Length", self.length, "Growth", growthFactor, "Segments", #self.segments)
+	print("Snake spawned: Length", self.length, "Growth", growthFactor, "Size", currentSize.X, "Visible segments", #self.segments)
 end
 
 function Snake:setupNetworking()
@@ -396,21 +394,21 @@ function Snake:update(dt)
 		end
 	end
 	
-	-- Update segments to follow history with dynamic spacing
+	-- Update segments to follow history with no gaps
 	local growthFactor = self:calculateGrowthFactor()
-	local baseSpacing = self.config.SegmentSpacing or 3.2
-	local adjustedSpacing = baseSpacing * (growthFactor * 0.7)
+	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
+	local currentSize = baseSize * growthFactor
+	local segmentDiameter = currentSize.X
+	local spacing = segmentDiameter * 0.9  -- 10% overlap to eliminate gaps
 	
-	-- Calculate how much of the snake each visible segment represents
-	local segmentStep = mathMax(1, mathFloor(self.length / #self.segments))
+	-- Calculate history steps per unit distance
+	local historyStepsPerUnit = 2  -- How many history steps per stud
 	
 	for i, segment in pairs(self.segments) do
-		-- Calculate which part of the snake this segment represents
-		local snakePosition = i * segmentStep
-		
-		-- Calculate history steps needed for this position
-		local historyStepsPerUnit = mathMax(1, mathFloor(3 / adjustedSpacing))
-		local historySteps = mathMin(snakePosition * historyStepsPerUnit, self.historyCount - 1)
+		-- Each segment follows at a fixed distance
+		local distanceBehind = i * spacing
+		local historySteps = mathFloor(distanceBehind * historyStepsPerUnit / 3.2)  -- Normalize by original spacing
+		historySteps = mathMin(historySteps, self.historyCount - 1)
 		
 		local historyData = self:getFromHistory(historySteps)
 		
@@ -418,8 +416,7 @@ function Snake:update(dt)
 			segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
 			
 			-- Update segment size
-			local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
-			segment.Size = baseSize * growthFactor
+			segment.Size = currentSize
 			
 			-- Update glow
 			local glow = segment:FindFirstChild("glow")

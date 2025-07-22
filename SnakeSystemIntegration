@@ -42,7 +42,7 @@ respawnSnake.Name = "RespawnSnake"
 
 -- Default configuration
 local DEFAULT_CONFIG = {
-	InitialLength = 25000,  -- TESTING MASSIVE SPAWN SIZE!
+	InitialLength = 55,  -- Normal starting length
 	MaxSegments = 50000,  -- MASSIVE SNAKES! Was 10000
 	SegmentSpacing = 3.2,  -- Original spacing
 	SegmentSize = Vector3.new(4, 4, 4),  -- Original size
