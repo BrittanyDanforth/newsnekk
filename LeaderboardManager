@@ -1,0 +1,584 @@
+-- Services
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+
+-- Hide the default Roblox player list
+StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
+
+-- Require the existing CharacterPreview module
+local CharacterPreview = require(ReplicatedStorage:WaitForChild("CharacterPreview"))
+
+-- Local Player
+local localPlayer = Players.LocalPlayer
+
+-- Mobile detection with safe area consideration
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+-- Performance optimization variables
+local UPDATE_INTERVAL = 1.5 -- Increased from 1s for better performance
+local MAX_VISIBLE_PLAYERS = 10
+local lastUpdateTime = 0
+local updateQueued = false
+
+-- Helper function to create UI elements
+local function create(instanceType, properties)
+	local inst = Instance.new(instanceType)
+	for prop, value in properties do
+		inst[prop] = value
+	end
+	return inst
+end
+
+-- Main GUI with mobile-responsive design
+local leaderboardGui = create("ScreenGui", {
+	Name = "LeaderboardGUI",
+	Parent = localPlayer:WaitForChild("PlayerGui"),
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	ResetOnSpawn = false,
+	Enabled = false,
+	IgnoreGuiInset = true, -- Critical for mobile positioning
+})
+
+-- Get safe area insets for mobile
+local topBarHeight = GuiService:GetGuiInset()
+
+-- Mobile-friendly container with proper positioning
+local container = create("Frame", {
+	Name = "Container",
+	Parent = leaderboardGui,
+	AnchorPoint = isMobile and Vector2.new(0, 0) or Vector2.new(1, 0),
+	Position = isMobile and UDim2.new(0, 10, 0, topBarHeight.Y + 10) or UDim2.new(1, -15, 0, topBarHeight.Y + 10),
+	Size = isMobile and UDim2.new(0.85, 0, 0, 400) or UDim2.new(0, 300, 0, 450),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ClipsDescendants = true, -- Prevent overflow
+})
+
+-- Ensure container stays within screen bounds
+if isMobile then
+	local screenSize = workspace.CurrentCamera.ViewportSize
+	local maxWidth = math.min(screenSize.X - 20, 350) -- Max width with padding
+	container.Size = UDim2.new(0, maxWidth, 0, 400)
+end
+
+-- Collapsible header button for mobile
+local headerButton = create("TextButton", {
+	Name = "HeaderButton",
+	Parent = container,
+	Size = UDim2.new(1, 0, 0, 45),
+	Position = UDim2.new(0, 0, 0, 0),
+	BackgroundColor3 = Color3.fromRGB(25, 25, 35),
+	BorderSizePixel = 0,
+	Text = "",
+	AutoButtonColor = false,
+})
+
+create("UICorner", { Parent = headerButton, CornerRadius = UDim.new(0, 12) })
+create("UIStroke", { 
+	Parent = headerButton, 
+	Color = Color3.fromRGB(70, 130, 255), 
+	Transparency = 0.3, 
+	Thickness = 2 
+})
+
+-- Header content
+local headerContent = create("Frame", {
+	Name = "HeaderContent",
+	Parent = headerButton,
+	Size = UDim2.new(1, 0, 1, 0),
+	BackgroundTransparency = 1,
+})
+
+create("UIPadding", {
+	Parent = headerContent,
+	PaddingLeft = UDim.new(0, 15),
+	PaddingRight = UDim.new(0, 15),
+})
+
+-- Title with icon
+local titleLabel = create("TextLabel", {
+	Name = "Title",
+	Parent = headerContent,
+	Size = UDim2.new(1, -30, 1, 0),
+	Position = UDim2.new(0, 0, 0, 0),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "🏆 LEADERBOARD",
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	TextSize = isMobile and 16 or 18,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Center,
+})
+
+-- Collapse/expand indicator
+local expandIcon = create("TextLabel", {
+	Name = "ExpandIcon",
+	Parent = headerContent,
+	Size = UDim2.new(0, 20, 0, 20),
+	Position = UDim2.new(1, -25, 0.5, -10),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "▼",
+	TextColor3 = Color3.fromRGB(70, 130, 255),
+	TextSize = 14,
+	TextXAlignment = Enum.TextXAlignment.Center,
+	TextYAlignment = Enum.TextYAlignment.Center,
+})
+
+-- Main content container (collapsible)
+local mainContent = create("Frame", {
+	Name = "MainContent",
+	Parent = container,
+	Position = UDim2.new(0, 0, 0, 55),
+	Size = UDim2.new(1, 0, 1, -55),
+	BackgroundColor3 = Color3.fromRGB(20, 20, 30),
+	BorderSizePixel = 0,
+	ClipsDescendants = true,
+})
+
+create("UICorner", { Parent = mainContent, CornerRadius = UDim.new(0, 12) })
+create("UIStroke", { 
+	Parent = mainContent, 
+	Color = Color3.fromRGB(70, 130, 255), 
+	Transparency = 0.5, 
+	Thickness = 1 
+})
+
+create("UIPadding", {
+	Parent = mainContent,
+	PaddingTop = UDim.new(0, 15),
+	PaddingBottom = UDim.new(0, 15),
+	PaddingLeft = UDim.new(0, 15),
+	PaddingRight = UDim.new(0, 15),
+})
+
+-- Content layout
+local contentLayout = create("UIListLayout", {
+	Parent = mainContent,
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Padding = UDim.new(0, 12),
+	FillDirection = Enum.FillDirection.Vertical,
+})
+
+-- Your rank section (compact for mobile)
+local yourRankSection = create("Frame", {
+	Name = "YourRankSection",
+	Parent = mainContent,
+	Size = UDim2.new(1, 0, 0, isMobile and 60 or 80),
+	BackgroundColor3 = Color3.fromRGB(35, 35, 50),
+	BorderSizePixel = 0,
+	LayoutOrder = 1,
+})
+
+create("UICorner", { Parent = yourRankSection, CornerRadius = UDim.new(0, 8) })
+create("UIStroke", { 
+	Parent = yourRankSection, 
+	Color = Color3.fromRGB(70, 130, 255), 
+	Transparency = 0.6, 
+	Thickness = 1 
+})
+
+create("UIPadding", {
+	Parent = yourRankSection,
+	PaddingTop = UDim.new(0, 8),
+	PaddingBottom = UDim.new(0, 8),
+	PaddingLeft = UDim.new(0, 12),
+	PaddingRight = UDim.new(0, 12),
+})
+
+-- Your rank layout
+local yourRankLayout = create("UIListLayout", {
+	Parent = yourRankSection,
+	FillDirection = Enum.FillDirection.Horizontal,
+	HorizontalAlignment = Enum.HorizontalAlignment.Left,
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Padding = UDim.new(0, 10),
+})
+
+
+
+-- Your info container
+local yourInfoContainer = create("Frame", {
+	Name = "YourInfoContainer",
+	Parent = yourRankSection,
+	Size = UDim2.new(1, isMobile and -60 or -70, 1, 0),
+	BackgroundTransparency = 1,
+	LayoutOrder = 2,
+})
+
+local yourRankLabel = create("TextLabel", {
+	Name = "YourRankLabel",
+	Parent = yourInfoContainer,
+	Size = UDim2.new(1, 0, 0.5, 0),
+	Position = UDim2.new(0, 0, 0, 0),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "Your Rank: #1",
+	TextColor3 = Color3.fromRGB(255, 215, 0),
+	TextSize = isMobile and 14 or 16,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Center,
+})
+
+local yourScoreLabel = create("TextLabel", {
+	Name = "YourScoreLabel",
+	Parent = yourInfoContainer,
+	Size = UDim2.new(1, 0, 0.5, 0),
+	Position = UDim2.new(0, 0, 0.5, 0),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "Score: 0",
+	TextColor3 = Color3.fromRGB(200, 200, 200),
+	TextSize = isMobile and 12 or 14,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Center,
+})
+
+-- Top players section
+local topPlayersSection = create("Frame", {
+	Name = "TopPlayersSection",
+	Parent = mainContent,
+	Size = UDim2.new(1, 0, 1, isMobile and -80 or -100),
+	BackgroundTransparency = 1,
+	LayoutOrder = 2,
+})
+
+-- Top players header
+local topPlayersHeader = create("TextLabel", {
+	Name = "TopPlayersHeader",
+	Parent = topPlayersSection,
+	Size = UDim2.new(1, 0, 0, 25),
+	Position = UDim2.new(0, 0, 0, 0),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "TOP PLAYERS",
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	TextSize = isMobile and 14 or 16,
+	TextXAlignment = Enum.TextXAlignment.Center,
+	TextYAlignment = Enum.TextYAlignment.Center,
+})
+
+-- Scrolling frame for players
+local playerList = create("ScrollingFrame", {
+	Name = "PlayerList",
+	Parent = topPlayersSection,
+	Position = UDim2.new(0, 0, 0, 30),
+	Size = UDim2.new(1, 0, 1, -30),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	CanvasSize = UDim2.new(0, 0, 0, 0),
+	ScrollBarImageColor3 = Color3.fromRGB(70, 130, 255),
+	ScrollBarThickness = 4,
+	ScrollBarImageTransparency = 0.3,
+	ScrollingDirection = Enum.ScrollingDirection.Y,
+})
+
+create("UIListLayout", {
+	Parent = playerList,
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Padding = UDim.new(0, 4),
+	FillDirection = Enum.FillDirection.Vertical,
+	HorizontalAlignment = Enum.HorizontalAlignment.Center,
+})
+
+-- Modern player entry template
+local template = create("Frame", {
+	Name = "PlayerEntryTemplate",
+	Parent = playerList,
+	Visible = false,
+	Size = UDim2.new(1, -8, 0, isMobile and 35 or 40), -- Account for scrollbar
+	BackgroundColor3 = Color3.fromRGB(30, 30, 40),
+	BorderSizePixel = 0,
+})
+
+create("UICorner", { Parent = template, CornerRadius = UDim.new(0, 6) })
+
+-- Entry layout
+local entryLayout = create("UIListLayout", {
+	Parent = template,
+	FillDirection = Enum.FillDirection.Horizontal,
+	HorizontalAlignment = Enum.HorizontalAlignment.Left,
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Padding = UDim.new(0, 8),
+})
+
+create("UIPadding", {
+	Parent = template,
+	PaddingLeft = UDim.new(0, 12),
+	PaddingRight = UDim.new(0, 12),
+})
+
+-- Rank badge
+local rankBadge = create("Frame", {
+	Name = "RankBadge",
+	Parent = template,
+	Size = UDim2.new(0, isMobile and 25 or 30, 0, isMobile and 25 or 30),
+	BackgroundColor3 = Color3.fromRGB(70, 130, 255),
+	BorderSizePixel = 0,
+	LayoutOrder = 1,
+})
+
+create("UICorner", { Parent = rankBadge, CornerRadius = UDim.new(0.5, 0) })
+
+local rankText = create("TextLabel", {
+	Name = "RankText",
+	Parent = rankBadge,
+	Size = UDim2.new(1, 0, 1, 0),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "1",
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	TextSize = isMobile and 12 or 14,
+	TextXAlignment = Enum.TextXAlignment.Center,
+	TextYAlignment = Enum.TextYAlignment.Center,
+})
+
+-- Player name
+local playerName = create("TextLabel", {
+	Name = "PlayerName",
+	Parent = template,
+	Size = UDim2.new(1, isMobile and -80 or -100, 1, 0),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.Gotham,
+	Text = "PlayerName",
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	TextSize = isMobile and 13 or 15,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Center,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	LayoutOrder = 2,
+})
+
+-- Score
+local scoreLabel = create("TextLabel", {
+	Name = "Score",
+	Parent = template,
+	Size = UDim2.new(0, 40, 1, 0),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "0",
+	TextColor3 = Color3.fromRGB(255, 215, 0),
+	TextSize = isMobile and 12 or 14,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	TextYAlignment = Enum.TextYAlignment.Center,
+	LayoutOrder = 3,
+})
+
+-- Leaderboard Logic
+local playerEntries = {}
+local isExpanded = not isMobile -- Start collapsed on mobile
+local lastPlayerData = {} -- Cache player data
+local isUpdating = false
+
+
+
+-- Collapse/expand functionality with debounce
+local expandDebounce = false
+local function toggleExpansion()
+	if expandDebounce then return end
+	expandDebounce = true
+
+	isExpanded = not isExpanded
+
+	local targetSize = isExpanded and UDim2.new(1, 0, 1, -55) or UDim2.new(1, 0, 0, 0)
+	local iconRotation = isExpanded and 0 or 180
+
+	TweenService:Create(mainContent, 
+		TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Size = targetSize}
+	):Play()
+
+	TweenService:Create(expandIcon, 
+		TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{Rotation = iconRotation}
+	):Play()
+
+	task.wait(0.3)
+	expandDebounce = false
+end
+
+headerButton.MouseButton1Click:Connect(toggleExpansion)
+
+-- Optimized update function
+local function updateLeaderboard()
+	-- Prevent overlapping updates
+	if isUpdating then return end
+
+	local currentTime = tick()
+	if currentTime - lastUpdateTime < UPDATE_INTERVAL then
+		return
+	end
+
+	isUpdating = true
+	lastUpdateTime = currentTime
+
+	-- Collect player data
+	local playersData = {}
+	for _, player in Players:GetPlayers() do
+		local leaderstats = player:FindFirstChild("leaderstats")
+		if leaderstats then
+			local length = leaderstats:FindFirstChild("Length")
+			if length then
+				table.insert(playersData, {player = player, score = length.Value})
+			end
+		end
+	end
+
+	-- Sort players by score
+	table.sort(playersData, function(a, b)
+		return a.score > b.score
+	end)
+
+	-- Update local player info
+	local localPlayerRank = 0
+	local localPlayerScore = 0
+
+	for i, data in ipairs(playersData) do
+		if data.player == localPlayer then
+			localPlayerRank = i
+			localPlayerScore = data.score
+			break
+		end
+	end
+
+	yourRankLabel.Text = localPlayerRank > 0 and ("Your Rank: #" .. localPlayerRank) or "Your Rank: Unranked"
+	yourScoreLabel.Text = "Score: " .. localPlayerScore
+
+	-- Update character preview only if skin changed
+	local localPlayerSkin = localPlayer:GetAttribute("SelectedSkin") or "Default"
+	if lastPlayerData.skin ~= localPlayerSkin then
+		CharacterPreview.update(localPlayerSkin)
+		lastPlayerData.skin = localPlayerSkin
+	end
+
+	-- Update player entries (limit to top 10)
+	local topPlayers = {}
+	for i = 1, math.min(MAX_VISIBLE_PLAYERS, #playersData) do
+		topPlayers[i] = playersData[i]
+	end
+
+	-- Batch UI updates
+	local activePlayers = {}
+	for rank, data in ipairs(topPlayers) do
+		local player = data.player
+		activePlayers[player] = true
+
+		local entry = playerEntries[player]
+		if not entry then
+			entry = template:Clone()
+			entry.Name = player.Name
+			entry.Parent = playerList
+			entry.Visible = true
+			playerEntries[player] = entry
+		end
+
+		-- Update entry content
+		entry.RankBadge.RankText.Text = tostring(rank)
+		entry.PlayerName.Text = player.Name
+		entry.Score.Text = tostring(data.score)
+		entry.LayoutOrder = rank
+
+		-- Special styling for top 3
+		local badgeColor
+		if rank == 1 then
+			badgeColor = Color3.fromRGB(255, 215, 0) -- Gold
+		elseif rank == 2 then
+			badgeColor = Color3.fromRGB(192, 192, 192) -- Silver
+		elseif rank == 3 then
+			badgeColor = Color3.fromRGB(205, 127, 50) -- Bronze
+		else
+			badgeColor = Color3.fromRGB(70, 130, 255)
+		end
+
+		entry.RankBadge.BackgroundColor3 = badgeColor
+
+		-- Highlight local player
+		entry.BackgroundColor3 = player == localPlayer and Color3.fromRGB(50, 50, 70) or Color3.fromRGB(30, 30, 40)
+	end
+
+	-- Remove inactive players
+	for player, entry in pairs(playerEntries) do
+		if not activePlayers[player] then
+			entry:Destroy()
+			playerEntries[player] = nil
+		end
+	end
+
+	-- Update canvas size
+	local canvasHeight = #topPlayers * (isMobile and 39 or 44)
+	playerList.CanvasSize = UDim2.new(0, 0, 0, canvasHeight)
+
+	isUpdating = false
+end
+
+-- Player removal handling
+Players.PlayerRemoving:Connect(function(player)
+	if playerEntries[player] then
+		playerEntries[player]:Destroy()
+		playerEntries[player] = nil
+	end
+end)
+
+-- Cleanup
+leaderboardGui.AncestryChanged:Connect(function()
+	if not leaderboardGui.Parent then
+		CharacterPreview.destroy()
+	end
+end)
+
+-- Optimized update loop - uses RenderStepped for smoother performance
+local updateConnection
+updateConnection = RunService.Heartbeat:Connect(function()
+	if leaderboardGui.Enabled then
+		updateLeaderboard()
+	end
+end)
+
+-- Respawn handling
+local function onCharacterAdded(character)
+	leaderboardGui.Enabled = true
+
+	-- Auto-collapse on mobile when spawning
+	if isMobile and isExpanded then
+		task.wait(2) -- Show for 2 seconds then collapse
+		if isExpanded then
+			toggleExpansion()
+		end
+	end
+
+	local humanoid = character:WaitForChild("Humanoid")
+	humanoid.Died:Connect(function()
+		leaderboardGui.Enabled = false
+	end)
+end
+
+localPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+if localPlayer.Character then
+	onCharacterAdded(localPlayer.Character)
+end
+
+-- Initialize expansion state
+if not isExpanded then
+	mainContent.Size = UDim2.new(1, 0, 0, 0)
+	expandIcon.Rotation = 180
+end
+
+-- Handle screen size changes (device rotation)
+workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+	if isMobile then
+		local screenSize = workspace.CurrentCamera.ViewportSize
+		local maxWidth = math.min(screenSize.X - 20, 350)
+		container.Size = UDim2.new(0, maxWidth, 0, 400)
+	end
+end)
+
+print("🎮 Optimized Mobile Leaderboard Loaded!")
+print("📱 Fixed: Positioning, Performance, and Visibility")
