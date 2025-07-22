@@ -1,0 +1,401 @@
+-- this is a script inside workspace
+-- Now supports High/Low graphics mode and multiplayer-safe decoration toggling
+
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+
+-- CONFIGURABLE MAP SIZE
+local MAP_SIZE = 800      -- Map is MAP_SIZE x MAP_SIZE studs
+local MAP_HEIGHT = 1      -- Height of the ground
+local WALL_THICKNESS = 20  -- Thickness of invisible walls (increased)
+local WALL_HEIGHT = 200    -- Height of invisible walls (much taller)
+
+-- GROUP NAMES for easy cleanup/toggling
+local DECOR_GROUP_NAME = "SlitherIOMapDecor"
+local GRID_GROUP_NAME = "SlitherIOMapGrid"
+
+-- Function to set up slither.io style lighting and environment
+local function setupSlitherEnvironment()
+	-- Remove skybox
+	local sky = Lighting:FindFirstChildOfClass("Sky")
+	if sky then
+		sky:Destroy()
+	end
+
+	-- Set up slither.io style environment (not pitch black!)
+	Lighting.Ambient = Color3.fromRGB(70, 70, 80)  -- Brighter ambient
+	Lighting.Brightness = 0.8  -- More brightness
+	Lighting.ColorShift_Bottom = Color3.fromRGB(50, 50, 60)
+	Lighting.ColorShift_Top = Color3.fromRGB(60, 60, 70)
+	Lighting.EnvironmentDiffuseScale = 0.5
+	Lighting.EnvironmentSpecularScale = 0.3
+	Lighting.GlobalShadows = false
+	Lighting.OutdoorAmbient = Color3.fromRGB(65, 65, 75)
+	Lighting.ShadowSoftness = 1
+	Lighting.ClockTime = 12  -- Noon for better visibility
+	Lighting.GeographicLatitude = 0
+	Lighting.FogEnd = 800
+	Lighting.FogStart = 200
+	Lighting.FogColor = Color3.fromRGB(45, 45, 55)
+
+	-- Create a proper backdrop
+	local backdrop = Workspace:FindFirstChild("SlitherBackdrop")
+	if backdrop then backdrop:Destroy() end
+
+	backdrop = Instance.new("Part")
+	backdrop.Name = "SlitherBackdrop"
+	backdrop.Size = Vector3.new(MAP_SIZE + 1000, 1, MAP_SIZE + 1000)
+	backdrop.Position = Vector3.new(0, -20, 0)
+	backdrop.Anchored = true
+	backdrop.CanCollide = false
+	backdrop.Material = Enum.Material.SmoothPlastic
+	backdrop.Color = Color3.fromRGB(35, 35, 45)  -- Dark blue-gray like slither.io
+	backdrop.Parent = Workspace
+
+	-- Remove or adjust atmosphere for clarity
+	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+	if atmosphere then
+		atmosphere:Destroy()  -- Remove haze for better visibility
+	end
+end
+
+-- Helper: Remove all map decor (grid lines, hexagons, spots, corners)
+local function removeDecor()
+	local decor = Workspace:FindFirstChild(DECOR_GROUP_NAME)
+	if decor then
+		decor:Destroy()
+	end
+	local grid = Workspace:FindFirstChild(GRID_GROUP_NAME)
+	if grid then
+		grid:Destroy()
+	end
+end
+
+-- Helper: Remove old map parts (ground, walls)
+local function removeMapParts()
+	for _, obj in pairs(Workspace:GetChildren()) do
+		if obj:IsA("Part") and (obj.Name == "SlitherIOGround" or obj.Name:match("^SlitherIOWall")) then
+			obj:Destroy()
+		end
+	end
+end
+
+-- Helper: Create the ground part
+local function createGround()
+	local ground = Instance.new("Part")
+	ground.Name = "SlitherIOGround"
+	ground.Size = Vector3.new(MAP_SIZE, MAP_HEIGHT, MAP_SIZE)
+	ground.Position = Vector3.new(0, MAP_HEIGHT/2, 0)
+	ground.Anchored = true
+	ground.CanCollide = true
+	ground.Locked = true
+	ground.TopSurface = Enum.SurfaceType.Smooth
+	ground.BottomSurface = Enum.SurfaceType.Smooth
+	ground.Material = Enum.Material.SmoothPlastic
+	ground.Color = Color3.fromRGB(45, 45, 55)  -- Dark blue-gray like real slither.io
+	ground.Parent = Workspace
+
+	-- Add hexagonal pattern decal (slither.io style)
+	local surfaceGui = Instance.new("SurfaceGui")
+	surfaceGui.Face = Enum.NormalId.Top
+	surfaceGui.Parent = ground
+
+	-- Create hexagonal grid pattern
+	for x = -10, 10 do
+		for z = -10, 10 do
+			local hex = Instance.new("ImageLabel")
+			hex.Size = UDim2.new(0.05, 0, 0.05, 0)
+			hex.Position = UDim2.new(0.5 + x * 0.05, 0, 0.5 + z * 0.05, 0)
+			hex.BackgroundTransparency = 1
+			hex.Image = "rbxasset://textures/ui/circle.png"
+			hex.ImageColor3 = Color3.fromRGB(55, 55, 65)
+			hex.ImageTransparency = 0.85
+			hex.Parent = surfaceGui
+		end
+	end
+end
+
+-- Helper: Create invisible boundary walls with better collision
+local function createWalls()
+	local function createWall(name, size, position)
+		local wall = Instance.new("Part")
+		wall.Name = name
+		wall.Size = size
+		wall.Position = position
+		wall.Anchored = true
+		wall.CanCollide = true
+		wall.CanTouch = true  -- Ensure touch detection works
+		wall.CanQuery = true  -- Ensure raycasts work
+		wall.Locked = true
+		wall.Transparency = 0.8  -- More visible
+		wall.Material = Enum.Material.ForceField  -- Better collision detection
+		wall.BrickColor = BrickColor.new("Really red")  -- Red like slither.io
+		wall.Parent = Workspace
+
+		-- Add a SelectionBox for better visibility
+		local selectionBox = Instance.new("SelectionBox")
+		selectionBox.Adornee = wall
+		selectionBox.Color3 = Color3.new(0.8, 0, 0)  -- Darker red
+		selectionBox.LineThickness = 0.1  -- Thicker lines
+		selectionBox.Transparency = 0.3  -- More visible
+		selectionBox.Parent = wall
+
+		-- Add invisible barrier below map to catch falling players
+		if name == "SlitherIOWall_Bottom" then
+			local floor = Instance.new("Part")
+			floor.Name = "SlitherIOFloor"
+			floor.Size = Vector3.new(MAP_SIZE + 100, 10, MAP_SIZE + 100)
+			floor.Position = Vector3.new(0, -20, 0)  -- Below the map
+			floor.Anchored = true
+			floor.CanCollide = true
+			floor.CanTouch = true
+			floor.CanQuery = true
+			floor.Transparency = 1
+			floor.Parent = Workspace
+		end
+
+		return wall
+	end
+	local half = MAP_SIZE/2
+	-- Position walls to extend from below ground to high above
+	local wallY = WALL_HEIGHT/2 - 20  -- Start 20 studs below ground
+	createWall("SlitherIOWall_Left", Vector3.new(WALL_THICKNESS, WALL_HEIGHT, MAP_SIZE+WALL_THICKNESS*2), Vector3.new(-half-WALL_THICKNESS/2, wallY, 0))
+	createWall("SlitherIOWall_Right", Vector3.new(WALL_THICKNESS, WALL_HEIGHT, MAP_SIZE+WALL_THICKNESS*2), Vector3.new(half+WALL_THICKNESS/2, wallY, 0))
+	createWall("SlitherIOWall_Top", Vector3.new(MAP_SIZE+WALL_THICKNESS*2, WALL_HEIGHT, WALL_THICKNESS), Vector3.new(0, wallY, -half-WALL_THICKNESS/2))
+	createWall("SlitherIOWall_Bottom", Vector3.new(MAP_SIZE+WALL_THICKNESS*2, WALL_HEIGHT, WALL_THICKNESS), Vector3.new(0, wallY, half+WALL_THICKNESS/2))
+end
+
+-- Helper: Create map decorations (only in High graphics)
+local function createDecor()
+	local decorGroup = Instance.new("Folder")
+	decorGroup.Name = DECOR_GROUP_NAME
+	decorGroup.Parent = Workspace
+
+	-- Create proper tessellating hexagonal pattern like slither.io
+	local hexRadius = 50  -- Distance from center to vertex
+	local hexHeight = hexRadius * math.sqrt(3)  -- Height of hexagon
+	local hexWidth = hexRadius * 2  -- Width of hexagon
+
+	-- Calculate spacing for perfect tessellation
+	local xSpacing = hexWidth * 3/4  -- Hexagons overlap horizontally
+	local ySpacing = hexHeight  -- Vertical spacing
+
+	-- Create hexagonal grid across the map
+	for row = -20, 20 do
+		for col = -20, 20 do
+			-- Calculate position with offset for odd rows
+			local xOffset = (row % 2) * (xSpacing / 2)
+			local x = col * xSpacing + xOffset
+			local z = row * ySpacing
+
+			-- Skip if outside map bounds
+			if math.abs(x) > MAP_SIZE/2 - 50 or math.abs(z) > MAP_SIZE/2 - 50 then
+				continue
+			end
+
+			-- Create hexagon using 6 lines
+			for i = 0, 5 do
+				local angle1 = (i * 60) * math.pi / 180
+				local angle2 = ((i + 1) * 60) * math.pi / 180
+
+				local x1 = x + hexRadius * math.cos(angle1)
+				local z1 = z + hexRadius * math.sin(angle1)
+				local x2 = x + hexRadius * math.cos(angle2)
+				local z2 = z + hexRadius * math.sin(angle2)
+
+				local line = Instance.new("Part")
+				line.Name = "HexLine"
+				line.Size = Vector3.new(
+					math.sqrt((x2-x1)^2 + (z2-z1)^2) + 2,  -- Length with small overlap
+					0.1,
+					3  -- Line thickness
+				)
+				line.CFrame = CFrame.lookAt(
+					Vector3.new((x1+x2)/2, MAP_HEIGHT + 0.1, (z1+z2)/2),
+					Vector3.new(x2, MAP_HEIGHT + 0.1, z2)
+				) * CFrame.Angles(0, math.pi/2, 0)
+				line.Anchored = true
+				line.CanCollide = false
+				line.Transparency = 0.88  -- Just a tiny bit more visible
+				line.Color = Color3.fromRGB(60, 60, 70)
+				line.Material = Enum.Material.SmoothPlastic
+				line.Parent = decorGroup
+			end
+		end
+	end
+
+	-- Add some circular spots like slither.io
+	for i = 1, 40 do
+		local spot = Instance.new("Part")
+		spot.Name = "GroundSpot"
+		spot.Shape = Enum.PartType.Cylinder
+		spot.Size = Vector3.new(0.2, math.random(30, 60), math.random(30, 60))
+		spot.Position = Vector3.new(
+			math.random(-MAP_SIZE/2+50, MAP_SIZE/2-50),
+			MAP_HEIGHT+0.1,
+			math.random(-MAP_SIZE/2+50, MAP_SIZE/2-50)
+		)
+		spot.Orientation = Vector3.new(0, 0, 90)
+		spot.Anchored = true
+		spot.CanCollide = false
+		spot.Locked = true
+		spot.Transparency = 0.92
+		spot.Color = Color3.fromRGB(55, 55, 65)
+		spot.Material = Enum.Material.SmoothPlastic
+		spot.Parent = decorGroup
+	end
+end
+
+-- Helper: Create grid lines (only in High graphics)
+local function createGrid()
+	local gridGroup = Instance.new("Folder")
+	gridGroup.Name = GRID_GROUP_NAME
+	gridGroup.Parent = Workspace
+
+	for i = -MAP_SIZE/2, MAP_SIZE/2, 50 do
+		-- Vertical grid lines
+		local vLine = Instance.new("Part")
+		vLine.Name = "GroundCircle"
+		vLine.Size = Vector3.new(0.3, 0.05, MAP_SIZE)
+		vLine.Position = Vector3.new(i, MAP_HEIGHT + 0.025, 0)
+		vLine.Anchored = true
+		vLine.CanCollide = false
+		vLine.Locked = true
+		vLine.Transparency = 0.97
+		vLine.Color = Color3.fromRGB(30, 30, 40)
+		vLine.Material = Enum.Material.SmoothPlastic
+		vLine.Parent = gridGroup
+
+		-- Horizontal grid lines
+		local hLine = Instance.new("Part")
+		hLine.Name = "GroundCircle"
+		hLine.Size = Vector3.new(MAP_SIZE, 0.05, 0.3)
+		hLine.Position = Vector3.new(0, MAP_HEIGHT + 0.025, i)
+		hLine.Anchored = true
+		hLine.CanCollide = false
+		hLine.Locked = true
+		hLine.Transparency = 0.97
+		hLine.Color = Color3.fromRGB(30, 30, 40)
+		hLine.Material = Enum.Material.SmoothPlastic
+		hLine.Parent = gridGroup
+	end
+end
+
+-- Helper: Remove the default Baseplate if present
+local function removeBaseplate()
+	local baseplate = Workspace:FindFirstChild("Baseplate")
+	if baseplate then
+		baseplate:Destroy()
+	end
+end
+
+-- Helper: Determine if majority of players are on High graphics
+local function shouldShowDecor()
+	local highCount = 0
+	local total = 0
+	for _, player in pairs(Players:GetPlayers()) do
+		total = total + 1
+		local mode = player:GetAttribute("GraphicsMode")
+		if mode == nil or mode == "High" then
+			highCount = highCount + 1
+		end
+	end
+	if total == 0 then return true end
+	return highCount >= (total / 2)
+end
+
+-- Main: Build the map (ground, walls, and decor based on graphics)
+local function buildMap()
+	removeMapParts()
+	removeDecor()
+	createGround()
+	createWalls()
+	removeBaseplate()
+	setupSlitherEnvironment() -- Call the new lighting setup function
+	if shouldShowDecor() then
+		createDecor()
+		createGrid()
+	end
+end
+
+-- Helper: Update only the decor (for graphics mode changes)
+local function updateDecor()
+	removeDecor()
+	if shouldShowDecor() then
+		createDecor()
+		createGrid()
+	end
+end
+
+-- Listen for player graphics mode changes and player join/leave
+for _, player in pairs(Players:GetPlayers()) do
+	player:GetAttributeChangedSignal("GraphicsMode"):Connect(function()
+		updateDecor()
+	end)
+end
+Players.PlayerAdded:Connect(function(player)
+	player:GetAttributeChangedSignal("GraphicsMode"):Connect(function()
+		updateDecor()
+	end)
+	updateDecor()
+end)
+Players.PlayerRemoving:Connect(function()
+	updateDecor()
+end)
+
+-- Listen for remote event to rebuild the map (e.g. after a round or admin command)
+local rebuildEvent = ReplicatedStorage:FindFirstChild("RequestMapRebuild")
+if rebuildEvent then
+	rebuildEvent.OnServerEvent:Connect(function()
+		buildMap()
+	end)
+end
+
+-- === BOUNDARY CHECK SYSTEM ===
+local RunService = game:GetService("RunService")
+
+-- Function to check and reset players who fall off map
+local function checkPlayerBoundaries()
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local root = player.Character.HumanoidRootPart
+			local pos = root.Position
+
+			-- Check if player is outside map boundaries or fell below
+			local halfMap = MAP_SIZE / 2 + 50
+			if math.abs(pos.X) > halfMap or math.abs(pos.Z) > halfMap or pos.Y < -10 then
+				-- Teleport back to spawn
+				root.CFrame = CFrame.new(0, 10, 0)
+				root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+
+				-- Fire respawn if needed
+				if player.Character:FindFirstChild("Humanoid") then
+					player.Character.Humanoid.Health = 0
+				end
+			end
+		end
+	end
+end
+
+-- Run boundary check periodically using task.spawn
+task.spawn(function()
+	while true do
+		task.wait(0.5) -- Check every half second
+		checkPlayerBoundaries()
+	end
+end)
+
+-- Initial build
+buildMap()
+
+-- Add chat command to rebuild map for testing
+Players.PlayerAdded:Connect(function(player)
+	player.Chatted:Connect(function(message)
+		if message:lower() == "/rebuildmap" then
+			buildMap()
+			print("Map rebuilt with updated walls!")
+		end
+	end)
+end)
