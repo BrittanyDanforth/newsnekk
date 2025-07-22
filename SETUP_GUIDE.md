@@ -30,11 +30,6 @@ This optimized snake system can handle 5000+ length snakes smoothly with 8+ play
    - This is a regular Script (not ModuleScript)
    - This connects the optimized system to your game
 
-3. **MenuSpawnFix** (Script in ServerScriptService)
-   - Copy the entire `MenuSpawnFix` code
-   - This is a regular Script
-   - This makes the Play button work with SlitherIOMenu
-
 ### Step 3: Disable Old CharacterSetup (Temporarily)
 
 1. Find your existing `CharacterSetup` script in ServerScriptService

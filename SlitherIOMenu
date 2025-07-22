@@ -21,7 +21,16 @@ local function setGraphicsMode(mode)
 end
 -- Enhanced respawn system with UI persistence
 local function requestRespawn()
-	local respawnEvent = ReplicatedStorage:WaitForChild("RespawnSnake")
+	-- Ensure RemoteEvent exists
+	local respawnEvent = ReplicatedStorage:FindFirstChild("RespawnSnake")
+	if not respawnEvent then
+		-- Create it if it doesn't exist (for studio testing)
+		respawnEvent = Instance.new("RemoteEvent")
+		respawnEvent.Name = "RespawnSnake"
+		respawnEvent.Parent = ReplicatedStorage
+		print("Created RespawnSnake RemoteEvent")
+	end
+	
 	respawnEvent:FireServer()
 end
 -- Function to create the menu UI

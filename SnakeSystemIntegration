@@ -204,6 +204,26 @@ for _, player in pairs(Players:GetPlayers()) do
 	Players.PlayerAdded:Fire(player)
 end
 
--- Spawn handling moved to MenuSpawnFix script
+-- Handle spawn requests from menu
+local respawnEvent = ReplicatedStorage:FindFirstChild("RespawnSnake")
+if respawnEvent then
+	respawnEvent.OnServerEvent:Connect(function(player)
+		if player.Character then
+			player.Character:Destroy()
+		end
+		wait(0.1)
+		player:LoadCharacter()
+		print("🐍 Respawned player:", player.Name)
+	end)
+end
+
+-- Auto-spawn players who don't have characters
+Players.PlayerAdded:Connect(function(player)
+	wait(2) -- Wait for systems to load
+	if not player.Character then
+		player:LoadCharacter()
+		print("🐍 Auto-spawned player:", player.Name)
+	end
+end)
 
 print("✅ Snake System Integration loaded!")
