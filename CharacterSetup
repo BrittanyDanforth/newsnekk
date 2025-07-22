@@ -87,7 +87,7 @@ local Config = {
 	SegmentSize = Vector3new(3.5, 3.5, 4),  -- Thinner but still good
 	SegmentSpacing = 3.2,  -- Tighter for more segments visible
 	InitialLength = 55,  -- Starting length
-	MaxSegments = 3000,  -- MANY MORE segments for HUGE length
+	MaxSegments = 10000,  -- MASSIVE increase for truly impressive snakes
 	HeadColor = Color3.fromRGB(76, 217, 100), -- Classic green
 	BodyColors = {
 		Color3.fromRGB(60, 180, 80),
@@ -186,6 +186,33 @@ if not SegmentContainer then
 	SegmentContainer.Name = "SegmentContainer"
 	SegmentContainer.Parent = workspace
 end
+
+-- Pre-populate segment pool for better performance with huge snakes
+task.spawn(function()
+	print("Pre-populating player segment pool...")
+	for i = 1, 300 do  -- Pre-create 300 segments
+		local segment = Instance.new("Part")
+		segment.Name = "PooledSegment"
+		segment.Shape = Enum.PartType.Ball
+		segment.TopSurface = Enum.SurfaceType.Smooth
+		segment.BottomSurface = Enum.SurfaceType.Smooth
+		segment.CanCollide = false
+		segment.CanQuery = false
+		segment.CanTouch = false
+		segment.Anchored = true
+		segment.Material = Enum.Material.Neon
+		segment.Size = Config.SegmentSize
+		segment.Transparency = 1
+		segment.Parent = SegmentContainer
+		PoolSize = PoolSize + 1
+		SegmentPool[PoolSize] = segment
+		
+		if i % 30 == 0 then
+			task.wait()  -- Yield every 30 segments
+		end
+	end
+	print("Player segment pool ready with", PoolSize, "segments")
+end)
 
 local function resetSegment(segment)
 	segment.Anchored = true
@@ -316,9 +343,23 @@ local function createSegment(index, position, color, config, parentModel, curren
 	segment:SetAttribute("IsSnakeSegment", true)
 	segment:SetAttribute("SegmentIndex", index)
 
-	-- Add glow to head segments and every 10th segment for performance
+	-- Add glow to head segments only - optimize for massive snakes
 	-- DISABLE GLOW IN LOW GRAPHICS MODE
-	if graphicsMode ~= "Low" and (index <= 30 or index % 10 == 0) then
+	local shouldAddLight = false
+	if graphicsMode ~= "Low" then
+		if currentLength and currentLength > HUGE_SNAKE_THRESHOLD then
+			-- For huge snakes, only first 5 segments and every 100th
+			shouldAddLight = index <= 5 or (index % 100 == 0)
+		elseif currentLength and currentLength > LARGE_SNAKE_THRESHOLD then
+			-- For large snakes, only first 10 segments and every 50th
+			shouldAddLight = index <= 10 or (index % 50 == 0)
+		else
+			-- Normal snakes get more lights
+			shouldAddLight = index <= 30 or (index % 10 == 0)
+		end
+	end
+	
+	if shouldAddLight then
 		local light = segment:FindFirstChild("Glow")
 		if not light then
 			light = Instance.new("PointLight")
@@ -326,8 +367,9 @@ local function createSegment(index, position, color, config, parentModel, curren
 			light.Parent = segment
 		end
 		light.Color = color
-		light.Brightness = config.GlowIntensity
-		light.Range = config.GlowRange
+		light.Brightness = config.GlowIntensity * (index > 30 and 0.5 or 1)  -- Dim tail lights
+		light.Range = config.GlowRange * (index > 30 and 0.7 or 1)  -- Smaller tail lights
+		light.Shadows = false  -- Never use shadows for performance
 		light.Enabled = true
 	end
 
@@ -846,6 +888,8 @@ local function createUltraSmoothSnake(character)
 	local updateCounter = 0
 	local networkUpdateInterval = 2
 	local lastNetworkUpdate = 0
+	local lastNetworkSync = 0
+	local segmentBatchIndex = 1
 
 	local function growSnake(amount)
 		amount = amount or 5
@@ -866,13 +910,21 @@ local function createUltraSmoothSnake(character)
 				local segment = createSegment(currentLength, newPos, color, activeConfig, snakeModel, currentLength)
 				segments[currentLength] = segment
 
-				-- Dynamic sizing: new segments match uniform growth
+				-- Dynamic sizing: progressive growth for massive snakes
 				local growthFactor = 1
 				if currentLength > 200 then
-					-- Same uniform growth as all other segments
-					growthFactor = 1 + ((currentLength - 200) / 2800) * 1.0  -- Match moderate growth
+					-- Progressive growth curve for huge snakes
+					if currentLength <= 1000 then
+						growthFactor = 1 + ((currentLength - 200) / 800) * 0.5  -- 50% growth by 1000
+					elseif currentLength <= 3000 then
+						growthFactor = 1.5 + ((currentLength - 1000) / 2000) * 0.5  -- +50% by 3000
+					elseif currentLength <= 6000 then
+						growthFactor = 2.0 + ((currentLength - 3000) / 3000) * 0.5  -- +50% by 6000
+					else
+						growthFactor = 2.5 + ((currentLength - 6000) / 4000) * 0.5  -- +50% by 10000
+					end
 				end
-				local targetSize = activeConfig.SegmentSize * mathMin(growthFactor, 2.0)  -- Match new max
+				local targetSize = activeConfig.SegmentSize * mathMin(growthFactor, 3.0)  -- Max 3x size
 
 				segment.Transparency = 1
 				segment.Size = Vector3new(0.05, 0.05, 0.05)
@@ -1151,30 +1203,105 @@ local function createUltraSmoothSnake(character)
 		end
 
 		local currentTime = tick()
+		
+		-- Network throttling for huge snakes to reduce ping
+		if currentLength > HUGE_SNAKE_THRESHOLD then
+			-- Only send position updates every 0.2 seconds for massive snakes
+			if currentTime - lastNetworkSync < 0.2 then
+				-- Skip some network updates but continue local movement
+				updateCounter = updateCounter + 1
+			else
+				lastNetworkSync = currentTime
+			end
+		elseif currentLength > LARGE_SNAKE_THRESHOLD then
+			-- Update every 0.1 seconds for large snakes
+			if currentTime - lastNetworkSync < 0.1 then
+				updateCounter = updateCounter + 1
+			else
+				lastNetworkSync = currentTime
+			end
+		end
 
 		-- POSITION HISTORY BASED MOVEMENT WITH ANTI-GAP FOR BOOSTING
 		framesSinceSpawn = framesSinceSpawn + 1
-
+		
+		-- Get nearest player position for LOD optimization
+		local nearestPlayerDist = math.huge
+		local myPos = rootPart.Position
+		for _, otherPlayer in pairs(Players:GetPlayers()) do
+			if otherPlayer ~= player and otherPlayer.Character then
+				local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if otherRoot then
+					local dist = (otherRoot.Position - myPos).Magnitude
+					nearestPlayerDist = math.min(nearestPlayerDist, dist)
+				end
+			end
+		end
+		
+		-- Batch processing for huge snakes
+		local segmentsToUpdate = {}
+		local batchIndex = (updateCounter % 3) + 1  -- Process 1/3 of segments each frame
+		
 		for i = 1, currentLength do
 			local segment = segments[i]
 			if segment and segment.Parent then
-				-- AGGRESSIVE LOD: Prioritize performance
+				-- AGGRESSIVE LOD for massive snakes
 				local updateFrequency = 1
-
-				if i > 100 then
-					updateFrequency = 2
-				elseif i > 300 then
-					updateFrequency = 4
-				elseif i > 600 then
-					updateFrequency = 8
-				elseif i > 1000 then
-					updateFrequency = 12
-				elseif i > 1400 then
-					updateFrequency = 16
-				elseif i > 2000 then
-					updateFrequency = 20  -- Very far tail for 3000 segments
-				elseif i > 2500 then
-					updateFrequency = 30  -- Extreme tail barely updates
+				
+				-- More aggressive LOD for huge snakes
+				if currentLength > HUGE_SNAKE_THRESHOLD then
+					if i > 100 then
+						updateFrequency = 3
+					elseif i > 300 then
+						updateFrequency = 6
+					elseif i > 600 then
+						updateFrequency = 12
+					elseif i > 1000 then
+						updateFrequency = 20
+					elseif i > 2000 then
+						updateFrequency = 30
+					elseif i > 4000 then
+						updateFrequency = 40
+					elseif i > 6000 then
+						updateFrequency = 50
+					elseif i > 8000 then
+						updateFrequency = 60
+					end
+				elseif currentLength > LARGE_SNAKE_THRESHOLD then
+					if i > 100 then
+						updateFrequency = 2
+					elseif i > 300 then
+						updateFrequency = 4
+					elseif i > 600 then
+						updateFrequency = 8
+					elseif i > 1000 then
+						updateFrequency = 12
+					elseif i > 1400 then
+						updateFrequency = 16
+					elseif i > 2000 then
+						updateFrequency = 20
+					elseif i > 2500 then
+						updateFrequency = 30
+					end
+				end
+				
+				-- Distance-based culling for other players' view
+				if nearestPlayerDist > LOD_DISTANCES.FAR and i > 50 then
+					-- Hide far segments from other players
+					if segment.Transparency < 1 then
+						segment.Transparency = 1
+					end
+					continue
+				elseif nearestPlayerDist > LOD_DISTANCES.MEDIUM and i > 200 then
+					-- Reduce detail for medium distance
+					if segment.Transparency ~= 0.5 then
+						segment.Transparency = 0.5
+					end
+				else
+					-- Full visibility
+					if segment.Transparency > 0 then
+						segment.Transparency = 0
+					end
 				end
 
 				if updateCounter % updateFrequency == 0 then
@@ -1197,6 +1324,10 @@ local function createUltraSmoothSnake(character)
 						local spacingMultiplier = 0.15  -- Base spacing
 						if currentLength > 1500 then
 							spacingMultiplier = 0.2  -- More spacing to show pattern
+						elseif currentLength > 3000 then
+							spacingMultiplier = 0.25  -- Even more spacing for huge snakes
+						elseif currentLength > 6000 then
+							spacingMultiplier = 0.3  -- Maximum spacing for massive snakes
 						end
 						local segmentPos = targetData.position - targetData.lookVector * (activeConfig.SegmentSpacing * spacingMultiplier)
 						local currentSegmentPos = segment.Position
