@@ -1,0 +1,349 @@
+--[[
+PERFORMANCE MANAGER FOR MASSIVE SNAKE OPTIMIZATION
+Dynamically adjusts quality settings based on FPS and game state
+]]--
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PerformanceManager = {}
+
+-- Configuration
+local TARGET_FPS = 50  -- Target FPS to maintain
+local MIN_FPS = 30     -- Minimum acceptable FPS
+local CRITICAL_FPS = 20 -- Critical FPS threshold
+
+-- Quality levels
+local QUALITY_LEVELS = {
+    ULTRA = 4,
+    HIGH = 3,
+    MEDIUM = 2,
+    LOW = 1,
+    POTATO = 0
+}
+
+-- Current quality settings per player
+local playerQuality = {}
+local globalQuality = QUALITY_LEVELS.HIGH
+
+-- FPS tracking
+local fpsHistory = {}
+local fpsHistorySize = 30
+local lastFrameTime = tick()
+
+-- Performance metrics
+local metrics = {
+    totalSegments = 0,
+    activeSnakes = 0,
+    largestSnake = 0,
+    averageFPS = 60
+}
+
+-- Quality presets
+local QUALITY_PRESETS = {
+    [QUALITY_LEVELS.ULTRA] = {
+        maxVisibleSegments = 5000,
+        segmentUpdateRate = 1,
+        glowEnabled = true,
+        outlineEnabled = true,
+        materialQuality = "High",
+        shadowsEnabled = true,
+        particlesEnabled = true
+    },
+    [QUALITY_LEVELS.HIGH] = {
+        maxVisibleSegments = 3000,
+        segmentUpdateRate = 2,
+        glowEnabled = true,
+        outlineEnabled = false,
+        materialQuality = "High",
+        shadowsEnabled = false,
+        particlesEnabled = true
+    },
+    [QUALITY_LEVELS.MEDIUM] = {
+        maxVisibleSegments = 2000,
+        segmentUpdateRate = 3,
+        glowEnabled = true,
+        outlineEnabled = false,
+        materialQuality = "Medium",
+        shadowsEnabled = false,
+        particlesEnabled = false
+    },
+    [QUALITY_LEVELS.LOW] = {
+        maxVisibleSegments = 1000,
+        segmentUpdateRate = 5,
+        glowEnabled = false,
+        outlineEnabled = false,
+        materialQuality = "Low",
+        shadowsEnabled = false,
+        particlesEnabled = false
+    },
+    [QUALITY_LEVELS.POTATO] = {
+        maxVisibleSegments = 500,
+        segmentUpdateRate = 10,
+        glowEnabled = false,
+        outlineEnabled = false,
+        materialQuality = "Potato",
+        shadowsEnabled = false,
+        particlesEnabled = false
+    }
+}
+
+-- Track FPS
+local function updateFPS()
+    local currentTime = tick()
+    local deltaTime = currentTime - lastFrameTime
+    lastFrameTime = currentTime
+    
+    local fps = 1 / deltaTime
+    table.insert(fpsHistory, fps)
+    
+    if #fpsHistory > fpsHistorySize then
+        table.remove(fpsHistory, 1)
+    end
+    
+    -- Calculate average FPS
+    local sum = 0
+    for _, f in ipairs(fpsHistory) do
+        sum = sum + f
+    end
+    metrics.averageFPS = sum / #fpsHistory
+end
+
+-- Update game metrics
+local function updateMetrics()
+    metrics.totalSegments = 0
+    metrics.activeSnakes = 0
+    metrics.largestSnake = 0
+    
+    -- Count player snakes
+    for _, player in pairs(Players:GetPlayers()) do
+        local snake = _G.PlayerSnakes and _G.PlayerSnakes[player]
+        if snake and snake.isActive and snake.isActive() then
+            metrics.activeSnakes = metrics.activeSnakes + 1
+            local length = snake.length()
+            metrics.totalSegments = metrics.totalSegments + length
+            metrics.largestSnake = math.max(metrics.largestSnake, length)
+        end
+    end
+    
+    -- Count AI snakes if module exists
+    local AISnakeModule = ReplicatedStorage:FindFirstChild("AISnake")
+    if AISnakeModule then
+        local success, aiSnakes = pcall(function()
+            local module = require(AISnakeModule)
+            return module._activeSnakes or {}
+        end)
+        
+        if success then
+            for _, aiSnake in pairs(aiSnakes) do
+                if aiSnake and aiSnake.CurrentLength then
+                    metrics.activeSnakes = metrics.activeSnakes + 1
+                    metrics.totalSegments = metrics.totalSegments + aiSnake.CurrentLength
+                    metrics.largestSnake = math.max(metrics.largestSnake, aiSnake.CurrentLength)
+                end
+            end
+        end
+    end
+end
+
+-- Determine quality level based on metrics
+local function determineQualityLevel()
+    local fps = metrics.averageFPS
+    local segments = metrics.totalSegments
+    local largestSnake = metrics.largestSnake
+    
+    -- Critical performance mode
+    if fps < CRITICAL_FPS then
+        return QUALITY_LEVELS.POTATO
+    end
+    
+    -- Low FPS mode
+    if fps < MIN_FPS then
+        return QUALITY_LEVELS.LOW
+    end
+    
+    -- Check segment count thresholds
+    if segments > 15000 or largestSnake > 3000 then
+        return QUALITY_LEVELS.LOW
+    elseif segments > 10000 or largestSnake > 2000 then
+        return QUALITY_LEVELS.MEDIUM
+    elseif segments > 5000 or largestSnake > 1000 then
+        return QUALITY_LEVELS.HIGH
+    end
+    
+    -- Good performance, can use higher quality
+    if fps > TARGET_FPS then
+        return QUALITY_LEVELS.HIGH
+    end
+    
+    return QUALITY_LEVELS.MEDIUM
+end
+
+-- Apply quality settings globally
+local function applyGlobalQuality(level)
+    if globalQuality == level then return end
+    
+    globalQuality = level
+    local preset = QUALITY_PRESETS[level]
+    
+    print("🎮 Performance Manager: Switching to quality level", level)
+    
+    -- Update all players
+    for _, player in pairs(Players:GetPlayers()) do
+        -- Set graphics mode attribute
+        if preset.materialQuality == "Potato" or preset.materialQuality == "Low" then
+            player:SetAttribute("GraphicsMode", "Low")
+        else
+            player:SetAttribute("GraphicsMode", "High")
+        end
+        
+        -- Store quality level
+        playerQuality[player] = level
+    end
+    
+    -- Apply global settings
+    game.Lighting.GlobalShadows = preset.shadowsEnabled
+    
+    -- Notify CharacterSetup of quality change
+    local event = ReplicatedStorage:FindFirstChild("QualityChanged")
+    if not event then
+        event = Instance.new("BindableEvent")
+        event.Name = "QualityChanged"
+        event.Parent = ReplicatedStorage
+    end
+    event:Fire(preset)
+end
+
+-- Per-player quality adjustment
+function PerformanceManager.AdjustPlayerQuality(player, snake)
+    if not snake or not snake.isActive() then return end
+    
+    local length = snake.length()
+    local quality = playerQuality[player] or globalQuality
+    local preset = QUALITY_PRESETS[quality]
+    
+    -- Hide distant segments beyond quality limit
+    if snake.segments then
+        for i, segment in pairs(snake.segments) do
+            if segment and segment.Parent then
+                if i > preset.maxVisibleSegments then
+                    segment.Transparency = 1
+                    -- Disable expensive properties
+                    local light = segment:FindFirstChild("Glow")
+                    if light then
+                        light.Enabled = false
+                    end
+                else
+                    segment.Transparency = 0
+                end
+            end
+        end
+    end
+end
+
+-- Initialize performance monitoring
+local frameCount = 0
+RunService.Heartbeat:Connect(function()
+    frameCount = frameCount + 1
+    
+    -- Update FPS every frame
+    updateFPS()
+    
+    -- Update metrics every 30 frames (1 second at 30 FPS)
+    if frameCount % 30 == 0 then
+        updateMetrics()
+        
+        -- Adjust quality every 2 seconds
+        if frameCount % 60 == 0 then
+            local newQuality = determineQualityLevel()
+            applyGlobalQuality(newQuality)
+        end
+    end
+    
+    -- Per-player adjustments every 10 frames
+    if frameCount % 10 == 0 then
+        for _, player in pairs(Players:GetPlayers()) do
+            local snake = _G.PlayerSnakes and _G.PlayerSnakes[player]
+            if snake then
+                PerformanceManager.AdjustPlayerQuality(player, snake)
+            end
+        end
+    end
+end)
+
+-- Handle new players
+Players.PlayerAdded:Connect(function(player)
+    playerQuality[player] = globalQuality
+    
+    -- Set initial graphics mode
+    local preset = QUALITY_PRESETS[globalQuality]
+    if preset.materialQuality == "Potato" or preset.materialQuality == "Low" then
+        player:SetAttribute("GraphicsMode", "Low")
+    else
+        player:SetAttribute("GraphicsMode", "High")
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    playerQuality[player] = nil
+end)
+
+-- Public API
+PerformanceManager.GetMetrics = function()
+    return metrics
+end
+
+PerformanceManager.GetQuality = function()
+    return globalQuality
+end
+
+PerformanceManager.ForceQuality = function(level)
+    if QUALITY_LEVELS[level] then
+        applyGlobalQuality(QUALITY_LEVELS[level])
+    end
+end
+
+-- Console commands for debugging
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "Performance Manager",
+    Text = "Type /perf in chat for performance stats",
+    Duration = 5
+})
+
+local function handleChatCommand(player, message)
+    if message:lower() == "/perf" then
+        local quality = "Unknown"
+        for name, level in pairs(QUALITY_LEVELS) do
+            if level == globalQuality then
+                quality = name
+                break
+            end
+        end
+        
+        local stats = string.format(
+            "FPS: %.1f | Quality: %s\nSnakes: %d | Segments: %d\nLargest: %d",
+            metrics.averageFPS,
+            quality,
+            metrics.activeSnakes,
+            metrics.totalSegments,
+            metrics.largestSnake
+        )
+        
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Performance Stats",
+            Text = stats,
+            Duration = 10
+        })
+    end
+end
+
+-- Connect chat commands
+Players.PlayerAdded:Connect(function(player)
+    player.Chatted:Connect(function(message)
+        handleChatCommand(player, message)
+    end)
+end)
+
+return PerformanceManager
