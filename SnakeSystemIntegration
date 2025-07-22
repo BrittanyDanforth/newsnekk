@@ -42,7 +42,7 @@ respawnSnake.Name = "RespawnSnake"
 
 -- Default configuration
 local DEFAULT_CONFIG = {
-	InitialLength = 55,
+	InitialLength = 25000,  -- TESTING MASSIVE SPAWN SIZE!
 	MaxSegments = 50000,  -- MASSIVE SNAKES! Was 10000
 	SegmentSpacing = 3.2,  -- Original spacing
 	SegmentSize = Vector3.new(4, 4, 4),  -- Original size
@@ -105,6 +105,8 @@ local function onCharacterAdded(character)
 	
 	-- Get configuration
 	local config = getSkinConfig(player)
+	
+	print("Creating snake with config - InitialLength:", config.InitialLength, "MaxSegments:", config.MaxSegments)
 	
 	-- Create optimized snake
 	local snake = OptimizedSnakeSystem.createSnake(character, config)
