@@ -44,12 +44,14 @@ respawnSnake.Name = "RespawnSnake"
 local DEFAULT_CONFIG = {
 	InitialLength = 55,
 	MaxSegments = 10000,
-	SegmentSpacing = 0.4,  -- Much smaller spacing for smooth body
-	SegmentSize = Vector3.new(3.8, 3.8, 3.8),  -- Slightly larger segments to overlap
+	SegmentSpacing = 3.2,  -- Original spacing
+	SegmentSize = Vector3.new(4, 4, 4),  -- Original size
 	HeadSize = Vector3.new(4.5, 4.5, 4.5),
 	HeadColor = Color3.fromRGB(76, 217, 100),
 	BodyColors = {
-		Color3.fromRGB(50, 170, 70),
+		Color3.fromRGB(60, 180, 80),
+		Color3.fromRGB(80, 200, 100),
+		Color3.fromRGB(100, 220, 120),
 		Color3.fromRGB(80, 200, 100),
 		Color3.fromRGB(60, 180, 80),
 	},

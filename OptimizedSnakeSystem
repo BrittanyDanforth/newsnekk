@@ -1,31 +1,23 @@
---[[
-ULTRA-OPTIMIZED SLITHER.IO SNAKE SYSTEM V6.0
-- Handles 5000+ length smoothly
-- Supports 8+ players in multiplayer
-- Segment streaming (only renders visible segments)
-- Network optimized with compression
-- Smooth interpolation without gaps
-- Dynamic LOD system
---]]
+-- Optimized Snake System V7.0 - COMPLETE REVAMP
+-- Based on original CharacterSetup with proper segment following
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local CollectionService = game:GetService("CollectionService")
 
 -- Constants
-local SEGMENT_POOL_SIZE = 5000 -- Pre-allocate segments
-local MAX_VISIBLE_SEGMENTS = 300 -- Only render nearby segments
-local NETWORK_UPDATE_RATE = 10 -- Network updates per second
-local INTERPOLATION_BUFFER_SIZE = 3 -- Smooth network interpolation
+local SEGMENT_POOL_SIZE = 5000
+local NETWORK_UPDATE_RATE = 30
+local MAX_VISIBLE_SEGMENTS = 300
 
--- Fast aliases
-local Vector3new = Vector3.new
+-- Fast references
 local CFramenew = CFrame.new
+local Vector3new = Vector3.new
 local mathMin = math.min
 local mathMax = math.max
 local mathFloor = math.floor
-local mathAbs = math.abs
 local tableInsert = table.insert
 local tableRemove = table.remove
 
@@ -38,7 +30,7 @@ local function initializeSegmentPool()
 	for i = 1, SEGMENT_POOL_SIZE do
 		local segment = Instance.new("Part")
 		segment.Name = "PooledSegment"
-		segment.Size = Vector3.new(3.5, 3.5, 3.5)  -- Default size
+		segment.Size = Vector3.new(4, 4, 4)  -- Default size
 		segment.Shape = Enum.PartType.Ball
 		segment.Material = Enum.Material.Neon
 		segment.TopSurface = Enum.SurfaceType.Smooth
@@ -52,8 +44,8 @@ local function initializeSegmentPool()
 		-- Add glow effect
 		local glow = Instance.new("PointLight")
 		glow.Name = "glow"
-		glow.Brightness = 0.7  -- Subtle glow as requested
-		glow.Range = 4
+		glow.Brightness = 0.8  -- Subtle glow
+		glow.Range = 5
 		glow.Parent = segment
 		
 		SegmentPool[i] = segment
@@ -74,115 +66,30 @@ end
 local function returnSegmentToPool(segment)
 	if segment then
 		segment.Parent = nil
-		segment.CFrame = CFramenew(0, -1000, 0) -- Move far away
+		segment.CFrame = CFramenew(0, -1000, 0)
 	end
-end
-
--- Optimized Snake Path using Catmull-Rom splines
-local SnakePath = {}
-SnakePath.__index = SnakePath
-
-function SnakePath.new(maxPoints)
-	local self = setmetatable({}, SnakePath)
-	self.points = {}
-	self.maxPoints = maxPoints or 10000
-	self.totalLength = 0
-	self.segmentLengths = {}
-	return self
-end
-
-function SnakePath:addPoint(position, lookVector)
-	table.insert(self.points, 1, {pos = position, look = lookVector})
-	
-	-- Limit path points to prevent memory issues
-	-- Keep enough for the longest possible snake
-	local maxPoints = 500  -- Enough for smooth movement
-	if #self.points > maxPoints then
-		table.remove(self.points, #self.points)
-	end
-	
-	-- Calculate segment length
-	if #self.points > 1 then
-		local dist = (self.points[1].pos - self.points[2].pos).Magnitude
-		tableInsert(self.segmentLengths, 1, dist)
-		self.totalLength = self.totalLength + dist
-	end
-	
-	-- Remove old points
-	while #self.points > self.maxPoints do
-		local removed = tableRemove(self.points)
-		if #self.segmentLengths > 0 then
-			local removedLength = tableRemove(self.segmentLengths)
-			self.totalLength = self.totalLength - removedLength
-		end
-	end
-end
-
-function SnakePath:getPositionAtDistance(distance)
-	if #self.points < 2 then
-		return self.points[1] or {pos = Vector3new(0,0,0), look = Vector3new(0,0,1)}
-	end
-	
-	local currentDist = 0
-	for i = 1, #self.segmentLengths do
-		local segLength = self.segmentLengths[i]
-		if currentDist + segLength >= distance then
-			-- Found the segment
-			local t = (distance - currentDist) / segLength
-			local p1 = self.points[i+1]
-			local p2 = self.points[i]
-			
-			-- Catmull-Rom interpolation for smooth curves
-			local p0 = self.points[i+2] or p1
-			local p3 = self.points[mathMax(i-1, 1)]
-			
-			local t2 = t * t
-			local t3 = t2 * t
-			
-			-- Catmull-Rom formula
-			local pos = 0.5 * (
-				(2 * p1.pos) +
-				(-p0.pos + p2.pos) * t +
-				(2 * p0.pos - 5 * p1.pos + 4 * p2.pos - p3.pos) * t2 +
-				(-p0.pos + 3 * p1.pos - 3 * p2.pos + p3.pos) * t3
-			)
-			
-			local look = p1.look:Lerp(p2.look, t)
-			
-			return {pos = pos, look = look}
-		end
-		currentDist = currentDist + segLength
-	end
-	
-	-- Return last point if distance exceeds path
-	return self.points[#self.points]
 end
 
 -- Create RemoteEvents for networking
 local remoteEvents = {}
-
 local function createNetworkEvents()
-	local remoteFolder = Instance.new("Folder")
-	remoteFolder.Name = "SnakeNetworking"
-	remoteFolder.Parent = ReplicatedStorage
+	local folder = ReplicatedStorage:FindFirstChild("SnakeNetworking")
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "SnakeNetworking"
+		folder.Parent = ReplicatedStorage
+	end
 	
-	-- Position updates (compressed)
-	local positionUpdate = Instance.new("RemoteEvent")
-	positionUpdate.Name = "PositionUpdate"
-	positionUpdate.Parent = remoteFolder
-	remoteEvents.positionUpdate = positionUpdate
-	
-	-- Length updates
-	local lengthUpdate = Instance.new("RemoteEvent")
-	lengthUpdate.Name = "LengthUpdate"
-	lengthUpdate.Parent = remoteFolder
-	remoteEvents.lengthUpdate = lengthUpdate
-	
-	-- Skin updates
-	local skinUpdate = Instance.new("RemoteEvent")
-	skinUpdate.Name = "SkinUpdate"
-	skinUpdate.Parent = remoteFolder
-	remoteEvents.skinUpdate = skinUpdate
+	local events = {"PositionUpdate", "LengthUpdate", "SkinUpdate"}
+	for _, eventName in ipairs(events) do
+		local event = folder:FindFirstChild(eventName)
+		if not event then
+			event = Instance.new("RemoteEvent")
+			event.Name = eventName
+			event.Parent = folder
+		end
+		remoteEvents[eventName:lower()] = event
+	end
 	
 	print("✅ Network events created")
 end
@@ -216,16 +123,31 @@ function Snake.new(character, config)
 		end
 	end
 	
-	-- Also make root part invisible
+	-- Root part settings
 	self.rootPart.Transparency = 1
-	self.rootPart.CanCollide = true -- Keep collision for movement
+	self.rootPart.CanCollide = true
 	
 	-- Snake data
-	self.length = config.InitialLength
-	self.path = SnakePath.new()
+	self.length = config.InitialLength or 55
 	self.segments = {}
 	self.visibleSegments = {}
-	self.lastNetworkUpdate = 0
+	
+	-- Position history buffer (like original)
+	local maxHistorySize = mathMin(mathFloor(config.MaxSegments * 0.6), 6000)
+	self.positionHistory = {}
+	self.historyHead = 1
+	self.historyCount = 0
+	
+	-- Initialize history
+	local initialPoint = {
+		position = self.rootPart.Position,
+		lookVector = self.rootPart.CFrame.LookVector
+	}
+	for i = 1, mathMin(100, maxHistorySize) do
+		self.positionHistory[i] = initialPoint
+		self.historyCount = i
+	end
+	self.maxHistorySize = maxHistorySize
 	
 	-- Create snake model
 	self.model = Instance.new("Model")
@@ -234,9 +156,37 @@ function Snake.new(character, config)
 	
 	-- Initialize
 	self:createHead()
+	self:createInitialSegments()
 	self:setupNetworking()
 	
 	return self
+end
+
+function Snake:addToHistory(data)
+	if self.historyCount < self.maxHistorySize then
+		self.historyCount = self.historyCount + 1
+		self.positionHistory[self.historyCount] = data
+		self.historyHead = self.historyCount
+	else
+		self.historyHead = (self.historyHead % self.maxHistorySize) + 1
+		self.positionHistory[self.historyHead] = data
+	end
+end
+
+function Snake:getFromHistory(stepsBack)
+	if stepsBack > self.historyCount then
+		return self.positionHistory[1]
+	end
+	
+	local index = self.historyHead - stepsBack
+	if index < 1 then
+		if self.historyCount >= self.maxHistorySize then
+			index = index + self.maxHistorySize
+		else
+			index = 1
+		end
+	end
+	return self.positionHistory[index] or self.positionHistory[1]
 end
 
 function Snake:createHead()
@@ -260,7 +210,7 @@ function Snake:createHead()
 	glow.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	glow.Parent = head
 	
-	-- Create eyes for visibility
+	-- Create eyes
 	local function createEye(xOffset)
 		local eye = Instance.new("Part")
 		eye.Name = "Eye"
@@ -295,10 +245,41 @@ function Snake:createHead()
 	self.head = head
 end
 
+function Snake:createInitialSegments()
+	local visibleLength = mathMin(self.length, MAX_VISIBLE_SEGMENTS)
+	local startPos = self.rootPart.Position
+	
+	-- Create initial segments
+	for i = 1, visibleLength do
+		local segment = getSegmentFromPool()
+		if segment then
+			segment.Name = "Segment" .. i
+			
+			-- Position behind head
+			local pos = startPos - self.rootPart.CFrame.LookVector * (i * (self.config.SegmentSpacing or 3.2))
+			
+			-- Apply color
+			local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
+			segment.Color = self.config.BodyColors[colorIndex]
+			segment.Size = self.config.SegmentSize or Vector3.new(4, 4, 4)
+			segment.CFrame = CFramenew(pos)
+			segment.Parent = self.model
+			
+			-- Update glow
+			local glow = segment:FindFirstChild("glow")
+			if glow then
+				glow.Color = segment.Color
+			end
+			
+			self.segments[i] = segment
+		end
+	end
+end
+
 function Snake:setupNetworking()
 	if not self.player then return end
 	
-	-- Setup update loop for all snakes
+	-- Setup update loop
 	self.updateConnection = RunService.Heartbeat:Connect(function(dt)
 		self:update(dt)
 	end)
@@ -307,59 +288,28 @@ function Snake:setupNetworking()
 	if self.player == Players.LocalPlayer then
 		self.networkConnection = RunService.Heartbeat:Connect(function()
 			local now = tick()
-			if now - self.lastNetworkUpdate > 1/NETWORK_UPDATE_RATE then
+			if now - (self.lastNetworkUpdate or 0) > 1/NETWORK_UPDATE_RATE then
 				self:sendNetworkUpdate()
 				self.lastNetworkUpdate = now
 			end
 		end)
-	else
-		-- Setup interpolation for remote players
-		self.interpolationBuffer = {}
-		self.lastServerUpdate = tick()
 	end
-end
-
-function Snake:sendNetworkUpdate()
-	if not remoteEvents.positionUpdate then return end
-	
-	-- Compress path data
-	local compressedPath = {}
-	local step = mathMax(1, mathFloor(#self.path.points / 50)) -- Send max 50 points
-	
-	for i = 1, #self.path.points, step do
-		local point = self.path.points[i]
-		tableInsert(compressedPath, {
-			p = {mathFloor(point.pos.X*10)/10, mathFloor(point.pos.Y*10)/10, mathFloor(point.pos.Z*10)/10},
-			l = {mathFloor(point.look.X*100)/100, mathFloor(point.look.Y*100)/100, mathFloor(point.look.Z*100)/100}
-		})
-	end
-	
-	remoteEvents.positionUpdate:FireServer({
-		path = compressedPath,
-		length = self.length,
-		speed = self.humanoid.WalkSpeed
-	})
 end
 
 function Snake:update(dt)
-	-- Update path
-	local pos = self.rootPart.Position
-	local look = self.rootPart.CFrame.LookVector
+	-- Update position history
+	local currentPos = self.rootPart.Position
+	local currentLook = self.rootPart.CFrame.LookVector
 	
-	-- Add points more frequently for smoother path
-	local lastPoint = self.path.points[1]
-	if not lastPoint or (pos - lastPoint.pos).Magnitude > 0.2 then  -- Reduced from 0.5
-		self.path:addPoint(pos, look)
-		
-		-- Debug: Print path info periodically
-		if math.random() < 0.1 then  -- 10% chance to print
-			print("Snake path points:", #self.path.points, "Length:", self.length)
-		end
-	end
+	-- Add to history
+	self:addToHistory({
+		position = currentPos,
+		lookVector = currentLook
+	})
 	
-	-- Update head and eyes
+	-- Update head position
 	if self.head then
-		local headCF = CFramenew(pos + look * 2, pos + look * 3)
+		local headCF = CFramenew(currentPos, currentPos + currentLook)
 		self.head.CFrame = headCF
 		
 		-- Update eyes
@@ -378,127 +328,16 @@ function Snake:update(dt)
 		end
 	end
 	
-	-- Stream segments (only render visible ones)
-	self:streamSegments()
-end
-
-function Snake:streamSegments()
-	-- Need at least a few points to create a path
-	if #self.path.points < 5 then
-		return
-	end
+	-- Update segments to follow history
+	local segmentSpacing = self.config.SegmentSpacing or 3.2
+	local historyStepsPerSegment = mathMax(1, mathFloor(segmentSpacing / 2))
 	
-	-- On server, show all segments (no camera-based streaming)
-	-- Client-side streaming will be handled by client scripts
-	if RunService:IsServer() then
-		-- Show all segments up to length
-		local segmentSpacing = self.config.SegmentSpacing or 0.4
-		local segmentSize = self.config.SegmentSize or Vector3.new(3.8, 3.8, 3.8)
+	for i, segment in pairs(self.segments) do
+		local historySteps = i * historyStepsPerSegment
+		local historyData = self:getFromHistory(historySteps)
 		
-		for i = 1, self.length do
-			-- Calculate distance based on actual segment size for tighter fit
-			local distance = i * segmentSpacing * segmentSize.X * 0.8  -- 0.8 for slight overlap
-			local pointData = self.path:getPositionAtDistance(distance)
-			
-			if pointData then
-				-- Need to show this segment
-				if not self.visibleSegments[i] then
-					local segment = getSegmentFromPool()
-					if segment then
-						-- Configure segment
-						local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
-						local bodyColor = self.config.BodyColors[colorIndex]
-						segment.Color = bodyColor
-						segment.Size = segmentSize
-						
-						-- Update glow color
-						local glow = segment:FindFirstChild("glow")
-						if glow then
-							glow.Color = bodyColor
-						end
-						
-						segment.Parent = self.model
-						
-						self.visibleSegments[i] = segment
-						
-						-- Debug print for first few segments
-						if i <= 5 then
-							print("Created segment", i, "at distance", distance)
-						end
-					end
-				end
-				
-				-- Update position with smooth orientation
-				local segment = self.visibleSegments[i]
-				if segment then
-					-- Use lerped orientation for smoother curves
-					local nextPoint = self.path:getPositionAtDistance(distance + segmentSpacing)
-					if nextPoint then
-						segment.CFrame = CFramenew(pointData.pos, nextPoint.pos)
-					else
-						segment.CFrame = CFramenew(pointData.pos, pointData.pos + pointData.look)
-					end
-				end
-			end
-		end
-		return
-	end
-	
-	-- Client-side camera-based streaming (original code)
-	local camera = workspace.CurrentCamera
-	if not camera then return end
-	
-	local cameraPos = camera.CFrame.Position
-	local renderDistance = 150 -- Only render segments within this distance
-	
-	-- Hide distant segments
-	for i, segment in pairs(self.visibleSegments) do
-		if segment and segment.Parent then
-			local dist = (segment.Position - cameraPos).Magnitude
-			if dist > renderDistance then
-				returnSegmentToPool(segment)
-				self.visibleSegments[i] = nil
-			end
-		end
-	end
-	
-	-- Show nearby segments
-	local segmentSpacing = self.config.SegmentSpacing
-	for i = 1, self.length do
-		local distance = i * segmentSpacing
-		local pointData = self.path:getPositionAtDistance(distance)
-		
-		if pointData then
-			local dist = (pointData.pos - cameraPos).Magnitude
-			if dist <= renderDistance then
-				-- Need to show this segment
-				if not self.visibleSegments[i] then
-					local segment = getSegmentFromPool()
-					if segment then
-						-- Configure segment
-						local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
-						local bodyColor = self.config.BodyColors[colorIndex]
-						segment.Color = bodyColor
-						segment.Size = self.config.SegmentSize or Vector3.new(3.5, 3.5, 3.5)
-						
-						-- Update glow color
-						local glow = segment:FindFirstChild("glow")
-						if glow then
-							glow.Color = bodyColor
-						end
-						
-						segment.Parent = self.model
-						
-						self.visibleSegments[i] = segment
-					end
-				end
-				
-				-- Update position
-				local segment = self.visibleSegments[i]
-				if segment then
-					segment.CFrame = CFramenew(pointData.pos, pointData.pos + pointData.look)
-				end
-			end
+		if historyData then
+			segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
 		end
 	end
 end
@@ -506,19 +345,60 @@ end
 function Snake:updateLength(newLength)
 	self.length = mathMin(newLength, self.config.MaxSegments)
 	
+	-- Add new segments if growing
+	local currentVisibleSegments = #self.segments
+	local targetVisibleSegments = mathMin(self.length, MAX_VISIBLE_SEGMENTS)
+	
+	if targetVisibleSegments > currentVisibleSegments then
+		for i = currentVisibleSegments + 1, targetVisibleSegments do
+			local segment = getSegmentFromPool()
+			if segment then
+				segment.Name = "Segment" .. i
+				
+				-- Start at last segment position
+				local lastSegment = self.segments[i-1]
+				local pos = lastSegment and lastSegment.Position or self.rootPart.Position
+				
+				-- Apply color
+				local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
+				segment.Color = self.config.BodyColors[colorIndex]
+				segment.Size = self.config.SegmentSize or Vector3.new(4, 4, 4)
+				segment.CFrame = CFramenew(pos)
+				segment.Parent = self.model
+				
+				-- Update glow
+				local glow = segment:FindFirstChild("glow")
+				if glow then
+					glow.Color = segment.Color
+				end
+				
+				self.segments[i] = segment
+			end
+		end
+	end
+	
 	-- Network update
 	if self.player == Players.LocalPlayer and remoteEvents.lengthUpdate then
 		remoteEvents.lengthUpdate:FireServer(self.length)
 	end
 end
 
+function Snake:sendNetworkUpdate()
+	-- Send position updates to server
+	if remoteEvents.positionUpdate then
+		remoteEvents.positionUpdate:FireServer({
+			position = self.rootPart.Position,
+			lookVector = self.rootPart.CFrame.LookVector
+		})
+	end
+end
+
 function Snake:destroy()
 	-- Return all segments to pool
-	for _, segment in pairs(self.visibleSegments) do
+	for _, segment in pairs(self.segments) do
 		returnSegmentToPool(segment)
 	end
 	
-	-- Cleanup
 	if self.networkConnection then
 		self.networkConnection:Disconnect()
 	end
@@ -540,7 +420,7 @@ function OptimizedSnakeSystem.init()
 	initializeSegmentPool()
 	createNetworkEvents()
 	
-	print("✅ Optimized Snake System V6.0 initialized")
+	print("✅ Optimized Snake System V7.0 initialized - Using position history like original!")
 end
 
 function OptimizedSnakeSystem.createSnake(character, config)
