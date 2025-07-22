@@ -494,6 +494,13 @@ function Snake:updateLength(newLength)
 end
 
 function Snake:grow(amount)
+	-- Debug check
+	print("grow called - self type:", typeof(self), "amount:", amount)
+	if typeof(self) == "number" then
+		error("grow was called with dot (.) instead of colon (:) - self is a number!")
+		return
+	end
+	
 	-- Increase length by amount (default 1)
 	amount = amount or 1
 	local newLength = self.length + amount

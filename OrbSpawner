@@ -327,11 +327,16 @@ local function growPlayerSnake(player, value)
 	print("growPlayerSnake - snakeInst type:", typeof(snakeInst), "value:", value)
 	if snakeInst then
 		print("snakeInst has grow?", snakeInst.grow ~= nil)
+		print("snakeInst is:", snakeInst)
 	end
 	
 	if snakeInst and snakeInst.grow then 
 		-- Queue the growth instead of growing immediately
+		print("About to call grow with value:", value or 10)
 		snakeInst:grow(value or 10)  -- FIXED: Added colon
+		print("Grow call completed")
+	else
+		warn("growPlayerSnake - No valid snake instance found for", player.Name)
 	end
 end
 
