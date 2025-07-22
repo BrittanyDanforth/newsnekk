@@ -518,6 +518,21 @@ end
 -- Initial bounds check
 updateMapBounds()
 
+-- Periodic bounds check every 30 seconds
+task.spawn(function()
+	while true do
+		task.wait(30)
+		local oldBounds = {minX = MAP_BOUNDS.minX, maxX = MAP_BOUNDS.maxX, minZ = MAP_BOUNDS.minZ, maxZ = MAP_BOUNDS.maxZ}
+		if updateMapBounds() then
+			-- Check if bounds changed
+			if oldBounds.minX ~= MAP_BOUNDS.minX or oldBounds.maxX ~= MAP_BOUNDS.maxX or 
+			   oldBounds.minZ ~= MAP_BOUNDS.minZ or oldBounds.maxZ ~= MAP_BOUNDS.maxZ then
+				warn("MAP BOUNDS CHANGED! Old:", oldBounds, "New:", MAP_BOUNDS)
+			end
+		end
+	end
+end)
+
 local function getWallAvoidanceVector(headPos)
 	local avoidVec = Vector3new(0, 0, 0)
 	local avoidStrength = 0
@@ -1604,10 +1619,8 @@ function AISnake:updateMovement(dt)
 		self.TargetYaw = mathAtan2(self.Direction.X, self.Direction.Z)
 		self.CurrentYaw = self.TargetYaw
 		
-		-- Debug print
-		if self.Config.HeadColor == Color3.fromRGB(255, 255, 0) then
-			print("Yellow snake hit boundary at", self.Position, "turning to center")
-		end
+		-- Debug print for ALL snakes hitting boundary
+		warn("AI Snake hit boundary at", self.Position, "Type:", self.Personality.Type, "Color:", tostring(self.Config.HeadColor))
 	end
 	
 	self.Position = self.Position + self.Direction * self.Speed * dt

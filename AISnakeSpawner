@@ -25,6 +25,11 @@ local function getRandomSpawnPosition()
 	-- Add some random offset
 	x = x + math.random(-20, 20)
 	z = z + math.random(-20, 20)
+	
+	-- ENSURE spawn is within safe bounds (map is 800x800, bounds are at ±370)
+	local safeLimit = 300  -- Well within the 370 boundary limit
+	x = math.clamp(x, -safeLimit, safeLimit)
+	z = math.clamp(z, -safeLimit, safeLimit)
 
 	return Vector3.new(x, SPAWN_HEIGHT, z)
 end
@@ -37,13 +42,20 @@ for i = 1, NUM_SNAKES do
 end
 
 -- Auto-respawn any snake that dies/disappears
+local respawnCheckCounter = 0
 RunService.Stepped:Connect(function()
+	respawnCheckCounter = respawnCheckCounter + 1
+	-- Only check every 30 frames to reduce lag
+	if respawnCheckCounter % 30 ~= 0 then return end
+	
 	for i = 1, NUM_SNAKES do
 		local snake = aiSnakes[i]
 		if not snake or not snake.RootPart or not snake.RootPart.Parent then
 			-- Respawn at random position
 			local pos = getRandomSpawnPosition()
+			print("Respawning AI snake", i, "at position:", pos)
 			aiSnakes[i] = AISnake.new(pos)
+			task.wait(0.1) -- Small delay to prevent spawn spam
 		end
 	end
 end)
