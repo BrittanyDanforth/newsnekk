@@ -1970,27 +1970,26 @@ function AISnake:updateMovement(dt)
 		for _, orb in pairs(orbFolder:GetChildren()) do
 			if orb:IsA("BasePart") and orb.Parent then
 				local dist = (orb.Position - headPos).Magnitude
+
+				
 				if dist <= pickupRadius then
-					-- Check if it's an upgrade orb
-					if orb.Name == "UpgradeOrb" and SnakeUpgrades then
-						-- Give upgrade to AI snake
-						print("🎯 AI Snake picked up upgrade orb! Current speed:", self.NormalSpeed)
-						SnakeUpgrades.GiveUpgrade(self)
-						orb:Destroy()
-						print("🚀 AI Snake speed after upgrade:", self.NormalSpeed)
+					-- All orbs handled the same way
+					local valueObj = orb:FindFirstChild("Value")
+					local orbValue = valueObj and valueObj.Value or 1
+					
+					if orb.Name == "UpgradeOrb" then
+						-- Apply upgrade directly
+						if SnakeUpgrades then
+							print("🎯 AI Snake collecting upgrade orb!")
+							SnakeUpgrades.GiveUpgrade(self)
+						end
 					else
 						-- Regular orb - grow the snake
-						local valueObj = orb:FindFirstChild("Value")
-						local orbValue = valueObj and valueObj.Value or 1
 						self:grow(orbValue)
-						
-						-- Use OrbUtils if available
-						if OrbUtils and OrbUtils.CollectOrb then
-							OrbUtils.CollectOrb(orb, "AI", tostring(self))
-						else
-							orb:Destroy()
-						end
 					end
+					
+					-- Destroy the orb
+					orb:Destroy()
 					break  -- Only pick up one orb per frame
 				end
 			end
