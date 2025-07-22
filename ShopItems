@@ -1,0 +1,20 @@
+local ShopItems = {
+	["kill_shield"] = {
+		Name = "Kill Shield",
+		Description = "Survive one fatal hit.",
+		Icon = "rbxassetid://9022534884", -- Shield icon
+		Color = Color3.fromRGB(0, 170, 255),
+		Robux = 50,
+		ProductId = 0 -- Placeholder, needs a real Product ID
+	},
+	["speed_boost"] = {
+		Name = "Speed Boost",
+		Description = "A 30-second speed increase.",
+		Icon = "rbxassetid://2844231895", -- Lightning icon
+		Color = Color3.fromRGB(255, 255, 0),
+		Price = 250, -- Coin price
+	}
+}
+
+return ShopItems
+
