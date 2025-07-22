@@ -1,0 +1,313 @@
+-- 📱 MOBILE HUD SYSTEM - Optimized for Slither.io
+-- Place in StarterPlayerScripts as LocalScript
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local StarterGui = game:GetService("StarterGui")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- 🔍 STRICT MOBILE DETECTION
+local function isMobileDevice()
+	-- Check if we have touch but NO mouse (most reliable)
+	if UserInputService.TouchEnabled and not UserInputService.MouseEnabled then
+		return true
+	end
+
+	-- Check for mobile-specific sensors
+	if UserInputService.GyroscopeEnabled or UserInputService.AccelerometerEnabled then
+		return true
+	end
+
+	-- Check if on console (not mobile)
+	if GuiService:IsTenFootInterface() then
+		return false
+	end
+
+	-- Additional check for touch-only devices
+	local hasMouse = UserInputService.MouseEnabled
+	local hasKeyboard = UserInputService.KeyboardEnabled
+	local hasTouch = UserInputService.TouchEnabled
+	local hasGamepad = UserInputService.GamepadEnabled
+
+	-- If we only have touch and nothing else, it's likely mobile
+	if hasTouch and not hasMouse and not hasKeyboard and not hasGamepad then
+		return true
+	end
+
+	return false
+end
+
+-- Only run on mobile
+if not isMobileDevice() then
+	print("Not a mobile device (PC detected), MobileHUD disabled")
+	return
+end
+
+print("Mobile device detected! Initializing MobileHUD...")
+
+-- 🚫 PROPERLY DISABLE DEFAULT MOBILE CONTROLS
+task.spawn(function()
+	-- Immediate removal of any existing touch UI
+	for _, gui in pairs(playerGui:GetChildren()) do
+		if gui.Name == "TouchGui" or gui.Name == "ControlGui" or gui.Name == "TouchControlFrame" then
+			gui:Destroy()
+		end
+	end
+
+	-- Wait for player scripts to load
+	local playerScripts = player:WaitForChild("PlayerScripts")
+	local playerModule = require(playerScripts:WaitForChild("PlayerModule"))
+	local controls = playerModule:GetControls()
+
+	-- Disable default movement controls completely
+	controls:Disable()
+	print("Default mobile controls disabled!")
+
+	-- Also disable CoreGui mobile controls
+	pcall(function()
+		StarterGui:SetCore("TouchGui", false)
+		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.TouchGui, false)
+		UserInputService.ModalEnabled = false
+	end)
+end)
+
+-- Create HUD
+local hudGui = Instance.new("ScreenGui")
+hudGui.Name = "MobileHUD"
+hudGui.ResetOnSpawn = false
+hudGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+hudGui.IgnoreGuiInset = true -- Ensure full screen usage
+hudGui.Parent = playerGui
+
+-- Initialize player snake data
+if not _G.PlayerSnakes then
+	_G.PlayerSnakes = {}
+end
+if not _G.PlayerSnakes[player] then
+	_G.PlayerSnakes[player] = {
+		touchPosition = nil, -- Store actual touch position instead of direction
+		isBoosting = false,
+		currentLength = 10
+	}
+end
+
+-- 🚀 BOOST BUTTON (Primary mobile control)
+local boostButton = Instance.new("ImageButton")
+boostButton.Name = "BoostButton"
+boostButton.Size = UDim2.new(0, 100, 0, 100)
+boostButton.Position = UDim2.new(1, -120, 1, -120)
+boostButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50) -- Dark gray base
+boostButton.BackgroundTransparency = 0.2
+boostButton.Parent = hudGui
+
+-- Clean circular design
+local boostCorner = Instance.new("UICorner")
+boostCorner.CornerRadius = UDim.new(0.5, 0) -- Perfect circle
+boostCorner.Parent = boostButton
+
+-- Subtle glow effect
+local boostStroke = Instance.new("UIStroke")
+boostStroke.Thickness = 2
+boostStroke.Color = Color3.fromRGB(100, 200, 255) -- Soft blue glow
+boostStroke.Transparency = 0.3
+boostStroke.Parent = boostButton
+
+-- Clean boost text
+local boostText = Instance.new("TextLabel")
+boostText.Size = UDim2.new(1, 0, 1, 0)
+boostText.BackgroundTransparency = 1
+boostText.Text = "BOOST"
+boostText.TextColor3 = Color3.fromRGB(255, 255, 255)
+boostText.Font = Enum.Font.Gotham -- Modern clean font
+boostText.TextScaled = true
+boostText.Parent = boostButton
+
+-- Add inner padding for text
+local textPadding = Instance.new("UIPadding")
+textPadding.PaddingTop = UDim.new(0.2, 0)
+textPadding.PaddingBottom = UDim.new(0.2, 0)
+textPadding.PaddingLeft = UDim.new(0.1, 0)
+textPadding.PaddingRight = UDim.new(0.1, 0)
+textPadding.Parent = boostText
+
+-- Boost visual feedback
+local isBoostPressed = false
+
+-- 🎮 BOOST BUTTON FUNCTIONALITY
+boostButton.MouseButton1Down:Connect(function()
+	if not isBoostPressed then
+		isBoostPressed = true
+
+		-- Visual feedback - subtle glow
+		boostButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70) -- Slightly lighter
+		boostStroke.Color = Color3.fromRGB(150, 255, 150) -- Green active glow
+		boostStroke.Thickness = 3
+		boostStroke.Transparency = 0
+
+		-- Send boost signal
+		if _G.PlayerSnakes and _G.PlayerSnakes[player] then
+			_G.PlayerSnakes[player].isBoosting = true
+		end
+
+		-- Haptic feedback if available
+		if UserInputService.IsVibrationSupported then
+			UserInputService:SetMotor(Enum.VibrationMotor.Small, 0.5)
+			task.wait(0.1)
+			UserInputService:SetMotor(Enum.VibrationMotor.Small, 0)
+		end
+	end
+end)
+
+boostButton.MouseButton1Up:Connect(function()
+	if isBoostPressed then
+		isBoostPressed = false
+
+		-- Reset visual
+		boostButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+		boostStroke.Color = Color3.fromRGB(100, 200, 255)
+		boostStroke.Thickness = 2
+		boostStroke.Transparency = 0.3
+
+		-- Stop boost
+		if _G.PlayerSnakes and _G.PlayerSnakes[player] then
+			_G.PlayerSnakes[player].isBoosting = false
+		end
+	end
+end)
+
+-- Handle touch end outside button
+UserInputService.TouchEnded:Connect(function()
+	if isBoostPressed then
+		boostButton.MouseButton1Up:Fire()
+	end
+end)
+
+-- 🎯 MOVEMENT HINT (Optional)
+local movementHint = Instance.new("TextLabel")
+movementHint.Size = UDim2.new(0, 300, 0, 30)
+movementHint.Position = UDim2.new(0.5, -150, 1, -200)
+movementHint.BackgroundTransparency = 1
+movementHint.Text = "Touch and drag to move"
+movementHint.TextColor3 = Color3.new(1, 1, 1)
+movementHint.TextTransparency = 0.5
+movementHint.Font = Enum.Font.SourceSans
+movementHint.TextScaled = true
+movementHint.Parent = hudGui
+
+-- Fade out hint after a few seconds
+task.spawn(function()
+	task.wait(5)
+	local fade = TweenService:Create(movementHint, TweenInfo.new(1), {
+		TextTransparency = 1
+	})
+	fade:Play()
+	fade.Completed:Connect(function()
+		movementHint:Destroy()
+	end)
+end)
+
+-- 📱 SLITHER.IO STYLE TOUCH MOVEMENT
+local activeTouches = {} -- Track multiple touches
+local primaryTouch = nil -- The main touch controlling movement
+
+-- Remove visual indicators - we'll use the debug part only
+
+-- Aggressively remove any default Roblox touch UI
+task.spawn(function()
+	while true do
+		task.wait(0.1)
+
+		-- Remove any default touch control UI
+		for _, gui in pairs(playerGui:GetDescendants()) do
+			if gui:IsA("GuiObject") then
+				local name = gui.Name:lower()
+				-- Remove any touch-related UI that's not ours
+				if (name:find("touch") or name:find("thumbstick") or name:find("control") or 
+					name:find("jump") or name:find("dpad")) and 
+					gui.Parent ~= hudGui and gui ~= boostButton then
+					gui.Visible = false
+					gui.Parent = nil
+				end
+			end
+		end
+
+		-- Also remove TouchGui at root level
+		local touchGui = playerGui:FindFirstChild("TouchGui")
+		if touchGui then
+			touchGui:Destroy()
+		end
+
+		-- Remove mobile control frame
+		local controlFrame = playerGui:FindFirstChild("TouchControlFrame")
+		if controlFrame then
+			controlFrame:Destroy()
+		end
+	end
+end)
+
+-- Better touch handling for hold and drag
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if input.UserInputType == Enum.UserInputType.Touch then
+		-- Don't process if touching the boost button area
+		if gameProcessed and input.Position.X > workspace.CurrentCamera.ViewportSize.X - 200 and 
+			input.Position.Y > workspace.CurrentCamera.ViewportSize.Y - 200 then
+			return
+		end
+
+		-- Track this touch
+		activeTouches[input] = true
+
+		-- If no primary touch, make this the primary
+		if not primaryTouch then
+			primaryTouch = input
+
+			-- Store the touch position for the snake to follow
+			if _G.PlayerSnakes and _G.PlayerSnakes[player] then
+				_G.PlayerSnakes[player].touchPosition = Vector2.new(input.Position.X, input.Position.Y)
+			end
+		end
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input, gameProcessed)
+	if input.UserInputType == Enum.UserInputType.Touch and input == primaryTouch then
+		-- Update touch position continuously as finger moves
+		if _G.PlayerSnakes and _G.PlayerSnakes[player] then
+			_G.PlayerSnakes[player].touchPosition = Vector2.new(input.Position.X, input.Position.Y)
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+	if input.UserInputType == Enum.UserInputType.Touch then
+		-- Remove from active touches
+		activeTouches[input] = nil
+
+		-- If this was the primary touch
+		if input == primaryTouch then
+			primaryTouch = nil
+
+			-- Keep last touch position so snake continues moving
+			-- Don't clear touchPosition - snake will continue towards last touch
+		end
+	end
+end)
+
+-- Update loop for smooth touch tracking
+local lastTouchUpdate = 0
+RunService.Heartbeat:Connect(function()
+	-- Force update touch position every frame if we have an active touch
+	if primaryTouch and _G.PlayerSnakes and _G.PlayerSnakes[player] then
+		-- This ensures continuous updates even if InputChanged doesn't fire
+		local currentTime = tick()
+		if currentTime - lastTouchUpdate > 0.016 then -- 60 FPS update rate
+			lastTouchUpdate = currentTime
+		end
+	end
+end)
+
+print("MobileHUD initialized successfully - Slither.io style controls active!")
