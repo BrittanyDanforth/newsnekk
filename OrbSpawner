@@ -81,7 +81,7 @@ local ORB_POOL_SIZE = 100  -- Pre-create orbs for pooling
 -- Dynamic spawn area
 ---------------------------------------------------------------------
 local function getOrbSpawnArea()
-	local groundPart = Workspace:FindFirstChild("SlitherIOGround")
+	local groundPart = workspace:FindFirstChild("SlitherIOGround")
 	if groundPart and groundPart:IsA("BasePart") then
 		local size, pos = groundPart.Size, groundPart.Position
 		local hx, hz    = size.X / 2, size.Z / 2
@@ -359,7 +359,7 @@ local function createOrbCollectVFX(pos, color)
 	part.Anchored = true
 	part.CanCollide = false
 	part.Transparency = 1
-	part.Parent = Workspace
+	part.Parent = workspace
 
 	-- Create particle emitter directly on the part (no attachments)
 	local pe = Instance.new("ParticleEmitter")
@@ -408,7 +408,7 @@ local function createSafeOrb(position, value, name, color, material)
 	orb.TopSurface = Enum.SurfaceType.Smooth
 	orb.BottomSurface = Enum.SurfaceType.Smooth
 	orb.Transparency = 1  -- Start invisible
-	orb.Parent = Workspace
+	orb.Parent = workspace
 
 	local val = Instance.new("NumberValue")
 	val.Name = "Value"
@@ -684,7 +684,7 @@ task.spawn(function()
 	while true do 
 		task.wait(0.2)
 		local aiHeads = {}
-		for _, obj in Workspace:GetDescendants() do
+		for _, obj in workspace:GetDescendants() do
 			if obj:IsA("BasePart") and obj.Name == "AISnakeHead" then
 				aiHeads[#aiHeads + 1] = obj
 			end
