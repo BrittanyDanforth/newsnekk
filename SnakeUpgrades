@@ -1,0 +1,82 @@
+-- SnakeUpgrades module: Implements real upgrades for player and AI snakes
+
+local SnakeUpgrades = {}
+
+-- Duration of speed boost in seconds
+local SPEED_BOOST_DURATION = 6
+local SPEED_BOOST_AMOUNT = 1.5 -- Multiplier
+
+function SnakeUpgrades.GiveUpgrade(snake)
+    if not snake then return end
+
+    -- Check if this is an AI snake (has Speed/BoostSpeed fields)
+    if snake.Speed and snake.BoostSpeed then
+        -- AI snake upgrade: temporary speed boost
+        if snake._isSpeedBoosted then return end -- Prevent stacking
+        snake._isSpeedBoosted = true
+
+        local origSpeed = snake.NormalSpeed or snake.Speed
+        local origBoost = snake.BoostSpeed
+
+        snake.NormalSpeed = origSpeed * SPEED_BOOST_AMOUNT
+        snake.BoostSpeed = origBoost * SPEED_BOOST_AMOUNT
+
+        -- Optional: Visual feedback (change head color)
+        if snake.HeadParts and snake.HeadParts.head then
+            snake.HeadParts.head.Color = Color3.fromRGB(255, 100, 0)
+        end
+
+        task.delay(SPEED_BOOST_DURATION, function()
+            if snake then
+                snake.NormalSpeed = origSpeed
+                snake.BoostSpeed = origBoost
+                snake._isSpeedBoosted = false
+                -- Restore color
+                if snake.HeadParts and snake.HeadParts.head then
+                    snake.HeadParts.head.Color = Color3.fromRGB(57, 255, 20)
+                end
+            end
+        end)
+    elseif snake.segments and snake.headParts then
+        -- Player snake upgrade: temporary WalkSpeed boost
+        if snake._isSpeedBoosted then return end
+        snake._isSpeedBoosted = true
+
+        -- Try to find the player's character and humanoid
+        local player = nil
+        for p, s in pairs(_G.PlayerSnakes or {}) do
+            if s == snake then
+                player = p
+                break
+            end
+        end
+        local humanoid = nil
+        if player and player.Character then
+            humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        end
+
+        local origWalkSpeed = humanoid and humanoid.WalkSpeed or 16
+
+        if humanoid then
+            humanoid.WalkSpeed = origWalkSpeed * SPEED_BOOST_AMOUNT
+        end
+
+        -- Optional: Visual feedback (change head color)
+        if snake.headParts and snake.headParts.head then
+            snake.headParts.head.Color = Color3.fromRGB(255, 100, 0)
+        end
+
+        task.delay(SPEED_BOOST_DURATION, function()
+            if humanoid then
+                humanoid.WalkSpeed = origWalkSpeed
+            end
+            snake._isSpeedBoosted = false
+            if snake.headParts and snake.headParts.head then
+                snake.headParts.head.Color = Color3.fromRGB(57, 255, 20)
+            end
+        end)
+    end
+end
+
+return SnakeUpgrades
+
