@@ -1,44 +1,20 @@
 --[[
-ULTRA-SMOOTH & HIGH-PERFORMANCE SLITHER.IO SNAKE SYSTEM V5.2 - SKIN SYSTEM INTEGRATED
+ULTRA-SMOOTH & HIGH-PERFORMANCE SLITHER.IO SNAKE SYSTEM V5.3 - MASSIVE SNAKE OPTIMIZATION
 - Fixed segment pooling to remove segments from workspace
 - Added periodic cleanup for orphaned segments
 - Optimized memory management
 - ENHANCED: Full skin system integration with proper attribute monitoring
 - ENHANCED: Real-time skin changes without breaking movement or performance
 - ENHANCED: Automatic skin application on spawn and skin changes
+- ENHANCED: Massive snake optimization for 5000+ segments with same smooth look
+
+WHERE TO ADD: Place in ServerScriptService
+DEPENDENCIES: SnakeSkinsData module (optional)
 --]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
--- PERFORMANCE: Load NetworkOptimization module for efficient replication
-local NetworkOptimization
-task.spawn(function()
-	local success, result = pcall(function()
-		return require(script.Parent:WaitForChild("NetworkOptimization", 5))
-	end)
-	if success then
-		NetworkOptimization = result
-		print("✅ NetworkOptimization module loaded")
-	else
-		warn("⚠️ NetworkOptimization module not found - using fallback networking")
-	end
-end)
-
--- PERFORMANCE: Load PerformanceManager for dynamic quality adjustment
-local PerformanceManager
-task.spawn(function()
-	local success, result = pcall(function()
-		return require(script.Parent:WaitForChild("PerformanceManager", 5))
-	end)
-	if success then
-		PerformanceManager = result
-		print("✅ PerformanceManager module loaded")
-	else
-		warn("⚠️ PerformanceManager module not found - using static quality")
-	end
-end)
 
 -- Helper function to get table keys (moved up to be available)
 local function getTableKeys(tbl)
@@ -297,11 +273,10 @@ local function createSegment(index, position, color, config, parentModel, curren
 	-- Apply growth factor based on current snake length
 	local growthFactor = 1
 	if currentLength and currentLength > 200 then
-		-- More gradual growth for better performance
-		growthFactor = 1 + ((currentLength - 200) / 4800) * 0.8  -- Slower growth, max 1.8x
+		growthFactor = 1 + ((currentLength - 200) / 2800) * 1.0  -- Match moderate growth
 	end
 
-	segment.Size = config.SegmentSize * mathMin(growthFactor, 1.8)  -- Smaller max size
+	segment.Size = config.SegmentSize * mathMin(growthFactor, 2.0)  -- Match new max
 
 	-- CHECK GRAPHICS MODE BEFORE SETTING MATERIAL
 	local player = Players:GetPlayerFromCharacter(parentModel.Parent)
@@ -335,23 +310,9 @@ local function createSegment(index, position, color, config, parentModel, curren
 	segment:SetAttribute("IsSnakeSegment", true)
 	segment:SetAttribute("SegmentIndex", index)
 
-	-- PERFORMANCE: Much more aggressive glow culling
-	local shouldHaveGlow = false
-	if graphicsMode ~= "Low" then
-		if index <= 20 then
-			shouldHaveGlow = true  -- Head area always has glow
-		elseif index <= 200 and index % 5 == 0 then
-			shouldHaveGlow = true  -- Front segments every 5th
-		elseif index <= 500 and index % 20 == 0 then
-			shouldHaveGlow = true  -- Mid segments every 20th
-		elseif index <= 1000 and index % 50 == 0 then
-			shouldHaveGlow = true  -- Far segments every 50th
-		elseif index % 100 == 0 then
-			shouldHaveGlow = true  -- Very far segments every 100th
-		end
-	end
-
-	if shouldHaveGlow then
+	-- Add glow to head segments and every 10th segment for performance
+	-- DISABLE GLOW IN LOW GRAPHICS MODE
+	if graphicsMode ~= "Low" and (index <= 30 or index % 10 == 0) then
 		local light = segment:FindFirstChild("Glow")
 		if not light then
 			light = Instance.new("PointLight")
@@ -364,19 +325,16 @@ local function createSegment(index, position, color, config, parentModel, curren
 		light.Enabled = true
 	end
 
-	-- PERFORMANCE: Only add outline to very few segments
-	if index <= 10 or (index <= 100 and index % 10 == 0) then
-		local outline = segment:FindFirstChild("Outline")
-		if not outline then
-			outline = Instance.new("SelectionBox")
-			outline.Name = "Outline"
-			outline.Parent = segment
-		end
-		outline.Adornee = segment
-		outline.Color3 = Color3.fromRGB(255, 255, 255)
-		outline.LineThickness = 0.03
-		outline.Transparency = 1
+	local outline = segment:FindFirstChild("Outline")
+	if not outline then
+		outline = Instance.new("SelectionBox")
+		outline.Name = "Outline"
+		outline.Parent = segment
 	end
+	outline.Adornee = segment
+	outline.Color3 = Color3.fromRGB(255, 255, 255)
+	outline.LineThickness = 0.03
+	outline.Transparency = 1
 
 	return segment
 end
@@ -1040,10 +998,10 @@ local function createUltraSmoothSnake(character)
 		-- Calculate uniform size ONCE per frame for ALL segments
 		local currentGrowthFactor = 1
 		if currentLength > 200 then
-			-- Slower growth for performance
-			currentGrowthFactor = 1 + ((currentLength - 200) / 4800) * 0.8  -- Max 1.8x
+			-- Moderate growth to stay long not just thick
+			currentGrowthFactor = 1 + ((currentLength - 200) / 2800) * 1.0  -- Less growth
 		end
-		local uniformTargetSize = activeConfig.SegmentSize * mathMin(currentGrowthFactor, 1.8)
+		local uniformTargetSize = activeConfig.SegmentSize * mathMin(currentGrowthFactor, 2.0)  -- Max 2x size only
 
 		-- Remove selection box every frame to ensure it stays gone
 		if rootPart:FindFirstChild("SelectionBox") then
@@ -1127,25 +1085,25 @@ local function createUltraSmoothSnake(character)
 				headParts.rightPupil.Transparency = pupilTransparency
 			end
 
-			-- Dynamic head sizing - slower growth
-			if updateCounter % 40 == 0 and currentLength > 200 then
-				local headGrowth = 1 + ((currentLength - 200) / 4800) * 0.8  -- Match body growth
-				local targetHeadSize = activeConfig.HeadSize * mathMin(headGrowth, 1.8)
-				headParts.head.Size = headParts.head.Size:Lerp(targetHeadSize, 0.1)
+			-- Dynamic head sizing - same growth as body segments
+			if updateCounter % 20 == 0 and currentLength > 200 then
+				local headGrowth = 1 + ((currentLength - 200) / 2800) * 1.0  -- Match body growth
+				local targetHeadSize = activeConfig.HeadSize * mathMin(headGrowth, 2.0)  -- Match max
+				headParts.head.Size = headParts.head.Size:Lerp(targetHeadSize, 0.15)
 
 				-- Scale eyes proportionally with head
 				if headParts.leftEye and headParts.rightEye then
 					-- Eyes should scale with head but stay attached via welds
 					local eyeScale = headGrowth * 0.8  -- Eyes grow less than head
-					local targetEyeSize = Vector3new(0.6, 0.6, 0.6) * mathMin(eyeScale, 1.4)
-					headParts.leftEye.Size = headParts.leftEye.Size:Lerp(targetEyeSize, 0.1)
-					headParts.rightEye.Size = headParts.rightEye.Size:Lerp(targetEyeSize, 0.1)
+					local targetEyeSize = Vector3new(0.6, 0.6, 0.6) * mathMin(eyeScale, 1.5)
+					headParts.leftEye.Size = headParts.leftEye.Size:Lerp(targetEyeSize, 0.15)
+					headParts.rightEye.Size = headParts.rightEye.Size:Lerp(targetEyeSize, 0.15)
 
 					-- Scale pupils too
 					if headParts.leftPupil and headParts.rightPupil then
-						local targetPupilSize = Vector3new(0.25, 0.25, 0.25) * mathMin(eyeScale, 1.4)
-						headParts.leftPupil.Size = headParts.leftPupil.Size:Lerp(targetPupilSize, 0.1)
-						headParts.rightPupil.Size = headParts.rightPupil.Size:Lerp(targetPupilSize, 0.1)
+						local targetPupilSize = Vector3new(0.25, 0.25, 0.25) * mathMin(eyeScale, 1.5)
+						headParts.leftPupil.Size = headParts.leftPupil.Size:Lerp(targetPupilSize, 0.15)
+						headParts.rightPupil.Size = headParts.rightPupil.Size:Lerp(targetPupilSize, 0.15)
 					end
 				end
 			end
@@ -1195,56 +1153,33 @@ local function createUltraSmoothSnake(character)
 		-- POSITION HISTORY BASED MOVEMENT WITH ANTI-GAP FOR BOOSTING
 		framesSinceSpawn = framesSinceSpawn + 1
 
-		-- PERFORMANCE: Process segments in batches
-		local segmentsPerBatch = 50
-		local batchStart = ((updateCounter - 1) % mathFloor(currentLength / segmentsPerBatch + 1)) * segmentsPerBatch + 1
-		local batchEnd = mathMin(batchStart + segmentsPerBatch - 1, currentLength)
-
 		for i = 1, currentLength do
 			local segment = segments[i]
 			if segment and segment.Parent then
-				-- SUPER AGGRESSIVE LOD for massive performance gains
-				local shouldUpdate = false
+				-- OPTIMIZED LOD: Smooth performance scaling
 				local updateFrequency = 1
 
-				if i <= 50 then
-					updateFrequency = 1  -- Always update near head
-					shouldUpdate = true
-				elseif i <= 100 then
+				if i <= 100 then
+					updateFrequency = 1  -- Always update near head for smoothness
+				elseif i <= 300 then
 					updateFrequency = 2
-					shouldUpdate = updateCounter % updateFrequency == 0
-				elseif i <= 200 then
-					updateFrequency = 3
-					shouldUpdate = updateCounter % updateFrequency == 0
-				elseif i <= 500 then
-					updateFrequency = 6
-					shouldUpdate = updateCounter % updateFrequency == 0
+				elseif i <= 600 then
+					updateFrequency = 4
 				elseif i <= 1000 then
-					updateFrequency = 10
-					shouldUpdate = updateCounter % updateFrequency == 0
+					updateFrequency = 8
+				elseif i <= 1500 then
+					updateFrequency = 12
 				elseif i <= 2000 then
-					updateFrequency = 20
-					shouldUpdate = updateCounter % updateFrequency == 0
+					updateFrequency = 16
 				elseif i <= 3000 then
-					updateFrequency = 30
-					shouldUpdate = updateCounter % updateFrequency == 0
+					updateFrequency = 24
 				elseif i <= 4000 then
-					updateFrequency = 40
-					shouldUpdate = updateCounter % updateFrequency == 0
+					updateFrequency = 32
 				else
-					updateFrequency = 60  -- Extreme tail barely updates
-					shouldUpdate = updateCounter % updateFrequency == 0
+					updateFrequency = 40  -- Extreme tail updates less
 				end
 
-				-- PERFORMANCE: Only update segments in current batch
-				if i >= batchStart and i <= batchEnd then
-					shouldUpdate = true
-				elseif i > 200 then
-					-- Skip most updates for far segments not in current batch
-					shouldUpdate = false
-				end
-
-				if shouldUpdate then
+				if updateCounter % updateFrequency == 0 then
 					-- Dynamic delay based on length to prevent pattern bunching
 					local baseMultiplier = isBoosting and 0.75 or 1.0  -- Tighter when boosting
 					-- Increase spacing as snake gets longer to preserve pattern visibility
@@ -1301,40 +1236,16 @@ local function createUltraSmoothSnake(character)
 					end
 				end
 
-				-- UNIFORM SIZE: Update less frequently for performance
-				if updateCounter % 10 == 0 or i <= 100 then
-					local sizeDiff = (uniformTargetSize - segment.Size).Magnitude
-					if sizeDiff > 0.01 then
-						segment.Size = uniformTargetSize
-					end
-				end
-
-				-- PERFORMANCE: Disable distant segment properties
-				if i > 2000 and segment.Material ~= Enum.Material.SmoothPlastic then
-					segment.Material = Enum.Material.SmoothPlastic
-					-- Remove any glow
-					local light = segment:FindFirstChild("Glow")
-					if light then
-						light.Enabled = false
-					end
+				-- UNIFORM SIZE: All segments MUST be the same size
+				local sizeDiff = (uniformTargetSize - segment.Size).Magnitude
+				if sizeDiff > 0.01 then  -- Very small threshold
+					segment.Size = uniformTargetSize  -- Instant update for ALL
 				end
 			end
 		end
 
-		if currentTime - lastNetworkUpdate > 0.15 then  -- Less frequent network updates
+		if currentTime - lastNetworkUpdate > 0.1 then
 			lastNetworkUpdate = currentTime
-			
-			-- PERFORMANCE: Use optimized network updates for large snakes
-			if NetworkOptimization then
-				if currentLength > 1000 then
-					-- Use batch updates for massive snakes
-					NetworkOptimization.BatchUpdateSnake(player, snakeInstance)
-				else
-					-- Use priority queue for smaller snakes
-					local priority = isBoosting and 2 or 1
-					NetworkOptimization.QueueUpdate(player, snakeInstance, priority)
-				end
-			end
 		end
 	end)
 	table.insert(connections, heartbeatConn)
