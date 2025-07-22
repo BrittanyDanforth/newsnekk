@@ -143,16 +143,16 @@ function OrbUtils.attachOrbTouched(orb)
 				end
 			else
 				local valObj = orb:FindFirstChild("Value")
-				local orbValue = (valObj and valObj.Value) or 1  -- REDUCED from 10
+				local orbValue = (valObj and valObj.Value) or 5  -- Updated to match new value
 				if player and player.Character then
 					if not player.Character:FindFirstChild("__SnakeInstance") then
 						if _G.PlayerSnakes and _G.PlayerSnakes[player] and _G.PlayerSnakes[player].grow then
-							_G.PlayerSnakes[player].grow(orbValue or 1)  -- REDUCED from 10
+							_G.PlayerSnakes[player]:grow(orbValue or 5)  -- Fixed: use colon syntax
 						end
 					else
 						local snake = player.Character:FindFirstChild("__SnakeInstance").Value
 						if snake and snake.grow then
-							snake.grow(orbValue or 1)  -- REDUCED from 10
+							snake:grow(orbValue or 5)  -- Fixed: use colon syntax
 						end
 					end
 				end
