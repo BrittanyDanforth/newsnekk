@@ -10,7 +10,14 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 -- Load the optimized system FIRST to create networking folder
-local OptimizedSnakeSystem = require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
+-- Try to use V2 if available, fallback to V1
+local OptimizedSnakeSystem
+pcall(function()
+	OptimizedSnakeSystem = require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV2"))
+end)
+if not OptimizedSnakeSystem then
+	OptimizedSnakeSystem = require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
+end
 
 -- Initialize the system (creates networking folder)
 OptimizedSnakeSystem.init()
