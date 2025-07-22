@@ -790,7 +790,7 @@ local function createOrb()
 			if val then val.Value = 1 end
 			
 			-- Add to OrbUtils tracking
-			OrbUtils.registerOrb(orb)
+			-- OrbUtils.registerOrb(orb) -- Function doesn't exist
 		else
 			orb = OrbUtils.spawnOrbAt(randomPosition(), 1)
 		end
