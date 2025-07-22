@@ -215,19 +215,13 @@ local function onCharacterAdded(character)
 			
 			print("Snake died - spawning", math.floor(snakeLength / 10), "death orbs at", deathPos)
 			
-			-- Spawn death orbs
-			local orbSpawner = game.ServerScriptService:FindFirstChild("OrbSpawner")
-			if orbSpawner then
-				local orbModule = require(orbSpawner)
-				if orbModule and orbModule.spawnDeathOrbsForSnake then
-					-- Spawn orbs based on snake length (cap at reasonable amount)
-					local orbCount = math.min(math.floor(snakeLength / 10), 100)
-					orbModule.spawnDeathOrbsForSnake(deathPos, orbCount)
-				else
-					warn("OrbSpawner module missing spawnDeathOrbsForSnake function")
-				end
+			-- Spawn death orbs using global OrbSpawner
+			if _G.OrbSpawner and _G.OrbSpawner.spawnDeathOrbsForSnake then
+				-- Spawn orbs based on snake length (cap at reasonable amount)
+				local orbCount = math.min(math.floor(snakeLength / 10), 100)
+				_G.OrbSpawner.spawnDeathOrbsForSnake(deathPos, orbCount)
 			else
-				warn("OrbSpawner not found in ServerScriptService")
+				warn("OrbSpawner not loaded yet or missing spawnDeathOrbsForSnake function")
 			end
 			
 			-- Clean up snake
