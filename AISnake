@@ -39,14 +39,16 @@ local AISnake = {}
 AISnake.__index = AISnake
 
 -- === OPTIMIZED SETTINGS ===
-local MAX_AI_SNAKES = 14
-local SPATIAL_GRID_UPDATE_RATE = 0.5  -- Increased from 0.2 (update less often)
+local MAX_AI_SNAKES = 10  -- Reduced from 14 for better performance
+local SPATIAL_GRID_UPDATE_RATE = 1.0  -- Increased from 0.5 (update less often)
 local BRAIN_UPDATES_PER_FRAME = 1
-local DEBUG_UPDATE_RATE = 2.0  -- Increased from 1.0
+local DEBUG_UPDATE_RATE = 5.0  -- Increased from 2.0 (debug less often)
 local AI_HEIGHT = 5
-local SEGMENT_UPDATE_SKIP = 1  -- Update every segment for no gaps
+local SEGMENT_UPDATE_SKIP = 2  -- Update every other segment for performance
 local LONG_SNAKE_THRESHOLD = 100  -- Snakes longer than this use more aggressive optimization
 local VERY_LONG_SNAKE_THRESHOLD = 300  -- Even more optimization for very long snakes
+local AI_UPDATE_DISTANCE = 200  -- Only update AI within this distance of players
+local SEGMENT_POOL_MAX = 500  -- Increased pool size for better reuse
 
 AISnake._activeSnakes = {}
 AISnake._orbTargets = {}
@@ -1761,6 +1763,18 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 	local snakes = AISnake._activeSnakes
 	if #snakes == 0 then return end
 
+	-- Get nearest player position for LOD
+	local nearestPlayerPos = nil
+	local nearestDist = math.huge
+	for _, player in Players:GetPlayers() do
+		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local pos = player.Character.HumanoidRootPart.Position
+			if nearestPlayerPos == nil then
+				nearestPlayerPos = pos
+			end
+		end
+	end
+
 	for i = 1, BRAIN_UPDATES_PER_FRAME do
 		if AISnake._brainUpdateIndex > #snakes then
 			AISnake._brainUpdateIndex = 1
@@ -1768,7 +1782,22 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 
 		local snake = snakes[AISnake._brainUpdateIndex]
 		if snake and snake._active then
-			snake:updateBrain()
+			-- Only update AI snakes near players
+			local shouldUpdate = true
+			if nearestPlayerPos and snake.Position then
+				local dist = (snake.Position - nearestPlayerPos).Magnitude
+				if dist > AI_UPDATE_DISTANCE then
+					shouldUpdate = false
+					-- Still do minimal position update for far snakes
+					if snake.HeadParts and snake.HeadParts.head then
+						snake.HeadParts.head.CFrame = CFrame.new(snake.Position)
+					end
+				end
+			end
+			
+			if shouldUpdate then
+				snake:updateBrain()
+			end
 		end
 
 		AISnake._brainUpdateIndex = AISnake._brainUpdateIndex + 1
