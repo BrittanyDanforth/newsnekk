@@ -325,7 +325,7 @@ local function growPlayerSnake(player, value)
 	end
 	if snakeInst and snakeInst.grow then 
 		-- Queue the growth instead of growing immediately
-		snakeInst.grow(value or 10) 
+		snakeInst:grow(value or 10)  -- FIXED: Added colon
 	end
 end
 
