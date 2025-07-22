@@ -1,6 +1,8 @@
 -- GamepassHandler - ServerScriptService
 -- Handles all gamepass functionality and benefits
 
+print("🎮 GamepassHandler loading...")
+
 local Players = game:GetService("Players")
 local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -83,11 +85,18 @@ local BOOST_CONFIGS = {
 -- Check if player owns a gamepass
 local function hasGamepass(player, gamepassName)
 	local gamepassId = GAMEPASS_IDS[gamepassName]
-	if not gamepassId then return false end
+	if not gamepassId then 
+		warn("Gamepass not found:", gamepassName)
+		return false 
+	end
+	
+	print("Checking gamepass:", gamepassName, "ID:", gamepassId, "for player:", player.Name)
 
 	-- Check cache first
 	if playerGamepasses[player.UserId] and playerGamepasses[player.UserId][gamepassName] ~= nil then
-		return playerGamepasses[player.UserId][gamepassName]
+		local cached = playerGamepasses[player.UserId][gamepassName]
+		print("Using cached value:", cached)
+		return cached
 	end
 
 	-- Check with Roblox
@@ -96,12 +105,15 @@ local function hasGamepass(player, gamepassName)
 	end)
 
 	if success then
+		print("Roblox check result:", hasPass)
 		-- Cache the result
 		if not playerGamepasses[player.UserId] then
 			playerGamepasses[player.UserId] = {}
 		end
 		playerGamepasses[player.UserId][gamepassName] = hasPass
 		return hasPass
+	else
+		warn("Failed to check gamepass:", hasPass)
 	end
 
 	return false
@@ -141,6 +153,10 @@ local function applyGamepassBenefits(player)
 	if hasGamepass(player, "Magnet") then
 		hasMagnet = true
 		player:SetAttribute("MagnetRange", 2.5)  -- 2.5x collection range
+		print("✅ Player has Magnet gamepass! MagnetRange set to 2.5")
+	else
+		player:SetAttribute("MagnetRange", 1)  -- Default range
+		print("❌ Player does not have Magnet gamepass. MagnetRange set to 1")
 	end
 
 	if hasGamepass(player, "VIP Access") then
@@ -260,6 +276,8 @@ end
 
 -- Handle gamepass purchases
 MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamepassId, wasPurchased)
+	print("🛒 Gamepass purchase finished - ID:", gamepassId, "Purchased:", wasPurchased)
+	
 	if wasPurchased then
 		-- Find which gamepass was purchased
 		local gamepassName = nil
@@ -271,6 +289,8 @@ MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamep
 		end
 
 		if gamepassName then
+			print("✅ Purchased gamepass:", gamepassName)
+			
 			-- Update cache
 			if not playerGamepasses[player.UserId] then
 				playerGamepasses[player.UserId] = {}
@@ -282,6 +302,10 @@ MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamep
 
 			-- Notify client
 			gamepassPurchasedRemote:FireClient(player, gamepassName)
+			
+			print("✅ Benefits applied for:", gamepassName)
+		else
+			warn("⚠️ Unknown gamepass ID purchased:", gamepassId)
 		end
 	end
 end)
