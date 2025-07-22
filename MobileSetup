@@ -1,0 +1,27 @@
+-- Mobile Setup Script - Place in ServerScriptService
+-- This configures StarterPlayer properties for mobile controls
+
+local StarterPlayer = game:GetService("StarterPlayer")
+
+-- Keep default controls for PC, only set Scriptable for mobile
+-- Mobile detection will be handled client-side
+StarterPlayer.DevComputerMovementMode = Enum.DevComputerMovementMode.UserChoice
+StarterPlayer.DevTouchMovementMode = Enum.DevTouchMovementMode.Scriptable
+
+-- Camera settings to prevent manipulation
+-- Camera movement mode handled by CameraController script instead
+-- Touch camera mode handled by CameraController script
+
+-- Disable camera occlusion (no transparency when objects are between camera and character)
+StarterPlayer.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
+
+-- Additional optimizations
+StarterPlayer.CharacterWalkSpeed = 16 -- Default speed for PC
+StarterPlayer.CharacterJumpPower = 50 -- Default jump for PC
+StarterPlayer.CharacterJumpHeight = 7.2
+
+-- Camera zoom limits
+StarterPlayer.CameraMinZoomDistance = 128
+StarterPlayer.CameraMaxZoomDistance = 128
+
+print("StarterPlayer configured - Camera locked, mobile controls ready")
