@@ -160,6 +160,11 @@ function Snake.new(character, config)
 	self.model:SetAttribute("OwnerUserId", self.player.UserId)
 	self.model.Parent = workspace
 	
+	-- Store reference to snake instance for collision handler
+	local snakeRef = Instance.new("ObjectValue")
+	snakeRef.Name = "SnakeInstance"
+	snakeRef.Parent = self.model
+	
 	-- Initialize
 	self:createHead()
 	self:createInitialSegments()
@@ -496,6 +501,21 @@ function Snake:sendNetworkUpdate()
 			lookVector = self.rootPart.CFrame.LookVector
 		})
 	end
+end
+
+function Snake:GetSegments()
+	-- Return all segments in order for collision detection
+	local allSegments = {}
+	for i = 1, #self.segments do
+		if self.segments[i] and self.segments[i].Parent then
+			table.insert(allSegments, self.segments[i])
+		end
+	end
+	return allSegments
+end
+
+function Snake:GetLength()
+	return self.length
 end
 
 function Snake:destroy()
