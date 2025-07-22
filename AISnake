@@ -1047,6 +1047,11 @@ end
 
 -- === HELPER: Get smart flee direction ===
 function AISnake:getSmartFleeDirection(threats)
+	-- Safety check for head
+	if not self.HeadParts or not self.HeadParts.head then
+		return Vector3new(mathRandom(-1, 1), 0, mathRandom(-1, 1)).Unit
+	end
+	
 	local myPos = self.HeadParts.head.Position
 	
 	-- Calculate danger zones from all threats
