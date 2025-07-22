@@ -12,7 +12,7 @@ local GAMEPASS_IDS = {
 	["Mega Speed"] = 123456790,
 	["2x Growth"] = 123456791,
 	["2x Coins"] = 123456792,
-	["Magnet"] = 123456793,
+	["Magnet"] = 1335069823,  -- Real gamepass ID
 	["Ghost Mode"] = 123456794,
 	["VIP Access"] = 123456795,
 	["Pet Ally"] = 123456796,
@@ -140,7 +140,7 @@ local function applyGamepassBenefits(player)
 
 	if hasGamepass(player, "Magnet") then
 		hasMagnet = true
-		player:SetAttribute("MagnetRange", 2.0)
+		player:SetAttribute("MagnetRange", 2.5)  -- 2.5x collection range
 	end
 
 	if hasGamepass(player, "VIP Access") then

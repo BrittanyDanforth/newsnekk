@@ -702,9 +702,17 @@ task.spawn(function()
 						local orbState = orbStates[orb]
 						if orbState and orbState.state ~= "hidden" then
 							local dist = (orb.Position - ph.Position).Magnitude
-							if dist < orb.Size.X * 0.8 + 3 then
-								local p = getPlayerFromTouchedPart(ph)
-								if p then atomicCollectOrb(orb, "player", p) end
+							local p = getPlayerFromTouchedPart(ph)
+							if p then
+								-- Check for magnet gamepass
+								local baseRange = orb.Size.X * 0.8 + 3
+								local magnetRange = p:GetAttribute("MagnetRange") or 1
+								local tempMagnetRange = p:GetAttribute("TempMagnetRange") or 1
+								local finalRange = baseRange * magnetRange * tempMagnetRange
+								
+								if dist < finalRange then
+									atomicCollectOrb(orb, "player", p)
+								end
 							end
 						end
 					end
@@ -732,7 +740,77 @@ task.spawn(function()
 end)
 
 ---------------------------------------------------------------------
--- Orb spawning helpers
+-- Magnet visual effect
+---------------------------------------------------------------------
+local magnetEffects = {}
+
+local function updateMagnetEffect(player)
+	if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+		if magnetEffects[player] then
+			magnetEffects[player]:Destroy()
+			magnetEffects[player] = nil
+		end
+		return
+	end
+	
+	local magnetRange = player:GetAttribute("MagnetRange") or 1
+	local tempMagnetRange = player:GetAttribute("TempMagnetRange") or 1
+	local totalRange = magnetRange * tempMagnetRange
+	
+	if totalRange > 1 then
+		-- Create or update magnet effect
+		if not magnetEffects[player] then
+			local effect = Instance.new("Part")
+			effect.Name = "MagnetEffect"
+			effect.Shape = Enum.PartType.Cylinder
+			effect.Material = Enum.Material.ForceField
+			effect.Color = Color3.fromRGB(147, 51, 234)  -- Purple like the gamepass
+			effect.Transparency = 0.8
+			effect.CanCollide = false
+			effect.CanQuery = false
+			effect.CanTouch = false
+			effect.Anchored = true
+			effect.Parent = workspace
+			magnetEffects[player] = effect
+		end
+		
+		local effect = magnetEffects[player]
+		local hrp = player.Character.HumanoidRootPart
+		local baseRange = 3.2 + 3  -- orb.Size.X * 0.8 + 3 (average orb size)
+		local visualRange = baseRange * totalRange * 2  -- Diameter
+		
+		effect.Size = Vector3.new(0.5, visualRange, visualRange)
+		effect.CFrame = hrp.CFrame * CFrame.Angles(0, 0, math.rad(90))
+		effect.Position = Vector3.new(effect.Position.X, 0.5, effect.Position.Z)
+	else
+		-- Remove effect if no magnet
+		if magnetEffects[player] then
+			magnetEffects[player]:Destroy()
+			magnetEffects[player] = nil
+		end
+	end
+end
+
+-- Update magnet effects periodically
+task.spawn(function()
+	while true do
+		task.wait(0.1)
+		for _, player in pairs(Players:GetPlayers()) do
+			updateMagnetEffect(player)
+		end
+	end
+end)
+
+-- Clean up on player leaving
+Players.PlayerRemoving:Connect(function(player)
+	if magnetEffects[player] then
+		magnetEffects[player]:Destroy()
+		magnetEffects[player] = nil
+	end
+end)
+
+---------------------------------------------------------------------
+-- Orb spawning control
 ---------------------------------------------------------------------
 local function randomPosition()
 	local a = getOrbSpawnArea()

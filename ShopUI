@@ -1066,7 +1066,7 @@ local GAMEPASS_DATA = {
 		gradient = {Color3.fromRGB(237, 66, 69), Color3.fromRGB(255, 100, 100)}
 	},
 	["Magnet"] = {
-		id = 123456793, -- ⚠️ REPLACE WITH YOUR ACTUAL GAMEPASS ID!
+		id = 1335069823, -- Real gamepass ID!
 		price = 150,
 		icon = "🧲",  -- Keeping magnet emoji as requested
 		description = "Attract orbs from further away!",
