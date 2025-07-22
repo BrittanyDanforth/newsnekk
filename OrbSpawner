@@ -789,7 +789,7 @@ local function createOrb()
 			orb.Position = randomPosition()
 			orb.Parent = workspace
 			local val = orb:FindFirstChild("Value")
-			if val then val.Value = 1 end
+			if val then val.Value = 5 end  -- Increased for faster growth
 			
 			-- Add to OrbUtils tracking
 			-- OrbUtils.registerOrb(orb) -- Function doesn't exist
