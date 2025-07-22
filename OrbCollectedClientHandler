@@ -1,0 +1,69 @@
+-- Client-side handler for OrbCollected remote event
+-- Highly optimized for low ping and zero print spam
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
+local Workspace = game:GetService("Workspace")
+
+local OrbCollectedEvent = ReplicatedStorage:WaitForChild("OrbCollected")
+
+-- Pre-create property tables for VFX to avoid allocations in handler
+local upgradeOrbColor = ColorSequence.new(Color3.fromRGB(0, 200, 255))
+local upgradeOrbSize = NumberSequence.new{
+	NumberSequenceKeypoint.new(0, 0.8),
+	NumberSequenceKeypoint.new(1, 3)
+}
+local normalOrbColor = ColorSequence.new(Color3.new(1, 1, 0))
+local normalOrbSize = NumberSequence.new{
+	NumberSequenceKeypoint.new(0, 0.5),
+	NumberSequenceKeypoint.new(1, 2)
+}
+local peTransparency = NumberSequence.new{
+	NumberSequenceKeypoint.new(0, 0),
+	NumberSequenceKeypoint.new(0.7, 0.5),
+	NumberSequenceKeypoint.new(1, 1)
+}
+local peLifetime = NumberRange.new(0.4, 0.8)
+local peSpeed = NumberRange.new(8, 15)
+local peSpread = Vector2.new(360, 360)
+
+-- Client-side VFX for orb collection
+local function createClientOrbVFX(position, orbName)
+	local part = Instance.new("Part")
+	part.Name = "ClientOrbVFX"
+	part.Size = Vector3.new(0.1, 0.1, 0.1)
+	part.Position = position
+	part.Anchored = true
+	part.CanCollide = false
+	part.Transparency = 1
+	part.Parent = Workspace
+
+	local pe = Instance.new("ParticleEmitter")
+	pe.Parent = part
+
+	if orbName == "UpgradeOrb" then
+		pe.Color = upgradeOrbColor
+		pe.Size = upgradeOrbSize
+	else
+		pe.Color = normalOrbColor
+		pe.Size = normalOrbSize
+	end
+
+	pe.LightEmission = 1
+	pe.Transparency = peTransparency
+	pe.Lifetime = peLifetime
+	pe.Speed = peSpeed
+	pe.Rate = 0
+	pe.SpreadAngle = peSpread
+	pe:Emit(25)
+
+	Debris:AddItem(part, 2)
+end
+
+-- Handle orb collection events (no print, ultra-lightweight)
+OrbCollectedEvent.OnClientEvent:Connect(function(position, orbName)
+	createClientOrbVFX(position, orbName)
+	-- Add additional lightweight effects here if needed (sound, UI, etc)
+end)
+
