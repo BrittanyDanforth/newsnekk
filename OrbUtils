@@ -148,7 +148,9 @@ function OrbUtils.attachOrbTouched(orb)
 				
 				if player and _G.PlayerSnakes and _G.PlayerSnakes[player] then
 					local snake = _G.PlayerSnakes[player]
-					print("Found snake in _G.PlayerSnakes, has grow?", snake.grow ~= nil)
+					print("Found snake in _G.PlayerSnakes, type:", typeof(snake))
+					print("Snake value:", snake)
+					print("Has grow?", snake.grow ~= nil)
 					if snake and snake.grow then
 						snake:grow(orbValue)
 						print("Called grow successfully!")
