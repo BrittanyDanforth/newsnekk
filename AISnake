@@ -1383,8 +1383,10 @@ function AISnake.new(startPosition)
 		return self.PositionHistory[index]
 	end
 
+	-- Create all segments at spawn position initially (prevents dragging on respawn)
 	for i = 1, self.CurrentLength do
-		local pos = self.Position - self.Direction * (i * self.Config.SegmentSpacing)
+		-- Start all segments at the same position
+		local pos = self.Position
 		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
 		local color = self.Config.BodyColors[colorIndex]
 		local segment = createSegment(i, pos, color, self.Config, self.Model, i)

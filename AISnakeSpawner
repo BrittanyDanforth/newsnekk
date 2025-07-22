@@ -6,6 +6,28 @@ local RunService        = game:GetService("RunService")
 
 local AISnake = require(ReplicatedStorage:WaitForChild("AISnake"))
 
+-- Function to clean up any orphaned snake parts
+local function cleanupOrphanedParts()
+	local aiModels = Workspace:GetChildren()
+	for _, model in pairs(aiModels) do
+		if model.Name == "AISnake" and model:IsA("Model") then
+			-- Check if this model has no associated active snake
+			local isOrphaned = true
+			for _, snake in pairs(aiSnakes) do
+				if snake and snake.Model == model then
+					isOrphaned = false
+					break
+				end
+			end
+			
+			if isOrphaned then
+				print("Cleaning up orphaned AI snake model")
+				model:Destroy()
+			end
+		end
+	end
+end
+
 -- === CONFIGURATION ===
 local NUM_SNAKES   = 8          -- reduced from 10+ for better performance
 local SPAWN_RADIUS = 250        -- ↑ bump this up to spread them out
@@ -34,12 +56,23 @@ local function getRandomSpawnPosition()
 	return Vector3.new(x, SPAWN_HEIGHT, z)
 end
 
+-- Clean up any orphaned parts before starting
+cleanupOrphanedParts()
+
 -- Initial spawn
 for i = 1, NUM_SNAKES do
 	local pos = getRandomSpawnPosition()
 	aiSnakes[i] = AISnake.new(pos)
 	task.wait(0.1) -- Small delay between spawns
 end
+
+-- Periodic cleanup of orphaned parts
+task.spawn(function()
+	while true do
+		task.wait(10) -- Every 10 seconds
+		cleanupOrphanedParts()
+	end
+end)
 
 -- Auto-respawn any snake that dies/disappears
 local respawnCheckCounter = 0
@@ -51,10 +84,29 @@ RunService.Stepped:Connect(function()
 	for i = 1, NUM_SNAKES do
 		local snake = aiSnakes[i]
 		if not snake or not snake.RootPart or not snake.RootPart.Parent then
+			-- Ensure old snake is completely destroyed
+			if snake and snake.Destroy then
+				pcall(function()
+					snake:Destroy()
+				end)
+			end
+			
+			-- Clear the reference
+			aiSnakes[i] = nil
+			
+			-- Wait a frame to ensure cleanup is complete
+			task.wait()
+			
 			-- Respawn at random position
 			local pos = getRandomSpawnPosition()
-			-- Respawning AI snake silently
-			aiSnakes[i] = AISnake.new(pos)
+			print("Respawning AI snake", i, "at position:", pos)
+			
+			-- Create new snake
+			local newSnake = AISnake.new(pos)
+			if newSnake then
+				aiSnakes[i] = newSnake
+			end
+			
 			task.wait(0.1) -- Small delay to prevent spawn spam
 		end
 	end
