@@ -321,17 +321,18 @@ end
 
 local function growPlayerSnake(player, value)
 	if not player or not player.Character then return end
-	local snakeInst = _G.PlayerSnakes and _G.PlayerSnakes[player]
-	if not snakeInst and player.Character:FindFirstChild("__SnakeInstance") then
-		snakeInst = player.Character.__SnakeInstance.Value
-	end
 	
-	if snakeInst and snakeInst.grow then 
-		-- Queue the growth instead of growing immediately
-		snakeInst:grow(value or 10)  -- FIXED: Added colon
-	else
-		warn("growPlayerSnake - No valid snake instance found for", player.Name)
-	end
+	-- Defer the growth to prevent blocking
+	task.defer(function()
+		local snakeInst = _G.PlayerSnakes and _G.PlayerSnakes[player]
+		if not snakeInst and player.Character:FindFirstChild("__SnakeInstance") then
+			snakeInst = player.Character.__SnakeInstance.Value
+		end
+		
+		if snakeInst and snakeInst.grow then 
+			snakeInst:grow(value or 10)
+		end
+	end)
 end
 
 local function giveUpgradeToPlayerSnake(player)
@@ -343,7 +344,7 @@ end
 -- VFX (no attachments) - FIXED: Completely standalone
 ---------------------------------------------------------------------
 local function createOrbCollectVFX(pos, color)
-	-- Create a completely standalone part for VFX
+	-- Simplified VFX for better performance
 	local part = Instance.new("Part")
 	part.Name = "OrbVFX"
 	part.Size = Vector3.new(0.1, 0.1, 0.1)
@@ -353,7 +354,7 @@ local function createOrbCollectVFX(pos, color)
 	part.Transparency = 1
 	part.Parent = workspace
 
-	-- Create particle emitter directly on the part (no attachments)
+	-- Create particle emitter with reduced particles
 	local pe = Instance.new("ParticleEmitter")
 	pe.Parent = part
 	pe.Color = ColorSequence.new(color or Color3.new(1, 1, 0))
@@ -364,17 +365,16 @@ local function createOrbCollectVFX(pos, color)
 	}
 	pe.Transparency = NumberSequence.new{
 		NumberSequenceKeypoint.new(0, 0), 
-		NumberSequenceKeypoint.new(0.7, 0.5),
 		NumberSequenceKeypoint.new(1, 1)
 	}
-	pe.Lifetime = NumberRange.new(0.4, 0.8)
-	pe.Speed = NumberRange.new(8, 15)
+	pe.Lifetime = NumberRange.new(0.3, 0.5)  -- Reduced from 0.4-0.8
+	pe.Speed = NumberRange.new(8, 12)  -- Reduced from 8-15
 	pe.Rate = 0
 	pe.SpreadAngle = Vector2.new(360, 360)
-	pe:Emit(25)
+	pe:Emit(10)  -- Reduced from 25 to 10 particles
 
-	-- Clean up after 2 seconds
-	Debris:AddItem(part, 2)
+	-- Clean up after 1 second instead of 2
+	Debris:AddItem(part, 1)
 end
 
 ---------------------------------------------------------------------
@@ -583,39 +583,49 @@ local function atomicCollectOrb(orb, collType, collObj)
 	if not orb or not orb.Parent or orbDebounce[orb] then return end
 	orbDebounce[orb] = true
 
-	createOrbCollectVFX(orb.Position, orb.Color)
-
-	if collType == "player" then
-		local p = collObj
-		-- FIXED: Only fire remote event if it exists and player is valid
-		if OrbCollectedEvent and p and p:IsA("Player") then
-			-- Use pcall to prevent errors if client doesn't handle it
-			pcall(function()
-				OrbCollectedEvent:FireClient(p, orb.Position, orb.Name)
-			end)
+	-- Store orb data before destroying
+	local orbPos = orb.Position
+	local orbColor = orb.Color
+	local orbName = orb.Name
+	local valObj = orb:FindFirstChild("Value")
+	local orbValue = (valObj and valObj.Value) or 10
+	
+	-- Remove orb immediately to prevent multiple collections
+	orb.Parent = nil
+	
+	-- Defer VFX and processing to prevent frame lag
+	task.defer(function()
+		createOrbCollectVFX(orbPos, orbColor)
+		
+		if collType == "player" then
+			local p = collObj
+			-- Fire remote event if exists
+			if OrbCollectedEvent and p and p:IsA("Player") then
+				pcall(function()
+					OrbCollectedEvent:FireClient(p, orbPos, orbName)
+				end)
+			end
+			
+			if orbName == "UpgradeOrb" then
+				giveUpgradeToPlayerSnake(p)
+			else
+				growPlayerSnake(p, orbValue)
+			end
+		else -- "ai"
+			local head = collObj
+			if orbName == "UpgradeOrb" then
+				giveUpgradeToAISnake(head)
+			else
+				growAISnake(head, orbValue)
+			end
 		end
-		if orb.Name == "UpgradeOrb" then
-			giveUpgradeToPlayerSnake(p)
-		else
-			local valObj = orb:FindFirstChild("Value")
-			local val = (valObj and valObj.Value) or 10
-			growPlayerSnake(p, val)
+		
+		-- Clean up orb tracking
+		removeOrb(orb)
+		if orb and orb.Parent then 
+			pcall(function() orb:Destroy() end) 
 		end
-	else -- "ai"
-		local head = collObj
-		if orb.Name == "UpgradeOrb" then
-			giveUpgradeToAISnake(head)
-		else
-			local valObj = orb:FindFirstChild("Value")
-			local val = (valObj and valObj.Value) or 10
-			growAISnake(head, val)
-		end
-	end
-
-	removeOrb(orb)
-	if orb and orb.Parent then 
-		pcall(function() orb:Destroy() end) 
-	end
+	end)
 end
 
 ---------------------------------------------------------------------
