@@ -9,15 +9,36 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
--- Load modules
-local OptimizedSnakeSystem = require(script.Parent:WaitForChild("OptimizedSnakeSystem"))
-local SnakeNetworkHandler = require(script.Parent:WaitForChild("SnakeNetworkHandler"))
+-- Load the optimized system FIRST to create networking folder
+local OptimizedSnakeSystem = require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
 
--- Initialize the optimized system
+-- Initialize the system (creates networking folder)
 OptimizedSnakeSystem.init()
+
+-- Wait a moment for folder creation
+wait(0.1)
+
+-- NOW load the network handler
+local SnakeNetworkHandler = nil
+pcall(function()
+	SnakeNetworkHandler = require(ServerScriptService:WaitForChild("SnakeNetworkHandler"))
+	if SnakeNetworkHandler and SnakeNetworkHandler.init then
+		SnakeNetworkHandler.init()
+	end
+end)
 
 -- Store active snakes
 local activeSnakes = {}
+
+-- Create/Get RemoteEvents for menu integration
+local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents") or Instance.new("Folder", ReplicatedStorage)
+remoteEvents.Name = "RemoteEvents"
+
+local spawnSnake = remoteEvents:FindFirstChild("SpawnSnake") or Instance.new("RemoteEvent", remoteEvents)
+spawnSnake.Name = "SpawnSnake"
+
+local respawnSnake = remoteEvents:FindFirstChild("RespawnSnake") or Instance.new("RemoteEvent", remoteEvents)
+respawnSnake.Name = "RespawnSnake"
 
 -- Configuration (matches your existing setup)
 local DEFAULT_CONFIG = {
@@ -182,5 +203,21 @@ end)
 for _, player in pairs(Players:GetPlayers()) do
 	Players.PlayerAdded:Fire(player)
 end
+
+-- Handle spawn requests from menu
+spawnSnake.OnServerEvent:Connect(function(player)
+	if player.Character then
+		player.Character:Destroy()
+	end
+	player:LoadCharacter()
+end)
+
+respawnSnake.OnServerEvent:Connect(function(player)
+	if player.Character then
+		player.Character:Destroy()
+	end
+	wait(0.1)
+	player:LoadCharacter()
+end)
 
 print("✅ Snake System Integration loaded!")

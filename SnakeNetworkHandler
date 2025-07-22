@@ -1,120 +1,143 @@
 --[[
-SNAKE NETWORK HANDLER - SERVER SIDE
+SNAKE NETWORK HANDLER - SERVER SIDE (ModuleScript)
 Handles network replication for optimized snake system
+Place this as ModuleScript in ServerScriptService
 --]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
--- Wait for networking folder
-local networkFolder = ReplicatedStorage:WaitForChild("SnakeNetworking", 10)
-if not networkFolder then
-	warn("SnakeNetworking folder not found!")
-	return
-end
+local SnakeNetworkHandler = {}
 
--- Get remote events
-local positionUpdate = networkFolder:WaitForChild("PositionUpdate")
-local lengthUpdate = networkFolder:WaitForChild("LengthUpdate")
-local skinUpdate = networkFolder:WaitForChild("SkinUpdate")
-
--- Player snake data
-local playerSnakeData = {}
-
--- Compression settings
-local POSITION_PRECISION = 0.1 -- Round positions to nearest 0.1
-local UPDATE_RATE = 15 -- Updates per second to clients
-
--- Handle position updates from clients
-positionUpdate.OnServerEvent:Connect(function(player, data)
-	if not data or not data.path then return end
-	
-	-- Validate data
-	if #data.path > 100 then -- Max 100 path points
-		player:Kick("Invalid snake data")
-		return
+function SnakeNetworkHandler.init()
+	-- Wait for networking folder with timeout
+	local networkFolder = ReplicatedStorage:WaitForChild("SnakeNetworking", 5)
+	if not networkFolder then
+		warn("SnakeNetworking folder not found! Creating it...")
+		-- Create it if it doesn't exist
+		networkFolder = Instance.new("Folder")
+		networkFolder.Name = "SnakeNetworking"
+		networkFolder.Parent = ReplicatedStorage
+		
+		-- Create events
+		local positionUpdate = Instance.new("RemoteEvent")
+		positionUpdate.Name = "PositionUpdate"
+		positionUpdate.Parent = networkFolder
+		
+		local lengthUpdate = Instance.new("RemoteEvent")
+		lengthUpdate.Name = "LengthUpdate"
+		lengthUpdate.Parent = networkFolder
+		
+		local skinUpdate = Instance.new("RemoteEvent")
+		skinUpdate.Name = "SkinUpdate"
+		skinUpdate.Parent = networkFolder
 	end
-	
-	-- Store player data
-	if not playerSnakeData[player] then
-		playerSnakeData[player] = {
-			path = {},
-			length = 50,
-			speed = 16,
-			lastUpdate = tick()
-		}
-	end
-	
-	local snakeData = playerSnakeData[player]
-	snakeData.path = data.path
-	snakeData.length = math.clamp(data.length or 50, 10, 5000)
-	snakeData.speed = math.clamp(data.speed or 16, 10, 50)
-	snakeData.lastUpdate = tick()
-end)
 
--- Handle length updates
-lengthUpdate.OnServerEvent:Connect(function(player, newLength)
-	if not newLength or type(newLength) ~= "number" then return end
-	
-	newLength = math.clamp(newLength, 10, 5000)
-	
-	if playerSnakeData[player] then
-		playerSnakeData[player].length = newLength
-	end
-	
-	-- Broadcast to other players
-	for _, otherPlayer in pairs(Players:GetPlayers()) do
-		if otherPlayer ~= player then
-			lengthUpdate:FireClient(otherPlayer, player, newLength)
+	-- Get remote events
+	local positionUpdate = networkFolder:WaitForChild("PositionUpdate")
+	local lengthUpdate = networkFolder:WaitForChild("LengthUpdate")
+	local skinUpdate = networkFolder:WaitForChild("SkinUpdate")
+
+	-- Player snake data
+	local playerSnakeData = {}
+
+	-- Compression settings
+	local POSITION_PRECISION = 0.1 -- Round positions to nearest 0.1
+	local UPDATE_RATE = 15 -- Updates per second to clients
+
+	-- Handle position updates from clients
+	positionUpdate.OnServerEvent:Connect(function(player, data)
+		if not data or not data.path then return end
+		
+		-- Validate data
+		if #data.path > 100 then -- Max 100 path points
+			player:Kick("Invalid snake data")
+			return
 		end
-	end
-end)
-
--- Handle skin updates
-skinUpdate.OnServerEvent:Connect(function(player, skinName)
-	if not skinName or type(skinName) ~= "string" then return end
-	
-	-- Validate skin name
-	if #skinName > 50 then return end
-	
-	-- Broadcast to all players
-	for _, otherPlayer in pairs(Players:GetPlayers()) do
-		if otherPlayer ~= player then
-			skinUpdate:FireClient(otherPlayer, player, skinName)
-		end
-	end
-end)
-
--- Broadcast updates to all players
-local lastBroadcast = tick()
-RunService.Heartbeat:Connect(function()
-	local now = tick()
-	if now - lastBroadcast < 1/UPDATE_RATE then return end
-	lastBroadcast = now
-	
-	-- Prepare update data
-	local updateData = {}
-	
-	for player, snakeData in pairs(playerSnakeData) do
-		if player.Parent and now - snakeData.lastUpdate < 5 then -- Only include recent updates
-			updateData[player.Name] = {
-				p = snakeData.path,
-				l = snakeData.length,
-				s = snakeData.speed
+		
+		-- Store player data
+		if not playerSnakeData[player] then
+			playerSnakeData[player] = {
+				path = {},
+				length = 50,
+				speed = 16,
+				lastUpdate = tick()
 			}
 		end
-	end
-	
-	-- Send to all players
-	for _, player in pairs(Players:GetPlayers()) do
-		positionUpdate:FireClient(player, updateData)
-	end
-end)
+		
+		local snakeData = playerSnakeData[player]
+		snakeData.path = data.path
+		snakeData.length = math.clamp(data.length or 50, 10, 5000)
+		snakeData.speed = math.clamp(data.speed or 16, 10, 50)
+		snakeData.lastUpdate = tick()
+	end)
 
--- Cleanup on player leaving
-Players.PlayerRemoving:Connect(function(player)
-	playerSnakeData[player] = nil
-end)
+	-- Handle length updates
+	lengthUpdate.OnServerEvent:Connect(function(player, newLength)
+		if not newLength or type(newLength) ~= "number" then return end
+		
+		newLength = math.clamp(newLength, 10, 5000)
+		
+		if playerSnakeData[player] then
+			playerSnakeData[player].length = newLength
+		end
+		
+		-- Broadcast to other players
+		for _, otherPlayer in pairs(Players:GetPlayers()) do
+			if otherPlayer ~= player then
+				lengthUpdate:FireClient(otherPlayer, player, newLength)
+			end
+		end
+	end)
 
-print("✅ Snake Network Handler initialized")
+	-- Handle skin updates
+	skinUpdate.OnServerEvent:Connect(function(player, skinName)
+		if not skinName or type(skinName) ~= "string" then return end
+		
+		-- Validate skin name
+		if #skinName > 50 then return end
+		
+		-- Broadcast to all players
+		for _, otherPlayer in pairs(Players:GetPlayers()) do
+			if otherPlayer ~= player then
+				skinUpdate:FireClient(otherPlayer, player, skinName)
+			end
+		end
+	end)
+
+	-- Broadcast updates to all players
+	local lastBroadcast = tick()
+	RunService.Heartbeat:Connect(function()
+		local now = tick()
+		if now - lastBroadcast < 1/UPDATE_RATE then return end
+		lastBroadcast = now
+		
+		-- Prepare update data
+		local updateData = {}
+		
+		for player, snakeData in pairs(playerSnakeData) do
+			if player.Parent and now - snakeData.lastUpdate < 5 then -- Only include recent updates
+				updateData[player.Name] = {
+					p = snakeData.path,
+					l = snakeData.length,
+					s = snakeData.speed
+				}
+			end
+		end
+		
+		-- Send to all players
+		for _, player in pairs(Players:GetPlayers()) do
+			positionUpdate:FireClient(player, updateData)
+		end
+	end)
+
+	-- Cleanup on player leaving
+	Players.PlayerRemoving:Connect(function(player)
+		playerSnakeData[player] = nil
+	end)
+
+	print("✅ Snake Network Handler initialized")
+end
+
+return SnakeNetworkHandler

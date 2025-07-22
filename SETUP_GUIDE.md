@@ -18,33 +18,49 @@ This optimized snake system can handle 5000+ length snakes smoothly with 8+ play
    - Copy the entire `OptimizedSnakeSystem` code
    - This is the core system that handles snake rendering
 
-### Step 2: Create Server Scripts
+### Step 2: Create Scripts in ServerScriptService
 
-1. **SnakeNetworkHandler** (Script in ServerScriptService)
+1. **SnakeNetworkHandler** (ModuleScript in ServerScriptService)
    - Copy the entire `SnakeNetworkHandler` code
+   - Make sure it's a ModuleScript, not a regular Script!
    - This handles network replication between players
 
 2. **SnakeSystemIntegration** (Script in ServerScriptService)
    - Copy the entire `SnakeSystemIntegration` code
+   - This is a regular Script (not ModuleScript)
    - This connects the optimized system to your game
 
 ### Step 3: Disable Old CharacterSetup (Temporarily)
 
-1. Find your existing `CharacterSetup` script
-2. Rename it to `CharacterSetup_OLD` to disable it
-3. The new system will handle all snake rendering
+1. Find your existing `CharacterSetup` script in ServerScriptService
+2. Right-click it and select "Rename"
+3. Rename it to `CharacterSetup_OLD`
+4. This disables it while keeping it as backup
 
-### Step 4: Configure Your Game
+### Step 4: Verify Your Game Setup
 
-1. Make sure you have a `leaderstats` folder with a `Length` value for each player
-2. The system reads skin data from player attributes:
-   - `SelectedSkin` attribute on player
-   - Skin data from `SnakeSkins` module
+The system uses existing data from your game:
+
+1. **leaderstats** - Already created by your game
+   ```
+   game.Players.[PlayerName].leaderstats.Length
+   ```
+
+2. **Player Attributes** - Already set by UnifiedSkinSystem
+   ```
+   game.Players.[PlayerName]:GetAttribute("SelectedSkin")
+   ```
+
+3. **RemoteEvents** - Already in ReplicatedStorage
+   ```
+   ReplicatedStorage.RemoteEvents.SpawnSnake
+   ReplicatedStorage.RemoteEvents.RespawnSnake
+   ```
 
 ### Step 5: Test the System
 
-1. Start a test server with 2+ players
-2. Check console for these messages:
+1. Start a test server in Roblox Studio (F8)
+2. Check console (F9) for these messages:
    ```
    ✅ Segment pool initialized with 5000 segments
    ✅ Network events created
@@ -53,11 +69,58 @@ This optimized snake system can handle 5000+ length snakes smoothly with 8+ play
    ✅ Snake System Integration loaded!
    ```
 
-3. Move around and verify:
-   - Smooth snake movement
-   - No gaps at high speeds
-   - Segments only render when nearby
-   - Other players' snakes replicate smoothly
+3. Click Play in your SlitherIOMenu
+4. Move around and verify smooth movement
+
+## Troubleshooting
+
+### Issue: "SnakeNetworking folder not found!"
+- This is normal on first run
+- The system will create it automatically
+- Just restart the test server
+
+### Issue: Play button doesn't work
+- Make sure `SnakeSystemIntegration` is running
+- Check that RemoteEvents folder exists in ReplicatedStorage
+- The integration script handles spawn requests
+
+### Issue: No snake appears
+- Check console for errors
+- Verify CharacterSetup_OLD is disabled
+- Make sure all scripts are in correct locations
+
+### Issue: Segments not appearing
+- Check if `leaderstats.Length` exists on your player
+- Verify segment pool initialized (check console)
+- Try moving around - segments stream based on camera distance
+
+## File Structure
+```
+ReplicatedStorage/
+├── OptimizedSnakeSystem (ModuleScript)
+├── RemoteEvents/ (Folder)
+│   ├── SpawnSnake (RemoteEvent)
+│   └── RespawnSnake (RemoteEvent)
+└── SnakeNetworking/ (Created automatically)
+    ├── PositionUpdate (RemoteEvent)
+    ├── LengthUpdate (RemoteEvent)
+    └── SkinUpdate (RemoteEvent)
+
+ServerScriptService/
+├── CharacterSetup_OLD (Disabled Script)
+├── SnakeNetworkHandler (ModuleScript)
+└── SnakeSystemIntegration (Script)
+```
+
+## Quick Toggle Between Systems
+
+To switch back to old system:
+1. Delete/Disable the 3 new scripts
+2. Rename `CharacterSetup_OLD` back to `CharacterSetup`
+
+To switch to optimized system:
+1. Rename `CharacterSetup` to `CharacterSetup_OLD`
+2. Enable the 3 new scripts
 
 ## Performance Tuning
 
@@ -80,23 +143,6 @@ local NETWORK_UPDATE_RATE = 15 -- Increase for smoother replication
 -- In Snake:streamSegments()
 local renderDistance = 150 -- Adjust based on your map size
 ```
-
-## Troubleshooting
-
-### Issue: Segments not appearing
-- Check if segment pool initialized properly
-- Verify `leaderstats.Length` exists
-- Check console for errors
-
-### Issue: Gaps in snake
-- Increase `NETWORK_UPDATE_RATE`
-- Check network latency
-- Verify path interpolation is working
-
-### Issue: Performance problems
-- Reduce `MAX_VISIBLE_SEGMENTS`
-- Increase segment streaming distance checks
-- Enable performance stats to check segment count
 
 ## Integration with Your Systems
 
