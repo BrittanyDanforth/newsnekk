@@ -4,7 +4,7 @@ local SnakeUpgrades = {}
 
 -- Duration of speed boost in seconds
 local SPEED_BOOST_DURATION = 6
-local SPEED_BOOST_AMOUNT = 1.2 -- Reduced from 1.5 to 1.2 (20% faster instead of 50%)
+local SPEED_BOOST_AMOUNT = 1.1 -- Very subtle 10% speed increase
 
 function SnakeUpgrades.GiveUpgrade(snake)
     if not snake then return end

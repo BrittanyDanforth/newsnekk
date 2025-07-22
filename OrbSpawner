@@ -62,7 +62,7 @@ end
 
 local ORB_SPAWN_INTERVAL  = 0.5  -- Slower respawn for better performance
 local ORB_MAX             = 600  -- Reduced orb count for better FPS
-local UPGRADE_ORB_CHANCE  = 0.05  -- Reduced from 13% to 5%
+local UPGRADE_ORB_CHANCE  = 0.02  -- Reduced to 2% (very rare)
 
 -- LOD (Level of Detail) settings for performance
 -- Server uses default high settings, clients handle their own graphics
@@ -250,10 +250,20 @@ local function applyOrbLOD(orb, state, fadeValue)
 	if orb.Name == "DeathOrb" then
 		-- Death orbs stay bigger for better collision
 		targetSize = Vector3.new(2.5, 2.5, 2.5) * fadeValue
+	elseif orb.Name == "UpgradeOrb" then
+		-- Upgrade orbs are larger and semi-transparent
+		targetSize = Vector3.new(5, 5, 5) * fadeValue
 	else
 		targetSize = Vector3.new(1,1,1) * (MIN_ORB_SIZE + (MAX_ORB_SIZE - MIN_ORB_SIZE) * fadeValue)
 	end
-	local targetTransparency = 1 - fadeValue
+	
+	-- Special transparency for upgrade orbs
+	local targetTransparency
+	if orb.Name == "UpgradeOrb" then
+		targetTransparency = 0.3 + (0.7 * (1 - fadeValue))  -- Range from 0.3 to 1
+	else
+		targetTransparency = 1 - fadeValue
+	end
 
 	-- Apply based on state
 	if state == "hidden" then
