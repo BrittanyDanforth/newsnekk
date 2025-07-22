@@ -1,12 +1,25 @@
 -- GamepassHandler - ServerScriptService
 -- Handles all gamepass functionality and benefits
 
+local RunService = game:GetService("RunService")
+
+-- STUDIO TESTING OVERRIDE - Set to true to test gamepasses in studio
+local STUDIO_TESTING = RunService:IsStudio()
+local STUDIO_OVERRIDE_GAMEPASSES = {
+	["Magnet"] = true,  -- Test magnet in studio
+	["2x Coins"] = false,
+	["2x Growth"] = false,
+	-- Add more as needed
+}
+
 print("🎮 GamepassHandler loading...")
+if STUDIO_TESTING then
+	warn("⚠️ STUDIO TESTING MODE - Some gamepasses will be overridden!")
+end
 
 local Players = game:GetService("Players")
 local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 -- GAMEPASS IDs (Replace with your actual IDs)
 local GAMEPASS_IDS = {
@@ -91,6 +104,13 @@ local function hasGamepass(player, gamepassName)
 	end
 	
 	print("Checking gamepass:", gamepassName, "ID:", gamepassId, "for player:", player.Name)
+	
+	-- Studio testing override
+	if STUDIO_TESTING and STUDIO_OVERRIDE_GAMEPASSES[gamepassName] ~= nil then
+		local override = STUDIO_OVERRIDE_GAMEPASSES[gamepassName]
+		print("🎮 STUDIO OVERRIDE:", gamepassName, "=", override)
+		return override
+	end
 
 	-- Check cache first
 	if playerGamepasses[player.UserId] and playerGamepasses[player.UserId][gamepassName] ~= nil then
