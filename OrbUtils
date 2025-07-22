@@ -144,16 +144,22 @@ function OrbUtils.attachOrbTouched(orb)
 			else
 				local valObj = orb:FindFirstChild("Value")
 				local orbValue = (valObj and valObj.Value) or 5  -- Updated to 5
-				if player and player.Character then
-					if not player.Character:FindFirstChild("__SnakeInstance") then
-						if _G.PlayerSnakes and _G.PlayerSnakes[player] and _G.PlayerSnakes[player].grow then
-							_G.PlayerSnakes[player]:grow(orbValue or 5)  -- Fixed: use colon syntax
-						end
+				print("Orb touched - Value:", orbValue, "Player:", player.Name)
+				
+				if player and _G.PlayerSnakes and _G.PlayerSnakes[player] then
+					local snake = _G.PlayerSnakes[player]
+					print("Found snake in _G.PlayerSnakes, has grow?", snake.grow ~= nil)
+					if snake and snake.grow then
+						snake:grow(orbValue)
+						print("Called grow successfully!")
 					else
-						local snake = player.Character:FindFirstChild("__SnakeInstance").Value
-						if snake and snake.grow then
-							snake:grow(orbValue or 5)  -- Fixed: use colon syntax
-						end
+						warn("Snake found but no grow function!")
+					end
+				else
+					warn("No snake found for player", player.Name)
+					print("_G.PlayerSnakes exists?", _G.PlayerSnakes ~= nil)
+					if _G.PlayerSnakes then
+						print("Player in table?", _G.PlayerSnakes[player] ~= nil)
 					end
 				end
 			end
