@@ -1,0 +1,138 @@
+-- This module augments the existing AISnake logic to allow AI snakes to pick up orbs.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local OrbUtils = require(ReplicatedStorage:WaitForChild("OrbUtils"))
+
+local ORB_PICKUP_RADIUS = 6  -- Adjust as needed for pickup range
+
+local AISnakeOrbPickup = {}
+
+-- Active AI snake tracking
+local trackedSnakes = {}
+
+-- Track an AI snake for orb collection
+function AISnakeOrbPickup.TrackSnake(aiSnake)
+	if not aiSnake or not aiSnake.HeadParts or not aiSnake.HeadParts.head then return end
+	trackedSnakes[aiSnake] = true
+	print("🎯 AISnakeOrbPickup: Now tracking AI snake")
+end
+
+-- Stop tracking an AI snake
+function AISnakeOrbPickup.UntrackSnake(aiSnake)
+	trackedSnakes[aiSnake] = nil
+end
+
+-- Main pickup function that runs for each AI snake
+function AISnakeOrbPickup.PickupNearbyOrbs(orbFolder, snakeHead, aiSnakeId)
+	if not orbFolder or not snakeHead then return end
+
+	for _, orb in pairs(orbFolder:GetChildren()) do
+		if orb:IsA("BasePart") and orb.Parent then
+			local dist = (orb.Position - snakeHead.Position).Magnitude
+			if dist <= ORB_PICKUP_RADIUS then
+				-- Get orb value before collection
+				local valueObj = orb:FindFirstChild("Value")
+				local orbValue = valueObj and valueObj.Value or 1
+
+				-- Collect orb using OrbUtils (assuming it has a CollectOrb function)
+				if OrbUtils.CollectOrb then
+					OrbUtils.CollectOrb(orb, "AI", aiSnakeId)
+				else
+					-- Fallback: just destroy the orb
+					orb:Destroy()
+				end
+
+				return orbValue -- Return the value collected
+			end
+		end
+	end
+
+	return 0
+end
+
+-- Debug counter
+local frameCount = 0
+
+-- Heartbeat loop to check all tracked AI snakes
+RunService.Heartbeat:Connect(function()
+	frameCount = frameCount + 1
+
+	-- ALWAYS check workspace directly for ALL orbs (including death orbs)
+	-- Death orbs spawn directly in workspace, not in containers!
+	-- Create a virtual container with all orbs
+	local allOrbs = {}
+	for _, obj in pairs(workspace:GetChildren()) do
+		if obj:IsA("BasePart") and obj.Name == "Orb" then
+			table.insert(allOrbs, obj)
+		end
+	end
+
+	-- Debug print every 60 frames (1 second)
+	if frameCount % 60 == 0 then
+		local snakeCount = 0
+		for _ in pairs(trackedSnakes) do snakeCount = snakeCount + 1 end
+		print("🔍 AI Orb Pickup: Found", #allOrbs, "orbs in workspace, tracking", snakeCount, "AI snakes")
+
+		-- Check if any orbs have Value child
+		local orbsWithValue = 0
+		for _, orb in pairs(allOrbs) do
+			if orb:FindFirstChild("Value") then
+				orbsWithValue = orbsWithValue + 1
+			end
+		end
+		print("   Orbs with Value child:", orbsWithValue)
+	end
+
+	-- Process each tracked snake
+	for snake, _ in pairs(trackedSnakes) do
+		if snake and snake.HeadParts and snake.HeadParts.head and snake.HeadParts.head.Parent then
+			local head = snake.HeadParts.head
+
+			-- Check each orb
+			for _, orb in pairs(allOrbs) do
+				if orb and orb.Parent then
+					local dist = (orb.Position - head.Position).Magnitude
+					local horizontalDist = ((orb.Position - head.Position) * Vector3.new(1, 0, 1)).Magnitude
+					local heightDiff = math.abs(orb.Position.Y - head.Position.Y)
+
+					-- Debug for close orbs
+					if dist <= ORB_PICKUP_RADIUS * 2 then
+						print("🎯 AI snake near orb - Total dist:", dist, "Horizontal:", horizontalDist, "Height diff:", heightDiff)
+						print("   Orb Y:", orb.Position.Y, "Head Y:", head.Position.Y)
+					end
+
+					if dist <= ORB_PICKUP_RADIUS then
+						print("💥 AI snake SHOULD collect orb! Distance:", dist)
+
+						-- Get orb value
+						local valueObj = orb:FindFirstChild("Value")
+						local orbValue = valueObj and valueObj.Value or 1
+
+						print("   Orb has Value?", valueObj ~= nil, "Value:", orbValue)
+						print("   Snake has grow function?", snake.grow ~= nil)
+						print("   Orb Parent:", orb.Parent)
+						print("   Orb Anchored:", orb.Anchored, "CanCollide:", orb.CanCollide)
+
+						-- Grow the snake
+						if snake.grow then
+							snake:grow(orbValue)
+							print("🍴 AI Snake collected", orb.Name, "worth", orbValue, "at position", orb.Position)
+						else
+							warn("❌ Snake has no grow function!")
+						end
+
+						-- Destroy the orb
+						orb:Destroy()
+						break -- Only eat one orb per frame
+					end
+				end
+			end
+		else
+			-- Remove invalid snake
+			trackedSnakes[snake] = nil
+		end
+	end
+end)
+
+return AISnakeOrbPickup
