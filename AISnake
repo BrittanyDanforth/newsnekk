@@ -8,12 +8,22 @@ local Players = game:GetService("Players")
 local SnakeConfig = require(ReplicatedStorage:WaitForChild("SnakeConfig"))
 local OrbUtils = require(ReplicatedStorage:WaitForChild("OrbUtils"))
 
--- Load the orb pickup module
+-- Load the orb pickup module  
 local AISnakeOrbPickup
 pcall(function()
-	local module = game.ServerScriptService:FindFirstChild("AISnakeOrbPickup")
+	local module = ReplicatedStorage:FindFirstChild("AISnakeOrbPickup") or game.ServerScriptService:FindFirstChild("AISnakeOrbPickup")
 	if module then
 		AISnakeOrbPickup = require(module)
+	end
+end)
+
+-- Load SnakeUpgrades module for upgrade orbs
+local SnakeUpgrades
+pcall(function()
+	local module = ReplicatedStorage:FindFirstChild("SnakeUpgrades")
+	if module then
+		SnakeUpgrades = require(module)
+		print("✅ AI Snakes can now pick up upgrade orbs!")
 	end
 end)
 
@@ -736,9 +746,9 @@ function AISnake:findBestOrb()
 	local nearest = nil
 	local headPos = self.HeadParts and self.HeadParts.head and self.HeadParts.head.Position or self.Position
 
+	-- First check spatial grid for regular orbs
 	local nearbyEntities = SpatialGrid.QueryRadius(headPos, minDist)
-	if #nearbyEntities == 0 then return nil, math.huge end
-
+	
 	-- Prioritize untargeted orbs
 	local targetedOrbs = {}
 	for ai, orb in AISnake._orbTargets do
@@ -747,24 +757,41 @@ function AISnake:findBestOrb()
 		end
 	end
 
-	for _, entity in nearbyEntities do
-		if entity.type == "ORB" and not targetedOrbs[entity.part] then
-			local dist = (entity.part.Position - headPos).Magnitude
-			if dist < minDist then
-				minDist = dist
-				nearest = entity.part
+	-- PRIORITIZE UPGRADE ORBS (check OrbFolder directly)
+	local orbFolder = Workspace:FindFirstChild("OrbFolder")
+	if orbFolder then
+		for _, orb in pairs(orbFolder:GetChildren()) do
+			if orb:IsA("BasePart") and orb.Name == "UpgradeOrb" and not targetedOrbs[orb] then
+				local dist = (orb.Position - headPos).Magnitude
+				if dist < minDist then
+					minDist = dist
+					nearest = orb
+				end
 			end
 		end
 	end
-
-	-- If no untargeted orbs, allow targeting of any orb
-	if not nearest then
+	
+	-- If no upgrade orbs, check regular orbs from spatial grid
+	if not nearest and #nearbyEntities > 0 then
 		for _, entity in nearbyEntities do
-			if entity.type == "ORB" then
+			if entity.type == "ORB" and not targetedOrbs[entity.part] then
 				local dist = (entity.part.Position - headPos).Magnitude
 				if dist < minDist then
 					minDist = dist
 					nearest = entity.part
+				end
+			end
+		end
+
+		-- If no untargeted orbs, allow targeting of any orb
+		if not nearest then
+			for _, entity in nearbyEntities do
+				if entity.type == "ORB" then
+					local dist = (entity.part.Position - headPos).Magnitude
+					if dist < minDist then
+						minDist = dist
+						nearest = entity.part
+					end
 				end
 			end
 		end
@@ -1645,6 +1672,41 @@ function AISnake:updateMovement(dt)
 
 	-- Set velocity for collision detection
 	self.HeadParts.head.AssemblyLinearVelocity = self.Direction * self.Speed
+	
+	-- CHECK FOR ORB PICKUPS (including upgrade orbs)
+	local orbFolder = Workspace:FindFirstChild("OrbFolder")
+	if orbFolder then
+		local headPos = self.HeadParts.head.Position
+		local pickupRadius = 6  -- Same as player pickup radius
+		
+		for _, orb in pairs(orbFolder:GetChildren()) do
+			if orb:IsA("BasePart") and orb.Parent then
+				local dist = (orb.Position - headPos).Magnitude
+				if dist <= pickupRadius then
+					-- Check if it's an upgrade orb
+					if orb.Name == "UpgradeOrb" and SnakeUpgrades then
+						-- Give upgrade to AI snake
+						SnakeUpgrades.GiveUpgrade(self)
+						orb:Destroy()
+						print("🎯 AI Snake picked up upgrade orb!")
+					else
+						-- Regular orb - grow the snake
+						local valueObj = orb:FindFirstChild("Value")
+						local orbValue = valueObj and valueObj.Value or 1
+						self:grow(orbValue)
+						
+						-- Use OrbUtils if available
+						if OrbUtils and OrbUtils.CollectOrb then
+							OrbUtils.CollectOrb(orb, "AI", tostring(self))
+						else
+							orb:Destroy()
+						end
+					end
+					break  -- Only pick up one orb per frame
+				end
+			end
+		end
+	end
 
 	-- History management
 	local lastHistoryPoint = self:getFromHistory(1)
