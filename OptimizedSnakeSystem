@@ -92,12 +92,14 @@ function SnakePath.new(maxPoints)
 end
 
 function SnakePath:addPoint(position, lookVector)
-	-- Add new point
-	tableInsert(self.points, 1, {
-		pos = position,
-		look = lookVector,
-		time = tick()
-	})
+	table.insert(self.points, 1, {pos = position, look = lookVector})
+	
+	-- Limit path points to prevent memory issues
+	-- Keep enough for the longest possible snake
+	local maxPoints = 500  -- Enough for smooth movement
+	if #self.points > maxPoints then
+		table.remove(self.points, #self.points)
+	end
 	
 	-- Calculate segment length
 	if #self.points > 1 then
@@ -344,9 +346,9 @@ function Snake:update(dt)
 	local pos = self.rootPart.Position
 	local look = self.rootPart.CFrame.LookVector
 	
-	-- Only add point if moved enough
+	-- Add points more frequently for smoother path
 	local lastPoint = self.path.points[1]
-	if not lastPoint or (pos - lastPoint.pos).Magnitude > 0.5 then
+	if not lastPoint or (pos - lastPoint.pos).Magnitude > 0.2 then  -- Reduced from 0.5
 		self.path:addPoint(pos, look)
 		
 		-- Debug: Print path info periodically
@@ -390,9 +392,12 @@ function Snake:streamSegments()
 	-- Client-side streaming will be handled by client scripts
 	if RunService:IsServer() then
 		-- Show all segments up to length
-		local segmentSpacing = self.config.SegmentSpacing or 1.2
+		local segmentSpacing = self.config.SegmentSpacing or 0.4
+		local segmentSize = self.config.SegmentSize or Vector3.new(3.8, 3.8, 3.8)
+		
 		for i = 1, self.length do
-			local distance = i * segmentSpacing
+			-- Calculate distance based on actual segment size for tighter fit
+			local distance = i * segmentSpacing * segmentSize.X * 0.8  -- 0.8 for slight overlap
 			local pointData = self.path:getPositionAtDistance(distance)
 			
 			if pointData then
@@ -404,7 +409,7 @@ function Snake:streamSegments()
 						local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
 						local bodyColor = self.config.BodyColors[colorIndex]
 						segment.Color = bodyColor
-						segment.Size = self.config.SegmentSize or Vector3.new(3.5, 3.5, 3.5)
+						segment.Size = segmentSize
 						
 						-- Update glow color
 						local glow = segment:FindFirstChild("glow")
@@ -423,10 +428,16 @@ function Snake:streamSegments()
 					end
 				end
 				
-				-- Update position
+				-- Update position with smooth orientation
 				local segment = self.visibleSegments[i]
 				if segment then
-					segment.CFrame = CFramenew(pointData.pos, pointData.pos + pointData.look)
+					-- Use lerped orientation for smoother curves
+					local nextPoint = self.path:getPositionAtDistance(distance + segmentSpacing)
+					if nextPoint then
+						segment.CFrame = CFramenew(pointData.pos, nextPoint.pos)
+					else
+						segment.CFrame = CFramenew(pointData.pos, pointData.pos + pointData.look)
+					end
 				end
 			end
 		end
