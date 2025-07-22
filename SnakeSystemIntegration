@@ -279,9 +279,8 @@ for _, player in pairs(Players:GetPlayers()) do
 	if player.Character then
 		onCharacterAdded(player.Character)
 	else
-		-- Wait for character to spawn
+		-- Wait for character to spawn (when they click Play)
 		player.CharacterAdded:Connect(onCharacterAdded)
-		player:LoadCharacter()
 	end
 end
 
@@ -298,13 +297,6 @@ if respawnEvent then
 	end)
 end
 
--- Auto-spawn players who don't have characters
-Players.PlayerAdded:Connect(function(player)
-	wait(2) -- Wait for systems to load
-	if not player.Character then
-		player:LoadCharacter()
-		print("🐍 Auto-spawned player:", player.Name)
-	end
-end)
+-- Removed auto-spawn - players spawn when clicking Play button
 
 print("✅ Snake System Integration loaded!")
