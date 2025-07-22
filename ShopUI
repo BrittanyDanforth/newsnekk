@@ -78,11 +78,12 @@ local function createVisualHead(rootPart, config, parentModel)
 	headPart:SetAttribute("IsSnakeHead", true)
 	headPart:SetAttribute("IsSnakeSegment", true)
 
-	local headLight = Instance.new("PointLight")
-	headLight.Color = config.HeadColor
-	headLight.Brightness = config.GlowIntensity + 1
-	headLight.Range = config.GlowRange + 2
-	headLight.Parent = headPart
+	-- Head glow (reduced for preview)
+	local headGlow = Instance.new("PointLight")
+	headGlow.Brightness = skin.GlowIntensity * 0.8 -- Reduced from 1.5 to 0.8
+	headGlow.Range = skin.GlowRange * 0.8 -- Reduced from 1.5 to 0.8
+	headGlow.Color = skin.HeadColor
+	headGlow.Parent = head
 
 	local headOutline = Instance.new("SelectionBox")
 	headOutline.Adornee = headPart
@@ -175,13 +176,12 @@ local function createSegment(index, position, color, config, parentModel)
 	segment:SetAttribute("IsSnakeSegment", true)
 	segment:SetAttribute("SegmentIndex", index)
 
-	local light = Instance.new("PointLight")
-	light.Name = "Glow"
-	light.Color = color
-	light.Brightness = config.GlowIntensity
-	light.Range = config.GlowRange
-	light.Enabled = true
-	light.Parent = segment
+	-- Segment glow (reduced for preview)
+	local glow = Instance.new("PointLight")
+	glow.Brightness = skin.GlowIntensity * 0.7 -- Slightly less than head
+	glow.Range = skin.GlowRange * 0.7
+	glow.Color = segment.Color
+	glow.Parent = segment
 
 	local outline = Instance.new("SelectionBox")
 	outline.Name = "Outline"
@@ -574,10 +574,10 @@ function CharacterPreview.create(viewport)
 	head.Position = Vector3.new(0, 0, PREVIEW_CONFIG.SNAKE_CENTER_Z)
 	head.Parent = model
 
-	-- Head glow
+	-- Head glow (reduced for preview)
 	local headGlow = Instance.new("PointLight")
-	headGlow.Brightness = skin.GlowIntensity * 1.5
-	headGlow.Range = skin.GlowRange * 1.5
+	headGlow.Brightness = skin.GlowIntensity * 0.8 -- Reduced from 1.5 to 0.8
+	headGlow.Range = skin.GlowRange * 0.8 -- Reduced from 1.5 to 0.8
 	headGlow.Color = skin.HeadColor
 	headGlow.Parent = head
 
@@ -639,10 +639,10 @@ function CharacterPreview.create(viewport)
 		local colorIndex = ((i - 1) % #skin.BodyColors) + 1
 		segment.Color = skin.BodyColors[colorIndex]
 
-		-- Segment glow
+		-- Segment glow (reduced for preview)
 		local glow = Instance.new("PointLight")
-		glow.Brightness = skin.GlowIntensity
-		glow.Range = skin.GlowRange
+		glow.Brightness = skin.GlowIntensity * 0.7 -- Slightly less than head
+		glow.Range = skin.GlowRange * 0.7
 		glow.Color = segment.Color
 		glow.Parent = segment
 
@@ -1044,7 +1044,7 @@ local GAMEPASS_DATA = {
 	["2x Coins"] = {
 		id = 123456792, -- ⚠️ REPLACE WITH YOUR ACTUAL GAMEPASS ID!
 		price = 99,
-		icon = "💰",
+		icon = "",  -- Removed emoji, will add image later
 		description = "Double all coin earnings!",
 		color = Color3.fromRGB(255, 215, 0),
 		gradient = {Color3.fromRGB(255, 215, 0), Color3.fromRGB(255, 170, 0)}
@@ -1052,7 +1052,7 @@ local GAMEPASS_DATA = {
 	["Lifeline Boost"] = {
 		id = 123456789, -- ⚠️ REPLACE WITH YOUR ACTUAL GAMEPASS ID!
 		price = 149,
-		icon = "⚡",
+		icon = "",  -- Removed emoji, will add image later
 		description = "Emergency speed boost every 3 minutes!",
 		color = Color3.fromRGB(88, 101, 242),
 		gradient = {Color3.fromRGB(88, 101, 242), Color3.fromRGB(120, 130, 255)}
@@ -1060,7 +1060,7 @@ local GAMEPASS_DATA = {
 	["Revive"] = {
 		id = 123456791, -- ⚠️ REPLACE WITH YOUR ACTUAL GAMEPASS ID!
 		price = 50,
-		icon = "❤️",
+		icon = "",  -- Removed emoji, will add image later
 		description = "Extra life - stackable!",
 		color = Color3.fromRGB(237, 66, 69),
 		gradient = {Color3.fromRGB(237, 66, 69), Color3.fromRGB(255, 100, 100)}
@@ -1068,7 +1068,7 @@ local GAMEPASS_DATA = {
 	["Magnet"] = {
 		id = 123456793, -- ⚠️ REPLACE WITH YOUR ACTUAL GAMEPASS ID!
 		price = 150,
-		icon = "🧲",
+		icon = "🧲",  -- Keeping magnet emoji as requested
 		description = "Attract orbs from further away!",
 		color = Color3.fromRGB(147, 51, 234),
 		gradient = {Color3.fromRGB(147, 51, 234), Color3.fromRGB(200, 100, 255)}
@@ -1076,7 +1076,7 @@ local GAMEPASS_DATA = {
 	["VIP Access"] = {
 		id = 123456795, -- ⚠️ REPLACE WITH YOUR ACTUAL GAMEPASS ID!
 		price = 299,
-		icon = "👑",
+		icon = "",  -- Removed emoji, will add image later
 		description = "VIP perks + exclusive content!",
 		color = Color3.fromRGB(255, 215, 0),
 		gradient = {Color3.fromRGB(255, 215, 0), Color3.fromRGB(255, 150, 0)}
@@ -1084,7 +1084,7 @@ local GAMEPASS_DATA = {
 	["Pet Ally"] = {
 		id = 123456796, -- ⚠️ REPLACE WITH YOUR ACTUAL GAMEPASS ID!
 		price = 150,
-		icon = "🐉",
+		icon = "",  -- Removed emoji, will add image later
 		description = "Dragon ally protects you for 1 life!",
 		color = Color3.fromRGB(255, 72, 176),
 		gradient = {Color3.fromRGB(255, 72, 176), Color3.fromRGB(255, 100, 200)}
@@ -2626,8 +2626,8 @@ createGamepassPurchasePopup = function(passName, passData)
 
 	-- Modern purchase button
 	local purchaseBtn = Instance.new("TextButton")
-	purchaseBtn.Size = UDim2.new(0.85, 0, 0.1, 0)
-	purchaseBtn.Position = UDim2.new(0.075, 0, 0.875, 0)
+	purchaseBtn.Size = UDim2.new(0.85, 0, 0.09, 0) -- Made slightly smaller
+	purchaseBtn.Position = UDim2.new(0.075, 0, 0.89, 0) -- Moved down from 0.875 to 0.89
 	purchaseBtn.BackgroundColor3 = Color3.fromRGB(0, 255, 127)
 	purchaseBtn.Text = "BUY NOW - R$" .. tostring(passData.price)
 	purchaseBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
