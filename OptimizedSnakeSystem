@@ -508,12 +508,12 @@ function Snake:grow(amount)
 		if leaderstats then
 			local lengthValue = leaderstats:FindFirstChild("Length")
 			if lengthValue then
-				lengthValue.Value = newLength
+				lengthValue.Value = self.length
 			end
 		end
 	end
 	
-	print("Snake grew by", amount, "- New length:", newLength)
+	print("Snake grew by", amount, "- New length:", self.length)
 end
 
 function Snake:sendNetworkUpdate()
@@ -539,6 +539,29 @@ end
 
 function Snake:GetLength()
 	return self.length
+end
+
+function Snake:grow(amount)
+	-- Increase length by amount (default 1)
+	amount = amount or 1
+	local newLength = self.length + amount
+	
+	-- Update length (will create new segments if needed)
+	self:updateLength(newLength)
+	
+	-- Update leaderstats
+	local player = self.player
+	if player then
+		local leaderstats = player:FindFirstChild("leaderstats")
+		if leaderstats then
+			local lengthValue = leaderstats:FindFirstChild("Length")
+			if lengthValue then
+				lengthValue.Value = self.length
+			end
+		end
+	end
+	
+	print("Snake grew by", amount, "- New length:", self.length)
 end
 
 function Snake:destroy()
