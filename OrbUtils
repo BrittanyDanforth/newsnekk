@@ -1,0 +1,307 @@
+-- OrbUtils: Utility functions for orbs, fully fixed for attachment and remote event errors
+-- this goes into replicatedstorage as a modulescript
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
+
+local OrbUtils = {}
+
+OrbUtils.orbs = {}
+
+-- Debounce table to prevent double-collection (shared for all orbs)
+local orbDebounce = {}
+
+-- Clean up debounce table periodically to prevent memory leaks
+task.spawn(function()
+	while true do
+		task.wait(30) -- Clean every 30 seconds
+		local now = tick()
+		for key, timestamp in pairs(orbDebounce) do
+			if now - timestamp > 5 then -- Remove entries older than 5 seconds
+				orbDebounce[key] = nil
+			end
+		end
+	end
+end)
+
+
+
+-- Forward declaration for attachOrbTouched (set by OrbSpawner)
+OrbUtils.attachOrbTouched = nil
+
+-- Callback for orb removal, for AI snakes to clear orb targets
+OrbUtils.onOrbRemoved = nil
+
+
+
+-- Helper: Get all AI snake heads
+local function getAISnakeHeads()
+	local heads = {}
+	-- Look for AI snake heads in all descendants
+	for _, obj in Workspace:GetDescendants() do
+		if obj:IsA("BasePart") and obj.Name == "AISnakeHead" then
+			table.insert(heads, obj)
+		end
+	end
+	return heads
+end
+
+-- Helper: Get all player snake heads (HumanoidRootPart)
+local function getPlayerHeads()
+	local heads = {}
+	for _, player in Players:GetPlayers() do
+		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			table.insert(heads, {player = player, part = player.Character.HumanoidRootPart})
+		end
+	end
+	return heads
+end
+
+-- Helper: Get player from touched part
+local function getPlayerFromTouchedPart(part)
+	for _, headData in getPlayerHeads() do
+		if headData.part == part then
+			return headData.player
+		end
+	end
+	return nil
+end
+
+-- Helper: Is part an AI snake head
+local function isAISnakeHead(part)
+	for _, aiHead in getAISnakeHeads() do
+		if aiHead == part then
+			return true
+		end
+	end
+	return false
+end
+
+-- Helper: Play orb collect VFX (no attachments, only ParticleEmitter on Part)
+local function playOrbCollectVFX(position, color)
+	local part = Instance.new("Part")
+	part.Name = "OrbVFX"
+	part.Size = Vector3.new(0.1, 0.1, 0.1)
+	part.Position = position
+	part.Anchored = true
+	part.CanCollide = false
+	part.Transparency = 1
+	part.Parent = Workspace
+
+	local pe = Instance.new("ParticleEmitter")
+	pe.Parent = part
+	pe.Color = ColorSequence.new(color or Color3.new(1, 1, 0))
+	pe.LightEmission = 1
+	pe.Size = NumberSequence.new{
+		NumberSequenceKeypoint.new(0, 0.5),
+		NumberSequenceKeypoint.new(1, 2)
+	}
+	pe.Transparency = NumberSequence.new{
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.7, 0.5),
+		NumberSequenceKeypoint.new(1, 1)
+	}
+	pe.Lifetime = NumberRange.new(0.4, 0.8)
+	pe.Speed = NumberRange.new(8, 15)
+	pe.Rate = 0
+	pe.SpreadAngle = Vector2.new(360, 360)
+	pe:Emit(25)
+
+	Debris:AddItem(part, 2)
+end
+
+-- Attach .Touched event to orb for event-driven collection
+function OrbUtils.attachOrbTouched(orb)
+	if not orb then return end
+	orb.Touched:Connect(function(hit)
+		if not orb or not orb.Parent then return end
+		if orbDebounce[orb] then return end
+
+
+
+		orbDebounce[orb] = true
+
+		-- Check if touched by player snake head
+		local player = getPlayerFromTouchedPart(hit)
+		if player then
+			playOrbCollectVFX(orb.Position)
+			local OrbCollectedEvent = ReplicatedStorage:FindFirstChild("OrbCollected")
+			if OrbCollectedEvent and player and player:IsA("Player") then
+				pcall(function()
+					OrbCollectedEvent:FireClient(player, orb.Position, orb.Name)
+				end)
+			end
+			if orb.Name == "UpgradeOrb" then
+				local SnakeUpgrades = require(ReplicatedStorage:WaitForChild("SnakeUpgrades"))
+				if _G.PlayerSnakes and _G.PlayerSnakes[player] then
+					local snake = _G.PlayerSnakes[player]
+					if snake then
+						SnakeUpgrades.GiveUpgrade(snake)
+					end
+				end
+			else
+				local valObj = orb:FindFirstChild("Value")
+				local orbValue = (valObj and valObj.Value) or 1  -- REDUCED from 10
+				if player and player.Character then
+					if not player.Character:FindFirstChild("__SnakeInstance") then
+						if _G.PlayerSnakes and _G.PlayerSnakes[player] and _G.PlayerSnakes[player].grow then
+							_G.PlayerSnakes[player].grow(orbValue or 1)  -- REDUCED from 10
+						end
+					else
+						local snake = player.Character:FindFirstChild("__SnakeInstance").Value
+						if snake and snake.grow then
+							snake.grow(orbValue or 1)  -- REDUCED from 10
+						end
+					end
+				end
+			end
+			OrbUtils.removeOrb(orb)
+			if orb and orb.Parent then
+				orb:Destroy()
+			end
+			return
+		end
+
+		-- Check if touched by AI snake head
+		if isAISnakeHead(hit) then
+			playOrbCollectVFX(orb.Position)
+			if orb.Name == "UpgradeOrb" then
+				local AISnakeModule = require(ReplicatedStorage:WaitForChild("AISnake"))
+				if AISnakeModule._activeSnakes then
+					for _, snake in AISnakeModule._activeSnakes do
+						if snake.HeadParts and snake.HeadParts.head == hit then
+							require(ReplicatedStorage:WaitForChild("SnakeUpgrades")).GiveUpgrade(snake)
+						end
+					end
+				end
+			else
+				local valObj = orb:FindFirstChild("Value")
+				local orbValue = (valObj and valObj.Value) or 1  -- REDUCED from 10
+				local AISnakeModule = require(ReplicatedStorage:WaitForChild("AISnake"))
+				if AISnakeModule._activeSnakes then
+					for _, snake in AISnakeModule._activeSnakes do
+						if snake.HeadParts and snake.HeadParts.head == hit then
+							if snake.grow then
+								snake:grow(orbValue or 1)  -- REDUCED from 10
+							end
+						end
+					end
+				end
+			end
+			OrbUtils.removeOrb(orb)
+			if orb and orb.Parent then
+				orb:Destroy()
+			end
+			return
+		end
+
+		-- If not a valid snake head, allow future touches
+		orbDebounce[orb] = nil
+	end)
+end
+
+-- Remove orb from all tracking tables and destroy it
+function OrbUtils.removeOrb(orb)
+	for i = #OrbUtils.orbs, 1, -1 do
+		if OrbUtils.orbs[i] == orb then
+			table.remove(OrbUtils.orbs, i)
+		end
+	end
+	if OrbUtils.onOrbRemoved then
+		pcall(function()
+			OrbUtils.onOrbRemoved(orb)
+		end)
+	end
+end
+
+-- Spawns an orb at a given position with a value, and attaches .Touched event
+function OrbUtils.spawnOrbAt(position, value)
+	local orb = Instance.new("Part")
+	orb.Name = "Orb"  -- ALL orbs are just "Orb" like in the old version
+	orb.Size = Vector3.new(1.5, 1.5, 1.5)
+	orb.Transparency = 0  -- Ensure orb is visible
+	orb.Shape = Enum.PartType.Ball
+	orb.Anchored = true
+	orb.CanCollide = false
+	orb.CanTouch = true  -- Important for touch detection
+	orb.CanQuery = false -- Optimize raycasting performance
+	orb.Material = Enum.Material.Neon
+	orb.Color = Color3.fromHSV(math.random(), 0.7, 1)
+	-- Ensure orbs spawn at AI snake height (Y=5) for proper collection
+	local fixedY = math.max(5, position.Y)
+	orb.Position = Vector3.new(position.X, fixedY, position.Z)
+	orb.TopSurface = Enum.SurfaceType.Smooth
+	orb.BottomSurface = Enum.SurfaceType.Smooth
+
+	local val = Instance.new("IntValue")
+	val.Name = "Value"
+	val.Value = value or 10
+	val.Parent = orb
+
+	orb.Parent = Workspace
+	table.insert(OrbUtils.orbs, orb)
+
+	-- Debug removed for performance
+
+	-- Attach .Touched event for collection
+	OrbUtils.attachOrbTouched(orb)
+
+	-- Register immediately but without spam
+	task.spawn(function()
+		local OrbSpawner = _G.OrbSpawner
+		if not OrbSpawner then
+			local success, result = pcall(function()
+				return require(game.ServerScriptService:FindFirstChild("OrbSpawner"))
+			end)
+			if success then
+				OrbSpawner = result
+			end
+		end
+
+		if OrbSpawner and OrbSpawner.registerExternalOrb then
+			pcall(function()
+				OrbSpawner.registerExternalOrb(orb)
+			end)
+		end
+	end)
+
+	return orb
+end
+
+-- Backup: AI head proximity check for orb pickup (call this in AISnake update loop)
+function OrbUtils.checkAISnakeHeadPickup(head)
+	local PICKUP_RADIUS = 7
+	for i = #OrbUtils.orbs, 1, -1 do
+		local orb = OrbUtils.orbs[i]
+		if orb and orb.Parent and (head.Position - orb.Position).Magnitude < PICKUP_RADIUS then
+			if not orbDebounce[orb] then
+				orbDebounce[orb] = true
+				playOrbCollectVFX(orb.Position)
+				local valObj = orb:FindFirstChild("Value")
+				local orbValue = (valObj and valObj.Value) or 1  -- REDUCED from 10
+				local AISnakeModule = require(ReplicatedStorage:WaitForChild("AISnake"))
+				if AISnakeModule._activeSnakes then
+					for _, snake in AISnakeModule._activeSnakes do
+						if snake.HeadParts and snake.HeadParts.head == head then
+							if orb.Name == "UpgradeOrb" then
+								require(ReplicatedStorage:WaitForChild("SnakeUpgrades")).GiveUpgrade(snake)
+							else
+								if snake.grow then
+									snake:grow(orbValue or 1)  -- REDUCED from 10
+								end
+							end
+						end
+					end
+				end
+				OrbUtils.removeOrb(orb)
+				if orb and orb.Parent then
+					orb:Destroy()
+				end
+			end
+		end
+	end
+end
+
+return OrbUtils
