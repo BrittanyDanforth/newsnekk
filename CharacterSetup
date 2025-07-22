@@ -82,6 +82,8 @@ local CFramelookAt = CFrame.lookAt
 local mathMin = math.min
 local mathMax = math.max
 local mathFloor = math.floor
+local mathSin = math.sin
+local mathCeil = math.ceil
 local taskSpawn = task.spawn
 local taskWait = task.wait
 
@@ -171,9 +173,9 @@ local SegmentPool = {}
 local PoolSize = 0
 local MAX_POOL_SIZE = 2000  -- Doubled for massive snakes
 
--- STREAMING SYSTEM: Track loaded/unloaded segments
-local StreamedSegments = {}  -- Currently loaded segments
-local UnloadedSegments = {}  -- Segment data for unloaded segments
+-- VISUAL LIMIT SYSTEM: Only render what's needed for visual quality
+local MAX_VISIBLE_SEGMENTS = 800  -- Hard limit on rendered segments
+local SEGMENT_FADE_START = 600  -- Start fading segments after this
 
 -- Dedicated container for better organization
 local SegmentContainer = workspace:FindFirstChild("SegmentContainer")
@@ -269,6 +271,8 @@ local function getOrCreateSnakeModel(player)
 	model:SetAttribute("OwnerUserId", player.UserId)
 	return model
 end
+
+
 
 local function createSegment(index, position, color, config, parentModel, currentLength)
 	local segment = getSegment()
@@ -784,16 +788,22 @@ local function createUltraSmoothSnake(character)
 	local currentLength = 0 -- Start with 0 segments
 	local targetLength = activeConfig.InitialLength
 
-	-- Create initial segments spread out behind spawn position (like reference)
+	-- Create initial segments spread out behind spawn position
 	local startPos = rootPart.Position
-	for i = 1, activeConfig.InitialLength do
+	local visibleLength = mathMin(activeConfig.InitialLength, MAX_VISIBLE_SEGMENTS)
+	
+	-- Only create visible segments
+	for i = 1, visibleLength do
 		local pos = startPos - rootPart.CFrame.LookVector * (i * activeConfig.SegmentSpacing)
 		local colorIndex = ((i - 1) % #activeConfig.BodyColors) + 1
 		local color = activeConfig.BodyColors[colorIndex]
 		local segment = createSegment(i, pos, color, activeConfig, snakeModel, i)
 		segments[i] = segment
-		currentLength = i
 	end
+	
+	-- Set actual length (can be higher than visible segments)
+	currentLength = activeConfig.InitialLength
+	targetLength = activeConfig.InitialLength
 
 	-- OPTIMIZED: Buffer sized for 5000 segments
 	local maxHistorySize = mathMin(mathFloor(activeConfig.MaxSegments * 0.6), 3000) -- 3000 for super long snake
@@ -846,56 +856,61 @@ local function createUltraSmoothSnake(character)
 	local function growSnake(amount)
 		amount = amount or 5
 		local grew = false
+		
 		for i = 1, amount do
 			if currentLength < activeConfig.MaxSegments then
 				grew = true
 				currentLength = currentLength + 1
-				-- Ensure we have colors to use
-				local bodyColors = activeConfig.BodyColors
-				if not bodyColors or #bodyColors == 0 then
-					bodyColors = Config.BodyColors  -- Fallback to default
-				end
-				local colorIndex = ((currentLength - 1) % #bodyColors) + 1
-				local color = bodyColors[colorIndex]
-				local lastSegment = segments[#segments]
-				local newPos = lastSegment and lastSegment.Position or rootPart.Position
-				local segment = createSegment(currentLength, newPos, color, activeConfig, snakeModel, currentLength)
-				segments[currentLength] = segment
+				
+				-- Only create visual segment if within visible limit
+				if #segments < MAX_VISIBLE_SEGMENTS then
+					-- Ensure we have colors to use
+					local bodyColors = activeConfig.BodyColors
+					if not bodyColors or #bodyColors == 0 then
+						bodyColors = Config.BodyColors  -- Fallback to default
+					end
+					local segmentIndex = #segments + 1
+					local colorIndex = ((segmentIndex - 1) % #bodyColors) + 1
+					local color = bodyColors[colorIndex]
+					local lastSegment = segments[#segments]
+					local newPos = lastSegment and lastSegment.Position or rootPart.Position
+					local segment = createSegment(segmentIndex, newPos, color, activeConfig, snakeModel, currentLength)
+					segments[segmentIndex] = segment
 
-				-- Dynamic sizing: new segments match uniform growth
-				local growthFactor = 1
-				if currentLength > 200 then
-					-- Same uniform growth as all other segments
-					growthFactor = 1 + ((currentLength - 200) / 2800) * 1.0  -- Match moderate growth
-				end
-				local targetSize = activeConfig.SegmentSize * mathMin(growthFactor, 2.0)  -- Match new max
+					-- Dynamic sizing: new segments match uniform growth
+					local growthFactor = 1
+					if currentLength > 200 then
+						growthFactor = 1 + ((currentLength - 200) / 2800) * 1.0
+					end
+					local targetSize = activeConfig.SegmentSize * mathMin(growthFactor, 2.0)
 
-				segment.Transparency = 1
-				segment.Size = Vector3new(0.05, 0.05, 0.05)
-				taskSpawn(function()
-					local growTime = 0.15
-					local t = 0
-					local startSize = Vector3new(0.05, 0.05, 0.05)
-					local endSize = targetSize
-					local heartbeat = RunService.Heartbeat
+					segment.Transparency = 1
+					segment.Size = Vector3new(0.05, 0.05, 0.05)
+					taskSpawn(function()
+						local growTime = 0.15
+						local t = 0
+						local startSize = Vector3new(0.05, 0.05, 0.05)
+						local endSize = targetSize
+						local heartbeat = RunService.Heartbeat
 
-					while t < growTime and segment.Parent do
-						t = t + heartbeat:Wait()
-						if segment.Parent then
-							local alpha = mathMin(t / growTime, 1)
-							segment.Size = startSize:Lerp(endSize, alpha)
-							segment.Transparency = 1 - alpha
+						while t < growTime and segment.Parent do
+							t = t + heartbeat:Wait()
+							if segment.Parent then
+								local alpha = mathMin(t / growTime, 1)
+								segment.Size = startSize:Lerp(endSize, alpha)
+								segment.Transparency = 1 - alpha
+							end
 						end
-					end
-					if segment.Parent then
-						segment.Size = endSize
-						segment.Transparency = 0
-					end
-				end)
+						if segment.Parent then
+							segment.Size = endSize
+							segment.Transparency = 0
+						end
+					end)
+				end
 			end
 		end
 
-		if grew and leaderstats and updateCounter % 5 == 0 then
+		if grew and leaderstats then
 			local lengthValue = leaderstats:FindFirstChild("Length")
 			if lengthValue then
 				lengthValue.Value = currentLength
@@ -1054,6 +1069,47 @@ local function createUltraSmoothSnake(character)
 				headParts.head.Transparency = 1
 			end
 
+			-- TAIL EFFECT: Show snake continues beyond visible segments
+			if currentLength > MAX_VISIBLE_SEGMENTS and #segments >= MAX_VISIBLE_SEGMENTS then
+				local lastSegments = math.min(30, #segments)
+				for i = #segments - lastSegments + 1, #segments do
+					local seg = segments[i]
+					if seg and seg.Parent then
+						-- Fade out the tail
+						local fadeProgress = (i - (#segments - lastSegments)) / lastSegments
+						seg.Transparency = fadeProgress * 0.7
+						
+						-- Pulse effect on the very last segment
+						if i == #segments then
+							seg.Transparency = 0.3 + mathSin(tick() * 4) * 0.3
+							-- Add particle effect to show continuation
+							if not seg:FindFirstChild("TailEffect") then
+								local attachment = Instance.new("Attachment")
+								attachment.Name = "TailEffect"
+								attachment.Parent = seg
+								
+								local particle = Instance.new("ParticleEmitter")
+								particle.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+								particle.Rate = 20
+								particle.Lifetime = NumberRange.new(0.5, 1)
+								particle.SpreadAngle = Vector2.new(360, 360)
+								particle.VelocityInheritance = 0.5
+								particle.Transparency = NumberSequence.new({
+									NumberSequenceKeypoint.new(0, 0.8),
+									NumberSequenceKeypoint.new(1, 1)
+								})
+								particle.Size = NumberSequence.new({
+									NumberSequenceKeypoint.new(0, 2),
+									NumberSequenceKeypoint.new(1, 0)
+								})
+								particle.Color = ColorSequence.new(seg.Color)
+								particle.Parent = attachment
+							end
+						end
+					end
+				end
+			end
+			
 			-- Update eye positions to maintain EXACT proportions as head grows
 			if headParts.leftEye and headParts.rightEye and updateCounter % 60 == 0 then  -- Much less frequent
 				local headSize = headParts.head.Size.X
@@ -1155,113 +1211,26 @@ local function createUltraSmoothSnake(character)
 		-- POSITION HISTORY BASED MOVEMENT WITH ANTI-GAP FOR BOOSTING
 		framesSinceSpawn = framesSinceSpawn + 1
 
-		-- VISIBILITY-BASED RENDERING: Only render what players can see
-		local camera = workspace.CurrentCamera
-		local maxRenderDistance = 500  -- Maximum distance to render segments
-		local visibleSegments = {}
+		-- SIMPLIFIED RENDERING: Only process visible segments
+		local visibleCount = #segments  -- Only process what we actually have
 		
-		-- QUALITY CHECK: Every 30 frames, do a full quality pass on visible segments
-		local doQualityCheck = updateCounter % 30 == 0
-		
-		-- First pass: Determine which segments are visible (optimized)
-		-- Check visibility in batches for performance
-		local batchSize = 20
-		for batchStart = 1, currentLength, batchSize do
-			local batchEnd = math.min(batchStart + batchSize - 1, currentLength)
-			
-			-- Check if any segment in this batch is visible
-			local batchVisible = batchStart <= 200  -- First 200 always visible
-			
-			if not batchVisible then
-				-- Get a representative position for the batch
-				local midIndex = math.floor((batchStart + batchEnd) / 2)
-				local midSegment = segments[midIndex]
-				
-				if midSegment and midSegment.Parent then
-					for _, player in pairs(Players:GetPlayers()) do
-						if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-							local distance = (midSegment.Position - player.Character.HumanoidRootPart.Position).Magnitude
-							if distance < maxRenderDistance * 1.2 then  -- Slightly larger range for batches
-								batchVisible = true
-								break
-							end
-						end
-					end
-				end
-			end
-			
-			-- Apply visibility to all segments in batch
-			for i = batchStart, batchEnd do
-				visibleSegments[i] = batchVisible
-			end
-		end
-
-		-- Second pass: Update segments with visibility-aware LOD
-		for i = 1, currentLength do
+		-- Update visible segments
+		for i = 1, visibleCount do
 			local segment = segments[i]
 			if segment and segment.Parent then
-				local isVisible = visibleSegments[i]
-				
-				-- SMART LOD: Update frequency based on visibility AND position
+				-- Simple LOD based on position
 				local updateFrequency = 1
-
-				if not isVisible then
-					-- Invisible segments update rarely but stay ready
-					updateFrequency = 60
-					segment.Transparency = 1
-					-- Disable effects for invisible segments
-					local light = segment:FindFirstChild("Glow")
-					if light then
-						light.Enabled = false
-					end
+				
+				if i <= 100 then
+					updateFrequency = 1  -- Always update near head
+				elseif i <= 200 then
+					updateFrequency = 2
+				elseif i <= 400 then
+					updateFrequency = 3
+				elseif i <= 600 then
+					updateFrequency = 4
 				else
-					-- Visible segments maintain full quality
-					segment.Transparency = 0
-					
-					-- Re-enable glow for visible segments that should have it
-					local shouldHaveGlow = graphicsMode ~= "Low" and (i <= 30 or i % 10 == 0)
-					local light = segment:FindFirstChild("Glow")
-					
-					if shouldHaveGlow then
-						if light then
-							light.Enabled = true
-							-- Update glow properties if needed
-							if doQualityCheck then
-								light.Color = segment.Color
-								light.Brightness = activeConfig.GlowIntensity
-								light.Range = activeConfig.GlowRange
-							end
-						else
-							-- Recreate glow if missing
-							light = Instance.new("PointLight")
-							light.Name = "Glow"
-							light.Color = segment.Color
-							light.Brightness = activeConfig.GlowIntensity
-							light.Range = activeConfig.GlowRange
-							light.Parent = segment
-						end
-					elseif light then
-						light.Enabled = false
-					end
-					
-					-- Smart update frequency for visible segments
-					if i <= 100 then
-						updateFrequency = 1  -- Always update near head for smoothness
-					elseif i <= 300 then
-						updateFrequency = 2
-					elseif i <= 600 then
-						updateFrequency = 3
-					elseif i <= 1000 then
-						updateFrequency = 4
-					elseif i <= 2000 then
-						updateFrequency = 6
-					elseif i <= 3000 then
-						updateFrequency = 8
-					elseif i <= 4000 then
-						updateFrequency = 10
-					else
-						updateFrequency = 12  -- Even far visible segments update smoothly
-					end
+					updateFrequency = 5  -- Far segments still update smoothly
 				end
 
 				if updateCounter % updateFrequency == 0 then
@@ -1327,54 +1296,7 @@ local function createUltraSmoothSnake(character)
 					segment.Size = uniformTargetSize  -- Instant update for ALL
 				end
 				
-				-- QUALITY PRESERVATION: Ensure segment maintains proper appearance
-				if isVisible or doQualityCheck then
-					-- Ensure material quality is preserved
-					local expectedMaterial = graphicsMode == "Low" and Enum.Material.SmoothPlastic or activeConfig.BodyMaterial
-					if segment.Material ~= expectedMaterial then
-						segment.Material = expectedMaterial
-					end
-					
-					-- Ensure color is correct
-					local colorIndex = ((i - 1) % #activeConfig.BodyColors) + 1
-					local expectedColor = activeConfig.BodyColors[colorIndex]
-					if segment.Color ~= expectedColor then
-						segment.Color = expectedColor
-						-- Update glow color too if it exists
-						local light = segment:FindFirstChild("Glow")
-						if light then
-							light.Color = expectedColor
-						end
-					end
-					
-					-- Ensure shape is correct (in case it got corrupted)
-					if segment.Shape ~= Enum.PartType.Ball then
-						segment.Shape = Enum.PartType.Ball
-					end
-					
-					-- Ensure surfaces are smooth
-					if segment.TopSurface ~= Enum.SurfaceType.Smooth then
-						segment.TopSurface = Enum.SurfaceType.Smooth
-						segment.BottomSurface = Enum.SurfaceType.Smooth
-					end
-					
-					-- Ensure outline exists and is properly configured
-					local outline = segment:FindFirstChild("Outline")
-					if not outline then
-						outline = Instance.new("SelectionBox")
-						outline.Name = "Outline"
-						outline.Adornee = segment
-						outline.Color3 = Color3.fromRGB(255, 255, 255)
-						outline.LineThickness = 0.03
-						outline.Transparency = 1
-						outline.Parent = segment
-					else
-						-- Ensure outline properties are correct
-						if outline.Transparency ~= 1 then
-							outline.Transparency = 1
-						end
-					end
-				end
+
 			end
 		end
 
