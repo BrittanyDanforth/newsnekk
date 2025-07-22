@@ -381,6 +381,59 @@ function Snake:update(dt)
 end
 
 function Snake:streamSegments()
+	-- Need at least a few points to create a path
+	if #self.path.points < 5 then
+		return
+	end
+	
+	-- On server, show all segments (no camera-based streaming)
+	-- Client-side streaming will be handled by client scripts
+	if RunService:IsServer() then
+		-- Show all segments up to length
+		local segmentSpacing = self.config.SegmentSpacing or 1.2
+		for i = 1, self.length do
+			local distance = i * segmentSpacing
+			local pointData = self.path:getPositionAtDistance(distance)
+			
+			if pointData then
+				-- Need to show this segment
+				if not self.visibleSegments[i] then
+					local segment = getSegmentFromPool()
+					if segment then
+						-- Configure segment
+						local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
+						local bodyColor = self.config.BodyColors[colorIndex]
+						segment.Color = bodyColor
+						segment.Size = self.config.SegmentSize or Vector3.new(3.5, 3.5, 3.5)
+						
+						-- Update glow color
+						local glow = segment:FindFirstChild("glow")
+						if glow then
+							glow.Color = bodyColor
+						end
+						
+						segment.Parent = self.model
+						
+						self.visibleSegments[i] = segment
+						
+						-- Debug print for first few segments
+						if i <= 5 then
+							print("Created segment", i, "at distance", distance)
+						end
+					end
+				end
+				
+				-- Update position
+				local segment = self.visibleSegments[i]
+				if segment then
+					segment.CFrame = CFramenew(pointData.pos, pointData.pos + pointData.look)
+				end
+			end
+		end
+		return
+	end
+	
+	-- Client-side camera-based streaming (original code)
 	local camera = workspace.CurrentCamera
 	if not camera then return end
 	
