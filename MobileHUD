@@ -83,12 +83,12 @@ hudGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 hudGui.IgnoreGuiInset = true -- Ensure full screen usage
 hudGui.Parent = playerGui
 
--- Initialize player snake data
-if not _G.PlayerSnakes then
-	_G.PlayerSnakes = {}
+-- Initialize mobile control data (separate from snake instances)
+if not _G.MobileControlData then
+	_G.MobileControlData = {}
 end
-if not _G.PlayerSnakes[player] then
-	_G.PlayerSnakes[player] = {
+if not _G.MobileControlData[player] then
+	_G.MobileControlData[player] = {
 		touchPosition = nil, -- Store actual touch position instead of direction
 		isBoosting = false,
 		currentLength = 10
@@ -149,8 +149,8 @@ boostButton.MouseButton1Down:Connect(function()
 		boostStroke.Transparency = 0
 
 		-- Send boost signal
-		if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-			_G.PlayerSnakes[player].isBoosting = true
+		if _G.MobileControlData and _G.MobileControlData[player] then
+			_G.MobileControlData[player].isBoosting = true
 		end
 
 		-- Haptic feedback if available
@@ -173,8 +173,8 @@ boostButton.MouseButton1Up:Connect(function()
 		boostStroke.Transparency = 0.3
 
 		-- Stop boost
-		if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-			_G.PlayerSnakes[player].isBoosting = false
+		if _G.MobileControlData and _G.MobileControlData[player] then
+			_G.MobileControlData[player].isBoosting = false
 		end
 	end
 end)
@@ -266,8 +266,8 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 			primaryTouch = input
 
 			-- Store the touch position for the snake to follow
-			if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-				_G.PlayerSnakes[player].touchPosition = Vector2.new(input.Position.X, input.Position.Y)
+			if _G.MobileControlData and _G.MobileControlData[player] then
+				_G.MobileControlData[player].touchPosition = Vector2.new(input.Position.X, input.Position.Y)
 			end
 		end
 	end
@@ -276,8 +276,8 @@ end)
 UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	if input.UserInputType == Enum.UserInputType.Touch and input == primaryTouch then
 		-- Update touch position continuously as finger moves
-		if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-			_G.PlayerSnakes[player].touchPosition = Vector2.new(input.Position.X, input.Position.Y)
+		if _G.MobileControlData and _G.MobileControlData[player] then
+			_G.MobileControlData[player].touchPosition = Vector2.new(input.Position.X, input.Position.Y)
 		end
 	end
 end)
@@ -301,7 +301,7 @@ end)
 local lastTouchUpdate = 0
 RunService.Heartbeat:Connect(function()
 	-- Force update touch position every frame if we have an active touch
-	if primaryTouch and _G.PlayerSnakes and _G.PlayerSnakes[player] then
+	if primaryTouch and _G.MobileControlData and _G.MobileControlData[player] then
 		-- This ensures continuous updates even if InputChanged doesn't fire
 		local currentTime = tick()
 		if currentTime - lastTouchUpdate > 0.016 then -- 60 FPS update rate

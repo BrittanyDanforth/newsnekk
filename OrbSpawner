@@ -323,6 +323,12 @@ local function growPlayerSnake(player, value)
 	if not snakeInst and player.Character:FindFirstChild("__SnakeInstance") then
 		snakeInst = player.Character.__SnakeInstance.Value
 	end
+	
+	print("growPlayerSnake - snakeInst type:", typeof(snakeInst), "value:", value)
+	if snakeInst then
+		print("snakeInst has grow?", snakeInst.grow ~= nil)
+	end
+	
 	if snakeInst and snakeInst.grow then 
 		-- Queue the growth instead of growing immediately
 		snakeInst:grow(value or 10)  -- FIXED: Added colon
