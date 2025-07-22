@@ -400,6 +400,13 @@ local function createSafeOrb(position, value, name, color, material)
 	orb.TopSurface = Enum.SurfaceType.Smooth
 	orb.BottomSurface = Enum.SurfaceType.Smooth
 	orb.Transparency = 1  -- Start invisible
+	
+	-- Special properties for upgrade orbs
+	if name == "UpgradeOrb" then
+		orb.Size = Vector3.new(5, 5, 5)  -- Bigger than normal orbs
+		orb.Transparency = 0.3  -- Semi-transparent
+	end
+	
 	orb.Parent = workspace
 
 	local val = Instance.new("NumberValue")
@@ -882,15 +889,17 @@ local function createOrb()
 			pooledOrbCount = pooledOrbCount - 1
 			-- Reset and configure as upgrade orb
 			orb.Name = "UpgradeOrb"
-			orb.Color = Color3.fromRGB(0, 200, 255)
+			orb.Color = Color3.fromRGB(0, 150, 255)  -- Darker blue
 			orb.Material = Enum.Material.ForceField
+			orb.Transparency = 0.3  -- Make it semi-transparent
+			orb.Size = Vector3.new(5, 5, 5)  -- Slightly larger
 			orb.Position = randomPosition()
 			orb.Parent = workspace
 			local val = orb:FindFirstChild("Value")
 			if val then val.Value = 0 end
 		else
 			orb = createSafeOrb(randomPosition(), 0, "UpgradeOrb",
-				Color3.fromRGB(0, 200, 255), Enum.Material.ForceField)
+				Color3.fromRGB(0, 150, 255), Enum.Material.ForceField)
 		end
 		upgradeOrbs[#upgradeOrbs + 1] = orb
 		orbs[#orbs + 1] = orb

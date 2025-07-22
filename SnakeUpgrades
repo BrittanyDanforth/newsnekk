@@ -4,7 +4,7 @@ local SnakeUpgrades = {}
 
 -- Duration of speed boost in seconds
 local SPEED_BOOST_DURATION = 6
-local SPEED_BOOST_AMOUNT = 1.5 -- Multiplier
+local SPEED_BOOST_AMOUNT = 1.2 -- Reduced from 1.5 to 1.2 (20% faster instead of 50%)
 
 function SnakeUpgrades.GiveUpgrade(snake)
     if not snake then return end
@@ -21,9 +21,12 @@ function SnakeUpgrades.GiveUpgrade(snake)
         snake.NormalSpeed = origSpeed * SPEED_BOOST_AMOUNT
         snake.BoostSpeed = origBoost * SPEED_BOOST_AMOUNT
 
-        -- Optional: Visual feedback (change head color)
+        -- NO COLOR CHANGE - just subtle glow increase
         if snake.HeadParts and snake.HeadParts.head then
-            snake.HeadParts.head.Color = Color3.fromRGB(255, 100, 0)
+            local headGlow = snake.HeadParts.head:FindFirstChild("PointLight")
+            if headGlow then
+                headGlow.Brightness = headGlow.Brightness * 1.3
+            end
         end
 
         task.delay(SPEED_BOOST_DURATION, function()
@@ -31,9 +34,12 @@ function SnakeUpgrades.GiveUpgrade(snake)
                 snake.NormalSpeed = origSpeed
                 snake.BoostSpeed = origBoost
                 snake._isSpeedBoosted = false
-                -- Restore color
+                -- Restore glow
                 if snake.HeadParts and snake.HeadParts.head then
-                    snake.HeadParts.head.Color = Color3.fromRGB(57, 255, 20)
+                    local headGlow = snake.HeadParts.head:FindFirstChild("PointLight")
+                    if headGlow then
+                        headGlow.Brightness = headGlow.Brightness / 1.3
+                    end
                 end
             end
         end)
@@ -50,26 +56,19 @@ function SnakeUpgrades.GiveUpgrade(snake)
         local currentSpeedMult = player:GetAttribute("SpeedMultiplier") or 1
         player:SetAttribute("TempSpeedMultiplier", SPEED_BOOST_AMOUNT)
         
-        -- Visual feedback - change head color to orange
+        -- NO COLOR CHANGE - just subtle glow increase
         if snake.head then
-            local originalColor = snake.head.Color
-            snake.head.Color = Color3.fromRGB(255, 100, 0)
-            
-            -- Add glow effect
             local headGlow = snake.head:FindFirstChild("PointLight")
             if headGlow then
-                headGlow.Brightness = headGlow.Brightness * 2
-                headGlow.Range = headGlow.Range * 1.5
+                headGlow.Brightness = headGlow.Brightness * 1.3
             end
             
             task.delay(SPEED_BOOST_DURATION, function()
                 if snake and snake.head then
-                    snake.head.Color = originalColor
                     snake._isSpeedBoosted = false
                     
                     if headGlow then
-                        headGlow.Brightness = headGlow.Brightness / 2
-                        headGlow.Range = headGlow.Range / 1.5
+                        headGlow.Brightness = headGlow.Brightness / 1.3
                     end
                 end
                 
