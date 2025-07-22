@@ -176,16 +176,26 @@ local function onCharacterAdded(character)
 		end
 	end)
 	
-	-- Cleanup on death
+	-- Handle death
 	humanoid.Died:Connect(function()
-		if updateConnection then
-			updateConnection:Disconnect()
-		end
-		if skinConnection then
-			skinConnection:Disconnect()
-		end
-		if activeSnakes[player] == snake then
-			snake:destroy()
+		if activeSnakes[player] then
+			-- Get snake's current position and length for death orbs
+			local deathPos = rootPart.Position
+			local snakeLength = lengthValue and lengthValue.Value or 55
+			
+			-- Spawn death orbs
+			local orbSpawner = game.ServerScriptService:FindFirstChild("OrbSpawner")
+			if orbSpawner then
+				local orbModule = require(orbSpawner)
+				if orbModule and orbModule.spawnDeathOrbsForSnake then
+					-- Spawn orbs based on snake length (cap at reasonable amount)
+					local orbCount = math.min(math.floor(snakeLength / 10), 100)
+					orbModule.spawnDeathOrbsForSnake(deathPos, orbCount)
+				end
+			end
+			
+			-- Clean up snake
+			activeSnakes[player]:destroy()
 			activeSnakes[player] = nil
 		end
 	end)

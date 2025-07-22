@@ -153,10 +153,15 @@ function Snake.new(character, config)
 	end
 	self.maxHistorySize = maxHistorySize
 	
-	-- Create snake model
+	-- Create snake model with proper naming for collision detection
 	self.model = Instance.new("Model")
-	self.model.Name = (self.player.Name or "Unknown") .. "_Snake"
+	self.model.Name = "SnakeModel_" .. self.player.UserId
+	self.model:SetAttribute("IsSnakeModel", true)
+	self.model:SetAttribute("OwnerUserId", self.player.UserId)
 	self.model.Parent = workspace
+	
+	-- Store reference in character for collision handler
+	self.character:SetAttribute("SnakeModel", self.model)
 	
 	-- Initialize
 	self:createHead()
@@ -206,6 +211,10 @@ function Snake:createHead()
 	head.CanTouch = false
 	head.Anchored = true
 	head.Parent = self.model
+	
+	-- Tag for collision detection
+	CollectionService:AddTag(head, "SnakeHead")
+	head:SetAttribute("PlayerId", self.player.UserId)
 	
 	-- Add glow
 	local glow = Instance.new("PointLight")
@@ -311,6 +320,10 @@ function Snake:createInitialSegments()
 			segment.Size = currentSize
 			segment.CFrame = CFramenew(pos, pos - direction)
 			segment.Parent = self.model
+			
+			-- Tag for collision detection
+			CollectionService:AddTag(segment, "SnakeSegment")
+			segment:SetAttribute("SegmentIndex", i)
 			
 			-- Update glow
 			local glow = segment:FindFirstChild("glow")
@@ -456,6 +469,10 @@ function Snake:updateLength(newLength)
 				segment.CFrame = CFramenew(pos)
 				segment.Parent = self.model
 				
+				-- Tag for collision detection
+				CollectionService:AddTag(segment, "SnakeSegment")
+				segment:SetAttribute("SegmentIndex", i)
+				
 				-- Update glow
 				local glow = segment:FindFirstChild("glow")
 				if glow then
@@ -485,8 +502,9 @@ function Snake:sendNetworkUpdate()
 end
 
 function Snake:destroy()
-	-- Return all segments to pool
+	-- Return all segments to pool and remove tags
 	for _, segment in pairs(self.segments) do
+		CollectionService:RemoveTag(segment, "SnakeSegment")
 		returnSegmentToPool(segment)
 	end
 	
@@ -499,7 +517,16 @@ function Snake:destroy()
 	end
 	
 	if self.model then
+		-- Remove head tag
+		if self.head then
+			CollectionService:RemoveTag(self.head, "SnakeHead")
+		end
 		self.model:Destroy()
+	end
+	
+	-- Clear character attribute
+	if self.character and self.character.Parent then
+		self.character:SetAttribute("SnakeModel", nil)
 	end
 end
 
