@@ -8,9 +8,9 @@ local TweenService = game:GetService("TweenService")
 local CollectionService = game:GetService("CollectionService")
 
 -- Constants
-local SEGMENT_POOL_SIZE = 5000
+local SEGMENT_POOL_SIZE = 10000  -- Doubled from 5000
 local NETWORK_UPDATE_RATE = 30
-local MAX_VISIBLE_SEGMENTS = 300
+local MAX_VISIBLE_SEGMENTS = 500  -- Increased from 300
 
 -- Fast references
 local CFramenew = CFrame.new
@@ -133,7 +133,7 @@ function Snake.new(character, config)
 	self.visibleSegments = {}
 	
 	-- Position history buffer (like original)
-	local maxHistorySize = mathMin(mathFloor(config.MaxSegments * 0.6), 6000)
+	local maxHistorySize = mathMin(mathFloor(config.MaxSegments * 0.6), 30000)  -- Increased from 6000
 	self.positionHistory = {}
 	self.historyHead = 1
 	self.historyCount = 0
@@ -249,14 +249,26 @@ function Snake:calculateGrowthFactor()
 	local growthFactor = 1
 	if self.length > 200 then
 		if self.length <= 2000 then
+			-- 200-2000: grow from 1x to 2x
 			growthFactor = 1 + ((self.length - 200) / 1800) * 1.0
 		elseif self.length <= 5000 then
-			growthFactor = 2 + ((self.length - 2000) / 3000) * 0.5
+			-- 2000-5000: grow from 2x to 3x
+			growthFactor = 2 + ((self.length - 2000) / 3000) * 1.0
+		elseif self.length <= 10000 then
+			-- 5000-10000: grow from 3x to 4x
+			growthFactor = 3 + ((self.length - 5000) / 5000) * 1.0
+		elseif self.length <= 20000 then
+			-- 10000-20000: grow from 4x to 5x
+			growthFactor = 4 + ((self.length - 10000) / 10000) * 1.0
+		elseif self.length <= 35000 then
+			-- 20000-35000: grow from 5x to 6x
+			growthFactor = 5 + ((self.length - 20000) / 15000) * 1.0
 		else
-			growthFactor = 2.5 + ((self.length - 5000) / 5000) * 0.5
+			-- 35000-50000: grow from 6x to 7x (MASSIVE!)
+			growthFactor = 6 + ((self.length - 35000) / 15000) * 1.0
 		end
 	end
-	return mathMin(growthFactor, 3.0)
+	return mathMin(growthFactor, 7.0)  -- Cap at 7x size
 end
 
 function Snake:createInitialSegments()
