@@ -33,7 +33,7 @@ function AISnakeOrbPickup.PickupNearbyOrbs(orbFolder, snakeHead, aiSnakeId)
 			if dist <= ORB_PICKUP_RADIUS then
 				-- Get orb value before collection
 				local valueObj = orb:FindFirstChild("Value")
-				local orbValue = valueObj and valueObj.Value or 1
+				local orbValue = valueObj and valueObj.Value or 5  -- Updated from 1 to 5
 
 				-- Collect orb using OrbUtils (assuming it has a CollectOrb function)
 				if OrbUtils.CollectOrb then
@@ -107,7 +107,7 @@ RunService.Heartbeat:Connect(function()
 
 						-- Get orb value
 						local valueObj = orb:FindFirstChild("Value")
-						local orbValue = valueObj and valueObj.Value or 1
+						local orbValue = valueObj and valueObj.Value or 5  -- Updated from 1 to 5
 
 						print("   Orb has Value?", valueObj ~= nil, "Value:", orbValue)
 						print("   Snake has grow function?", snake.grow ~= nil)
