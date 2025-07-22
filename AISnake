@@ -997,7 +997,116 @@ function AISnake:getFleeVector()
 	return fleeDir
 end
 
--- === MUCH CLEANER AI BRAIN ===
+-- === HELPER: Check if path to target is safe ===
+function AISnake:isPathSafe(targetPos, checkDistance)
+	local myHead = self.HeadParts.head
+	if not myHead then return false end
+	
+	local myPos = myHead.Position
+	local toTarget = targetPos - myPos
+	local distance = toTarget.Magnitude
+	
+	if distance < 0.1 then return true end
+	
+	local direction = toTarget.Unit
+	local checkDist = mathMin(distance, checkDistance or 50)
+	local stepSize = 5
+	
+	-- Check points along the path
+	for d = stepSize, checkDist, stepSize do
+		local checkPos = myPos + direction * d
+		
+		-- Check for other snakes at this position
+		local nearbyEntities = SpatialGrid.QueryRadius(checkPos, 8)
+		for _, entity in nearbyEntities do
+			if entity.type == "AI_SEGMENT" or entity.type == "PLAYER_SEGMENT" then
+				-- Check if it's not our own segment
+				if entity.owner ~= self then
+					-- This path crosses another snake!
+					return false
+				end
+			elseif entity.type == "AI_HEAD" or entity.type == "PLAYER_HEAD" then
+				if entity.owner ~= self then
+					-- Calculate if we'd collide
+					local theirVel = entity.part.AssemblyLinearVelocity or Vector3.zero
+					local timeToReach = d / self.Speed
+					local theirFuturePos = entity.part.Position + theirVel * timeToReach
+					
+					if (checkPos - theirFuturePos).Magnitude < 10 then
+						-- Collision likely!
+						return false
+					end
+				end
+			end
+		end
+	end
+	
+	return true
+end
+
+-- === HELPER: Get smart flee direction ===
+function AISnake:getSmartFleeDirection(threats)
+	local myPos = self.HeadParts.head.Position
+	
+	-- Calculate danger zones from all threats
+	local dangerVectors = {}
+	for _, threat in ipairs(threats) do
+		local awayFromThreat = (myPos - threat.position).Unit
+		local weight = 1 / mathMax(threat.distance, 5) -- Closer = more weight
+		
+		-- Extra weight for bigger snakes
+		if threat.lengthDiff > 20 then
+			weight = weight * 2
+		end
+		
+		table.insert(dangerVectors, {
+			direction = awayFromThreat,
+			weight = weight
+		})
+	end
+	
+	-- Combine all danger vectors
+	local fleeDir = Vector3.zero
+	local totalWeight = 0
+	
+	for _, danger in ipairs(dangerVectors) do
+		fleeDir = fleeDir + danger.direction * danger.weight
+		totalWeight = totalWeight + danger.weight
+	end
+	
+	-- Add bias towards center if far from it
+	local toCenter = Vector3new(0, myPos.Y, 0) - myPos
+	local distFromCenter = toCenter.Magnitude
+	if distFromCenter > 200 then
+		local centerWeight = (distFromCenter - 200) / 100
+		fleeDir = fleeDir + toCenter.Unit * centerWeight
+		totalWeight = totalWeight + centerWeight
+	end
+	
+	if totalWeight > 0 then
+		fleeDir = (fleeDir / totalWeight).Unit
+		
+		-- Check if flee direction is safe
+		if not self:isPathSafe(myPos + fleeDir * 30, 30) then
+			-- Try perpendicular directions
+			local perpDir1 = Vector3new(-fleeDir.Z, 0, fleeDir.X)
+			local perpDir2 = Vector3new(fleeDir.Z, 0, -fleeDir.X)
+			
+			if self:isPathSafe(myPos + perpDir1 * 30, 30) then
+				fleeDir = perpDir1
+			elseif self:isPathSafe(myPos + perpDir2 * 30, 30) then
+				fleeDir = perpDir2
+			end
+		end
+		
+		return fleeDir
+	end
+	
+	-- Default: flee towards center
+	return toCenter.Unit
+end
+
+-- === MUCH SMARTER AI BRAIN ===
 function AISnake:_determineAction()
 	local headPos = self.HeadParts.head.Position
 	local p = self.Personality
@@ -1028,9 +1137,9 @@ function AISnake:_determineAction()
 		self.isAmbushing = false
 	end
 
-	-- Priority 0: BOUNDARY AVOIDANCE (NEW - HIGHEST PRIORITY)
-	local boundaryBuffer = 80  -- Start turning when this close to edge
-	local strongBuffer = 40    -- Strong turn when this close
+	-- Priority 0: BOUNDARY AVOIDANCE (HIGHEST PRIORITY)
+	local boundaryBuffer = 80
+	local strongBuffer = 40
 	local edgeSteer = nil
 	
 	-- Check X boundaries
@@ -1082,7 +1191,72 @@ function AISnake:_determineAction()
 		return "AVOID_WALL", wallVec.Unit
 	end
 
-	-- Priority 2: Threat assessment (MUCH more selective)
+	-- Priority 2: COLLISION AVOIDANCE (NEW!)
+	-- Check for imminent collisions in our current path
+	local lookAheadDist = self.Speed * 1.5 -- Look 1.5 seconds ahead
+	local futurePos = headPos + self.Direction * lookAheadDist
+	
+	local nearbyDanger = SpatialGrid.QueryRadius(futurePos, 15)
+	local collisionThreat = nil
+	local minCollisionTime = math.huge
+	
+	for _, entity in nearbyDanger do
+		if entity.owner ~= self and (entity.type:match("HEAD") or entity.type:match("SEGMENT")) then
+			-- Calculate time to collision
+			local theirPos = entity.part.Position
+			local relPos = theirPos - headPos
+			local relVel = self.Direction * self.Speed
+			
+			if entity.part.AssemblyLinearVelocity then
+				relVel = relVel - entity.part.AssemblyLinearVelocity
+			end
+			
+			local timeToCollision = relPos:Dot(relVel) / relVel:Dot(relVel)
+			
+			if timeToCollision > 0 and timeToCollision < 2 then
+				local collisionPos = headPos + self.Direction * self.Speed * timeToCollision
+				local theirFuturePos = theirPos
+				
+				if entity.part.AssemblyLinearVelocity then
+					theirFuturePos = theirPos + entity.part.AssemblyLinearVelocity * timeToCollision
+				end
+				
+				local collisionDist = (collisionPos - theirFuturePos).Magnitude
+				
+				if collisionDist < 8 and timeToCollision < minCollisionTime then
+					minCollisionTime = timeToCollision
+					collisionThreat = entity
+				end
+			end
+		end
+	end
+	
+	if collisionThreat and minCollisionTime < 1 then
+		-- EMERGENCY AVOIDANCE!
+		local threatPos = collisionThreat.part.Position
+		local avoidDir = (headPos - threatPos).Unit
+		
+		-- Try to go perpendicular to avoid head-on collision
+		local perpDir = Vector3new(-avoidDir.Z, 0, avoidDir.X)
+		
+		-- Choose direction based on which side is clearer
+		local leftClear = self:isPathSafe(headPos + perpDir * 20, 20)
+		local rightClear = self:isPathSafe(headPos - perpDir * 20, 20)
+		
+		if leftClear and not rightClear then
+			steer = perpDir
+		elseif rightClear and not leftClear then
+			steer = -perpDir
+		else
+			-- Both or neither clear, just avoid directly
+			steer = avoidDir
+		end
+		
+		self.TargetOrb = nil  -- Cancel orb seeking
+		return "COLLISION_AVOID", steer
+	end
+
+	-- Priority 3: Threat assessment (SMARTER)
 	local threats = self:findNearbyThreats()
 	local shouldFlee = false
 	local fleeReason = ""
@@ -1090,123 +1264,80 @@ function AISnake:_determineAction()
 	if #threats > 0 then
 		local closestThreat = threats[1]
 
-		-- More balanced fleeing decisions
-		if closestThreat.distance < 20 and closestThreat.lengthDiff > 10 then
+		-- More nuanced fleeing decisions
+		if closestThreat.distance < 15 and closestThreat.lengthDiff > 5 then
 			shouldFlee = true
 			fleeReason = "immediate_danger"
-		elseif closestThreat.lengthDiff > 30 and closestThreat.distance < 35 then
+		elseif closestThreat.distance < 25 and closestThreat.lengthDiff > 15 then
+			shouldFlee = true
+			fleeReason = "bigger_snake_nearby"
+		elseif closestThreat.lengthDiff > 30 and closestThreat.distance < 40 then
 			shouldFlee = true
 			fleeReason = "giant_enemy"
-		elseif #threats >= 3 and closestThreat.distance < 25 then
+		elseif #threats >= 2 and closestThreat.distance < 30 then
 			shouldFlee = true
-			fleeReason = "surrounded"
-		elseif p.FleeThreshold and closestThreat.lengthDiff > p.FleeThreshold and closestThreat.distance < 40 then
+			fleeReason = "multiple_threats"
+		elseif p.Type == "Coward" and closestThreat.lengthDiff > 0 and closestThreat.distance < 35 then
 			shouldFlee = true
-			fleeReason = "personality_threshold"
+			fleeReason = "coward_instinct"
 		end
 
-		-- Aggressive types are braver but still cautious
-		if shouldFlee and (p.Type == "Aggressor" or p.Type == "Hunter") and closestThreat.lengthDiff < 15 then
-			shouldFlee = false
+		-- Even aggressive types flee from much bigger snakes
+		if shouldFlee and (p.Type == "Aggressor" or p.Type == "Hunter") then
+			if closestThreat.lengthDiff < 10 and closestThreat.distance > 20 then
+				shouldFlee = false
+			end
 		end
 	end
 
 	if shouldFlee or self.Avoiding then
 		self.TargetSnake = nil
-		local fleeVec = self:getFleeVector()
-
+		self.TargetOrb = nil  -- Cancel orb seeking when fleeing
+		
+		local fleeDir = self:getSmartFleeDirection(threats)
+		
 		self.Avoiding = true
-		self.AvoidDir = fleeVec
-		self.AvoidExpire = now + 2.0 -- INCREASED duration
+		self.AvoidDir = fleeDir
+		self.AvoidExpire = now + 2.5
 		if shouldFlee then self.FleeReason = fleeReason end
-		return "FLEE", fleeVec
+		return "FLEE", fleeDir
 	end
 
-	-- Priority 3: Target acquisition (ONLY if no orbs nearby AND very close)
-	local nearestSnake, nearestDist = self:findNearestSnakeHead()
-
-	-- Only target snakes if VERY close and no orbs
-	if nearestSnake and nearestDist < 25 and not self.TargetOrb then
-		self.TargetSnake = nearestSnake
-	else
-		self.TargetSnake = nil
-	end
-
-	-- Priority 4: Combat decisions (MUCH simpler)
-	if self.TargetSnake then
-		local opponentLength
-		if self.TargetSnake.isPlayer then
-			opponentLength = getPlayerLength(self.TargetSnake.player)
-		else
-			opponentLength = self.TargetSnake.snake.CurrentLength
-		end
-		local lengthAdvantage = self.CurrentLength - opponentLength
-		if self.isConfident then lengthAdvantage = lengthAdvantage + 15 end
-
-		local targetPos = self.TargetSnake.part.Position
-		local decision = "WANDER"
-
-		-- SUPER SIMPLIFIED decisions - focus on orbs!
-		if lengthAdvantage > 20 and nearestDist < 20 then
-			-- Only attack if we're much bigger and very close
-			decision = "HUNT"
-		elseif lengthAdvantage < -10 then
-			-- Flee if they're bigger
-			decision = "FLEE"
-		else
-			-- Otherwise just wander and look for orbs
-			decision = "WANDER"
-			self.TargetSnake = nil
-		end
-
-		-- Execute decisions (SIMPLIFIED)
-		if decision == "HUNT" then
-			state = "HUNT"
-			steer = (targetPos - headPos).Unit
-
-		elseif decision == "CIRCLE" then
-			-- Just convert circling to hunting for simplicity
-			state = "HUNT"
-			steer = (targetPos - headPos).Unit
-
-		elseif decision == "FLEE" then
-			state = "FLEE"
-			local fleeVec = self:getFleeVector()
-			steer = fleeVec
-			self.Avoiding = true
-			self.AvoidDir = fleeVec
-			self.AvoidExpire = now + 2.5
-
-		else
-			self.TargetSnake = nil
-		end
-	end
-
-	-- Priority 5: Orb seeking (TOP PRIORITY!)
+	-- Priority 4: Smart orb seeking
 	if p.TargetOrbs then
-		if not self.TargetOrb then
+		-- Find best orb with path checking
+		if not self.TargetOrb or not self:isPathSafe(self.TargetOrb.Position) then
 			local orb, dist = self:findBestOrb()
-			if orb and dist < p.OrbSeekRadius * 1.5 then  -- Increased range
+			
+			-- Only target orb if path is safe
+			if orb and dist < p.OrbSeekRadius * 1.5 and self:isPathSafe(orb.Position) then
 				self.TargetOrb = orb
-				self.TargetOrbExpire = now + mathRandom(50, 80) / 10 -- Even longer targeting
+				self.TargetOrbExpire = now + mathRandom(50, 80) / 10
 				AISnake._orbTargets[self] = orb
+			else
+				self.TargetOrb = nil
 			end
 		end
+		
 		if self.TargetOrb and self.TargetOrb.Parent then
 			state = "SEEK_ORB"
 			local toOrb = self.TargetOrb.Position - headPos
 			local orbDist = toOrb.Magnitude
 			
-			-- Smart orb approach - predict where to aim based on distance
+			-- Smart orb approach with collision checking
 			if orbDist < 15 then
-				-- Very close - aim directly at orb
 				steer = toOrb.Unit
 			elseif orbDist < 30 then
-				-- Medium distance - aim slightly ahead of current direction for smoother approach
-				local predictedPos = self.TargetOrb.Position + self.Direction * 2
-				steer = (predictedPos - headPos).Unit
+				-- Check for obstacles
+				if not self:isPathSafe(self.TargetOrb.Position, 30) then
+					-- Path blocked, find new orb
+					self.TargetOrb = nil
+					AISnake._orbTargets[self] = nil
+				else
+					local leadFactor = mathMin(orbDist / 30, 0.5)
+					steer = toOrb.Unit
+				end
 			else
-				-- Far away - just head towards it
 				steer = toOrb.Unit
 			end
 			
@@ -1215,50 +1346,45 @@ function AISnake:_determineAction()
 		end
 	end
 
-	-- Priority 6: Wandering with personality-based patrol
+	-- Priority 5: Wandering (SMARTER)
 	if state == "WANDER" then
-		-- Use territory center for Guardians, map center for others
-		local patrolCenter = p.TerritoryCenter or Vector3new(0, headPos.Y, 0)
-		local toCenter = patrolCenter - headPos
+		local mapCenter = Vector3new(0, headPos.Y, 0)
+		local toCenter = mapCenter - headPos
 		local distFromCenter = toCenter.Magnitude
-		local patrolRadius = p.PatrolRadius or 200
 
-		-- SMOOTHER random turning
+		-- Smoother wandering
 		if (now - (self.LastTurn or 0) > p.RandomTurnInterval) then
-			-- Turn amount based on personality
-			local maxTurn = p.Type == "Nomad" and 45 or 30
+			local maxTurn = 45
 			self.TargetYaw = self.TargetYaw + mathRad(mathRandom(-maxTurn, maxTurn))
 			self.LastTurn = now
 		end
 
 		local baseSteer = Vector3new(mathSin(self.TargetYaw), 0, mathCos(self.TargetYaw))
 
-		-- Patrol radius enforcement based on personality
-		if distFromCenter > patrolRadius * 0.9 then
-			-- Too far - strong pull back
-			steer = toCenter.Unit
-		elseif distFromCenter > patrolRadius * 0.7 then
-			-- Getting far - moderate pull
-			local centerBias = toCenter.Unit * 0.5
-			steer = (baseSteer + centerBias).Unit
-		elseif distFromCenter > patrolRadius * 0.5 then 
-			-- Medium distance - light bias
-			local centerBias = toCenter.Unit * 0.2
-			steer = (baseSteer + centerBias).Unit
-		else
-			-- Within patrol area - free movement
-			steer = baseSteer
-			
-			-- Nomads prefer exploring edges of their patrol area
-			if p.Type == "Nomad" and p.ExplorationBias and mathRandom() < p.ExplorationBias then
-				-- Bias away from center occasionally
-				steer = (baseSteer - toCenter.Unit * 0.3).Unit
+		-- Check if wander direction is safe
+		if not self:isPathSafe(headPos + baseSteer * 30, 30) then
+			-- Find a safe direction
+			for i = 1, 8 do
+				local testAngle = self.TargetYaw + (i * mathPi / 4)
+				local testSteer = Vector3new(mathSin(testAngle), 0, mathCos(testAngle))
+				if self:isPathSafe(headPos + testSteer * 30, 30) then
+					baseSteer = testSteer
+					self.TargetYaw = testAngle
+					break
+				end
 			end
 		end
-	end
 
-	-- REMOVED erratic behavior completely
-	-- REMOVED circle detection (was causing jitter)
+		-- Center bias based on distance
+		if distFromCenter > 250 then
+			steer = toCenter.Unit
+		elseif distFromCenter > 150 then
+			local centerBias = toCenter.Unit * 0.7
+			steer = (baseSteer + centerBias).Unit
+		else
+			steer = baseSteer
+		end
+	end
 
 	return state, steer
 end
@@ -1625,6 +1751,9 @@ function AISnake:updateMovement(dt)
 	elseif state == "AVOID_BOUNDARY" then
 		-- Need sharp turns to avoid map edge
 		turnSpeed = turnSpeed * 2.5  -- Even sharper for emergencies
+	elseif state == "COLLISION_AVOID" then
+		-- Emergency collision avoidance needs instant response
+		turnSpeed = turnSpeed * 3.0
 	end
 	
 	-- When boosting, turn slightly slower like players do
