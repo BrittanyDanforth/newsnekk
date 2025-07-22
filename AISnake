@@ -492,24 +492,31 @@ task.spawn(function()
 end)
 
 -- Ground-based boundary detection
-local ground = Workspace:FindFirstChild("SlitherIOGround")
 local MAP_BOUNDS = {
-	minX = -500,
-	maxX = 500,
-	minZ = -500,
-	maxZ = 500
+	minX = -370,
+	maxX = 370,
+	minZ = -370,
+	maxZ = 370
 }
 
--- Update bounds based on ground if it exists
-if ground and ground:IsA("BasePart") then
-	local halfSizeX = ground.Size.X / 2
-	local halfSizeZ = ground.Size.Z / 2
-	MAP_BOUNDS.minX = ground.Position.X - halfSizeX + 30  -- 30 stud buffer
-	MAP_BOUNDS.maxX = ground.Position.X + halfSizeX - 30
-	MAP_BOUNDS.minZ = ground.Position.Z - halfSizeZ + 30
-	MAP_BOUNDS.maxZ = ground.Position.Z + halfSizeZ - 30
-	print("AI Snake map bounds set:", MAP_BOUNDS.minX, MAP_BOUNDS.maxX, MAP_BOUNDS.minZ, MAP_BOUNDS.maxZ)
+-- Function to update bounds based on ground
+local function updateMapBounds()
+	local ground = Workspace:FindFirstChild("SlitherIOGround")
+	if ground and ground:IsA("BasePart") then
+		local halfSizeX = ground.Size.X / 2
+		local halfSizeZ = ground.Size.Z / 2
+		MAP_BOUNDS.minX = ground.Position.X - halfSizeX + 30  -- 30 stud buffer
+		MAP_BOUNDS.maxX = ground.Position.X + halfSizeX - 30
+		MAP_BOUNDS.minZ = ground.Position.Z - halfSizeZ + 30
+		MAP_BOUNDS.maxZ = ground.Position.Z + halfSizeZ - 30
+		print("AI Snake map bounds updated:", MAP_BOUNDS.minX, MAP_BOUNDS.maxX, MAP_BOUNDS.minZ, MAP_BOUNDS.maxZ)
+		return true
+	end
+	return false
 end
+
+-- Initial bounds check
+updateMapBounds()
 
 local function getWallAvoidanceVector(headPos)
 	local avoidVec = Vector3new(0, 0, 0)
@@ -963,6 +970,53 @@ function AISnake:_determineAction()
 		self.isAmbushing = false
 	end
 
+	-- Priority 0: BOUNDARY AVOIDANCE (NEW - HIGHEST PRIORITY)
+	local boundaryBuffer = 80  -- Start turning when this close to edge
+	local strongBuffer = 40    -- Strong turn when this close
+	local edgeSteer = nil
+	
+	-- Check X boundaries
+	if headPos.X > MAP_BOUNDS.maxX - boundaryBuffer then
+		local strength = 1 - (MAP_BOUNDS.maxX - headPos.X) / boundaryBuffer
+		edgeSteer = Vector3new(-1, 0, 0) * strength
+	elseif headPos.X < MAP_BOUNDS.minX + boundaryBuffer then
+		local strength = 1 - (headPos.X - MAP_BOUNDS.minX) / boundaryBuffer
+		edgeSteer = Vector3new(1, 0, 0) * strength
+	end
+	
+	-- Check Z boundaries
+	if headPos.Z > MAP_BOUNDS.maxZ - boundaryBuffer then
+		local strength = 1 - (MAP_BOUNDS.maxZ - headPos.Z) / boundaryBuffer
+		local zSteer = Vector3new(0, 0, -1) * strength
+		edgeSteer = edgeSteer and (edgeSteer + zSteer).Unit or zSteer
+	elseif headPos.Z < MAP_BOUNDS.minZ + boundaryBuffer then
+		local strength = 1 - (headPos.Z - MAP_BOUNDS.minZ) / boundaryBuffer
+		local zSteer = Vector3new(0, 0, 1) * strength
+		edgeSteer = edgeSteer and (edgeSteer + zSteer).Unit or zSteer
+	end
+	
+	-- Strong boundary avoidance overrides everything
+	if edgeSteer and (
+		headPos.X > MAP_BOUNDS.maxX - strongBuffer or 
+		headPos.X < MAP_BOUNDS.minX + strongBuffer or
+		headPos.Z > MAP_BOUNDS.maxZ - strongBuffer or 
+		headPos.Z < MAP_BOUNDS.minZ + strongBuffer
+	) then
+		-- Add some randomness to prevent getting stuck in corners
+		local randomAngle = mathRandom(-30, 30) * mathPi / 180
+		local cosA = mathCos(randomAngle)
+		local sinA = mathSin(randomAngle)
+		local rotatedSteer = Vector3new(
+			edgeSteer.X * cosA - edgeSteer.Z * sinA,
+			0,
+			edgeSteer.X * sinA + edgeSteer.Z * cosA
+		)
+		
+		self.TargetSnake = nil
+		self.TargetOrb = nil
+		return "AVOID_BOUNDARY", rotatedSteer.Unit
+	end
+
 	-- Priority 1: Wall avoidance
 	local wallVec, wallStrength = getWallAvoidanceVector(headPos)
 	if wallVec and wallStrength > 0.3 then
@@ -1165,6 +1219,9 @@ function AISnake.new(startPosition)
 
 	local self = setmetatable({}, AISnake)
 	self.Config = deepCopy(SnakeConfig)
+	
+	-- Update map bounds if needed (in case map was created after script started)
+	updateMapBounds()
 
 	-- Get random AI color (50% yellow, 50% others)
 	local colorData = getRandomAIColor()
@@ -1466,6 +1523,9 @@ function AISnake:updateMovement(dt)
 	elseif state == "AVOID_WALL" then
 		-- Still need to avoid walls effectively
 		turnSpeed = turnSpeed * 1.3
+	elseif state == "AVOID_BOUNDARY" then
+		-- Need sharp turns to avoid map edge
+		turnSpeed = turnSpeed * 1.8
 	end
 	
 	-- When boosting, turn slightly slower like players do
@@ -1530,9 +1590,29 @@ function AISnake:updateMovement(dt)
 		self.Speed = mathMax(self.NormalSpeed, self.NormalSpeed * speedMultiplier)
 	end
 
+	-- Check if we're about to hit boundary BEFORE moving
+	local nextPos = self.Position + self.Direction * self.Speed * dt
+	local wasClamped = false
+	
+	-- If next position would be out of bounds, force a turn
+	if nextPos.X < MAP_BOUNDS.minX or nextPos.X > MAP_BOUNDS.maxX or 
+	   nextPos.Z < MAP_BOUNDS.minZ or nextPos.Z > MAP_BOUNDS.maxZ then
+		wasClamped = true
+		-- Force turn towards center
+		local toCenter = Vector3new(0, self.Position.Y, 0) - self.Position
+		self.Direction = toCenter.Unit
+		self.TargetYaw = mathAtan2(self.Direction.X, self.Direction.Z)
+		self.CurrentYaw = self.TargetYaw
+		
+		-- Debug print
+		if self.Config.HeadColor == Color3.fromRGB(255, 255, 0) then
+			print("Yellow snake hit boundary at", self.Position, "turning to center")
+		end
+	end
+	
 	self.Position = self.Position + self.Direction * self.Speed * dt
 	
-	-- HARD CLAMP to prevent going out of bounds
+	-- HARD CLAMP to prevent going out of bounds (failsafe)
 	self.Position = Vector3new(
 		mathClamp(self.Position.X, MAP_BOUNDS.minX, MAP_BOUNDS.maxX),
 		self.Position.Y,
