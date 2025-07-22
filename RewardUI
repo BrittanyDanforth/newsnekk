@@ -1,0 +1,244 @@
+-- RewardUI Module - Modern post-match rewards like the examples
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local RewardUI = {}
+RewardUI.__index = RewardUI
+
+-- Modern UI configuration
+local UI_CONFIG = {
+	COLORS = {
+		BACKGROUND = Color3.fromRGB(10, 10, 15),
+		CARD_BG = Color3.fromRGB(20, 20, 25),
+		ACCENT = Color3.fromRGB(0, 200, 150),
+		SUCCESS = Color3.fromRGB(0, 255, 150),
+		TEXT_PRIMARY = Color3.fromRGB(255, 255, 255),
+		TEXT_SECONDARY = Color3.fromRGB(200, 200, 210),
+		BUTTON_ACCEPT = Color3.fromRGB(0, 200, 150),
+		BUTTON_DECLINE = Color3.fromRGB(60, 60, 70),
+	}
+}
+
+function RewardUI.new(player)
+	local self = setmetatable({}, RewardUI)
+	self.player = player
+	self.playerGui = player:WaitForChild("PlayerGui")
+	self.active = false
+	return self
+end
+
+function RewardUI:ShowDeathReward(score, coins)
+	if self.active then return end
+	self.active = true
+
+	-- Create dark overlay
+	local overlay = Instance.new("Frame")
+	overlay.Name = "RewardOverlay"
+	overlay.Size = UDim2.new(1, 0, 1, 0)
+	overlay.BackgroundColor3 = UI_CONFIG.COLORS.BACKGROUND
+	overlay.BackgroundTransparency = 0.3
+	overlay.Parent = self.playerGui
+
+	-- Main reward card
+	local card = Instance.new("Frame")
+	card.Name = "RewardCard"
+	card.Size = UDim2.new(0, 450, 0, 350)
+	card.Position = UDim2.new(0.5, -225, 0.5, -175)
+	card.BackgroundColor3 = UI_CONFIG.COLORS.CARD_BG
+	card.Parent = overlay
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 16)
+	corner.Parent = card
+
+	-- Header
+	local header = Instance.new("Frame")
+	header.Size = UDim2.new(1, 0, 0, 60)
+	header.BackgroundColor3 = UI_CONFIG.COLORS.CARD_BG
+	header.BorderSizePixel = 0
+	header.Parent = card
+
+	local headerCorner = Instance.new("UICorner")
+	headerCorner.CornerRadius = UDim.new(0, 16)
+	headerCorner.Parent = header
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 1, 0)
+	title.BackgroundTransparency = 1
+	title.Text = "RESULTS"
+	title.TextColor3 = UI_CONFIG.COLORS.TEXT_PRIMARY
+	title.TextScaled = true
+	title.Font = Enum.Font.GothamBold
+	title.Parent = header
+
+	-- Close button
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0, 40, 0, 40)
+	closeBtn.Position = UDim2.new(1, -50, 0, 10)
+	closeBtn.BackgroundColor3 = UI_CONFIG.COLORS.BUTTON_DECLINE
+	closeBtn.Text = "×"
+	closeBtn.TextColor3 = UI_CONFIG.COLORS.TEXT_PRIMARY
+	closeBtn.TextScaled = true
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.Parent = card
+
+	local closeBtnCorner = Instance.new("UICorner")
+	closeBtnCorner.CornerRadius = UDim.new(0, 8)
+	closeBtnCorner.Parent = closeBtn
+
+	-- Divider
+	local divider = Instance.new("Frame")
+	divider.Size = UDim2.new(1, -40, 0, 1)
+	divider.Position = UDim2.new(0, 20, 0, 60)
+	divider.BackgroundColor3 = UI_CONFIG.COLORS.BUTTON_DECLINE
+	divider.BorderSizePixel = 0
+	divider.Parent = card
+
+	-- Timer
+	local timerBg = Instance.new("Frame")
+	timerBg.Size = UDim2.new(1, -40, 0, 30)
+	timerBg.Position = UDim2.new(0, 20, 0, 75)
+	timerBg.BackgroundTransparency = 1
+	timerBg.Parent = card
+
+	local timerLabel = Instance.new("TextLabel")
+	timerLabel.Size = UDim2.new(1, 0, 1, 0)
+	timerLabel.BackgroundTransparency = 1
+	timerLabel.Text = "OFFER ENDS IN: 10s"
+	timerLabel.TextColor3 = UI_CONFIG.COLORS.TEXT_SECONDARY
+	timerLabel.TextScaled = true
+	timerLabel.Font = Enum.Font.Gotham
+	timerLabel.Parent = timerBg
+
+	-- Main offer
+	local offerFrame = Instance.new("Frame")
+	offerFrame.Size = UDim2.new(1, -40, 0, 120)
+	offerFrame.Position = UDim2.new(0, 20, 0, 120)
+	offerFrame.BackgroundTransparency = 1
+	offerFrame.Parent = card
+
+	local offerTitle = Instance.new("TextLabel")
+	offerTitle.Size = UDim2.new(1, 0, 0.4, 0)
+	offerTitle.BackgroundTransparency = 1
+	offerTitle.Text = "DOUBLE"
+	offerTitle.TextColor3 = UI_CONFIG.COLORS.TEXT_PRIMARY
+	offerTitle.TextScaled = true
+	offerTitle.Font = Enum.Font.GothamBold
+	offerTitle.Parent = offerFrame
+
+	local offerAmount = Instance.new("TextLabel")
+	offerAmount.Size = UDim2.new(1, 0, 0.6, 0)
+	offerAmount.Position = UDim2.new(0, 0, 0.4, 0)
+	offerAmount.BackgroundTransparency = 1
+	offerAmount.Text = "GEMS"
+	offerAmount.TextColor3 = UI_CONFIG.COLORS.TEXT_PRIMARY
+	offerAmount.TextScaled = true
+	offerAmount.Font = Enum.Font.GothamBold
+	offerAmount.Parent = offerFrame
+
+	-- Description
+	local desc = Instance.new("TextLabel")
+	desc.Size = UDim2.new(1, -40, 0, 30)
+	desc.Position = UDim2.new(0, 20, 0, 250)
+	desc.BackgroundTransparency = 1
+	desc.Text = "Watch an AD to earn DOUBLE GEMS from this match! (+" .. coins * 2 .. " GEMS)"
+	desc.TextColor3 = UI_CONFIG.COLORS.TEXT_SECONDARY
+	desc.TextScaled = true
+	desc.Font = Enum.Font.Gotham
+	desc.Parent = card
+
+	-- Buttons
+	local watchBtn = Instance.new("TextButton")
+	watchBtn.Size = UDim2.new(0, 160, 0, 45)
+	watchBtn.Position = UDim2.new(0, 60, 1, -65)
+	watchBtn.BackgroundColor3 = UI_CONFIG.COLORS.BUTTON_ACCEPT
+	watchBtn.Text = "WATCH AD"
+	watchBtn.TextColor3 = UI_CONFIG.COLORS.TEXT_PRIMARY
+	watchBtn.TextScaled = true
+	watchBtn.Font = Enum.Font.GothamBold
+	watchBtn.Parent = card
+
+	local watchCorner = Instance.new("UICorner")
+	watchCorner.CornerRadius = UDim.new(0, 25)
+	watchCorner.Parent = watchBtn
+
+	local skipBtn = Instance.new("TextButton")
+	skipBtn.Size = UDim2.new(0, 160, 0, 45)
+	skipBtn.Position = UDim2.new(1, -220, 1, -65)
+	skipBtn.BackgroundColor3 = UI_CONFIG.COLORS.BUTTON_DECLINE
+	skipBtn.Text = "SKIP"
+	skipBtn.TextColor3 = UI_CONFIG.COLORS.TEXT_PRIMARY
+	skipBtn.TextScaled = true
+	skipBtn.Font = Enum.Font.GothamBold
+	skipBtn.Parent = card
+
+	local skipCorner = Instance.new("UICorner")
+	skipCorner.CornerRadius = UDim.new(0, 25)
+	skipCorner.Parent = skipBtn
+
+	-- Animate entrance
+	card.Position = UDim2.new(0.5, -225, 0.5, -200)
+	overlay.BackgroundTransparency = 1
+
+	TweenService:Create(overlay, TweenInfo.new(0.3), {
+		BackgroundTransparency = 0.3
+	}):Play()
+
+	TweenService:Create(card, TweenInfo.new(0.5, Enum.EasingStyle.Back), {
+		Position = UDim2.new(0.5, -225, 0.5, -175)
+	}):Play()
+
+	-- Timer countdown
+	local timeLeft = 10
+	local timerConnection
+	timerConnection = RunService.Heartbeat:Connect(function()
+		timeLeft = timeLeft - (1/60)
+		if timeLeft > 0 then
+			timerLabel.Text = "OFFER ENDS IN: " .. math.ceil(timeLeft) .. "s"
+		else
+			timerConnection:Disconnect()
+			self:Close(overlay)
+		end
+	end)
+
+	-- Button handlers
+	watchBtn.MouseButton1Click:Connect(function()
+		timerConnection:Disconnect()
+		-- Here you would trigger ad
+		print("Watching ad for double rewards!")
+		self:Close(overlay)
+		-- Give double rewards
+	end)
+
+	skipBtn.MouseButton1Click:Connect(function()
+		timerConnection:Disconnect()
+		self:Close(overlay)
+	end)
+
+	closeBtn.MouseButton1Click:Connect(function()
+		timerConnection:Disconnect()
+		self:Close(overlay)
+	end)
+end
+
+function RewardUI:Close(overlay)
+	TweenService:Create(overlay, TweenInfo.new(0.3), {
+		BackgroundTransparency = 1
+	}):Play()
+
+	local card = overlay:FindFirstChild("RewardCard")
+	if card then
+		TweenService:Create(card, TweenInfo.new(0.3), {
+			Position = UDim2.new(0.5, -225, 0.5, -200),
+			Size = UDim2.new(0, 400, 0, 300)
+		}):Play()
+	end
+
+	task.wait(0.3)
+	overlay:Destroy()
+	self.active = false
+end
+
+return RewardUI
