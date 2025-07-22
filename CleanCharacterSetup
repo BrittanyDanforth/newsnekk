@@ -1,0 +1,85 @@
+-- Optimized client-side character setup for smooth, beautiful appearance & minimal lag
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+local ROOT_COLOR = Color3.fromRGB(0, 255, 127)
+
+local function fadeIn(instance, props, duration)
+    local tween = TweenService:Create(instance, TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+    tween:Play()
+    return tween
+end
+
+local function cleanCharacter(character)
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    -- Hide all body parts except root
+    for _, part in character:GetChildren() do
+        if part:IsA("BasePart") and part ~= rootPart then
+            part.Transparency = 1
+            part.CanCollide = false
+            part.CastShadow = false
+        end
+    end
+
+    -- Hide all accessories (do not destroy, for respawn performance)
+    for _, acc in character:GetChildren() do
+        if acc:IsA("Accessory") then
+            local handle = acc:FindFirstChildWhichIsA("BasePart")
+            if handle then
+                handle.Transparency = 1
+                handle.CanCollide = false
+                handle.CastShadow = false
+            end
+        end
+    end
+
+    -- Add a nice glow to the root part for polish (with fade-in)
+    local glow = rootPart:FindFirstChild("RootGlow")
+    if not glow then
+        glow = Instance.new("PointLight")
+        glow.Name = "RootGlow"
+        glow.Color = ROOT_COLOR
+        glow.Brightness = 0
+        glow.Range = 10
+        glow.Parent = rootPart
+        fadeIn(glow, {Brightness = 2}, 0.5)
+    end
+
+    -- Add a subtle outline for style (with fade-in)
+    local outline = rootPart:FindFirstChild("RootOutline")
+    if not outline then
+        outline = Instance.new("SelectionBox")
+        outline.Name = "RootOutline"
+        outline.Adornee = rootPart
+        outline.Color3 = ROOT_COLOR
+        outline.LineThickness = 0.05
+        outline.Transparency = 1
+        outline.Parent = rootPart
+        fadeIn(outline, {Transparency = 0.2}, 0.5)
+    end
+end
+
+local function onCharacterAdded(character)
+    cleanCharacter(character)
+    -- Fire ReloadSnake remote to server to retrigger snake system
+    local ReloadSnake = ReplicatedStorage:FindFirstChild("ReloadSnake")
+    if ReloadSnake then
+        ReloadSnake:FireServer()
+    end
+end
+
+-- Listen for character spawns
+LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+if LocalPlayer.Character then
+    cleanCharacter(LocalPlayer.Character)
+    -- Fire ReloadSnake on initial spawn as well
+    local ReloadSnake = ReplicatedStorage:FindFirstChild("ReloadSnake")
+    if ReloadSnake then
+        ReloadSnake:FireServer()
+    end
+end
+
