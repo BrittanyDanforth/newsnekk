@@ -23,7 +23,7 @@ pcall(function()
 	local module = ReplicatedStorage:FindFirstChild("SnakeUpgrades")
 	if module then
 		SnakeUpgrades = require(module)
-		print("✅ AI Snakes can now pick up upgrade orbs!")
+		-- AI Snakes can now pick up upgrade orbs
 	end
 end)
 
@@ -519,7 +519,7 @@ local function updateMapBounds()
 		MAP_BOUNDS.maxX = ground.Position.X + halfSizeX - 30
 		MAP_BOUNDS.minZ = ground.Position.Z - halfSizeZ + 30
 		MAP_BOUNDS.maxZ = ground.Position.Z + halfSizeZ - 30
-		print("AI Snake map bounds updated:", MAP_BOUNDS.minX, MAP_BOUNDS.maxX, MAP_BOUNDS.minZ, MAP_BOUNDS.maxZ)
+		-- Map bounds updated silently
 		return true
 	end
 	return false
@@ -613,9 +613,9 @@ local function isPartsColliding(partA, partB)
 	return dist < (radiusA + radiusB) * 0.85
 end
 
--- === FIXED AI PERSONALITIES - MUCH SMOOTHER ===
+-- === ENHANCED AI PERSONALITIES - STABLE & DISTINCT ===
 AISnake.PersonalityTypes = {
-	"Aggressor", "Scavenger", "Trickster", "Coward", "Hunter", "Trapper", "Assassin"
+	"Aggressor", "Scavenger", "Guardian", "Opportunist", "Hunter", "Nomad", "Shadow", "Berserker"
 }
 
 AISnake.PersonalityDefinitions = {
@@ -624,119 +624,135 @@ AISnake.PersonalityDefinitions = {
 		TargetPlayers = true,
 		TargetOrbs = true,
 		AvoidOthers = false,
-		SpeedMultiplier = 1.2,
-		TurnBias = 0.05, -- REDUCED from 0.1
-		BoostChance = 0.08, -- REDUCED from 0.15
-		CombatRadius = 40, -- MUCH REDUCED
-		RandomTurnInterval = 4.0, -- INCREASED
-		OrbSeekRadius = 120, -- MUCH INCREASED
-		Description = "Aggressive but controlled hunter",
-		Erratic = false,
-		PackHunter = false,
-		PredictionTime = 0.8,
-		TrapStyle = "circle",
+		SpeedMultiplier = 1.15,
+		TurnBias = 0.03,
+		BoostChance = 0.06,
+		CombatRadius = 45,
+		RandomTurnInterval = 5.0,
+		OrbSeekRadius = 100,
+		Description = "Balanced aggressor - hunts when advantageous",
+		FleeThreshold = 20,  -- Length difference before fleeing
+		AggressionLevel = 0.7,
+		PatrolRadius = 200,
 	},
 	Scavenger = {
 		Type = "Scavenger",
 		TargetPlayers = false,
 		TargetOrbs = true,
 		AvoidOthers = true,
-		SpeedMultiplier = 1.1, -- INCREASED from 1.0
-		TurnBias = 0.1, -- REDUCED from 0.2
-		BoostChance = 0.05, -- REDUCED from 0.1
-		CombatRadius = 30, -- MUCH REDUCED  
-		RandomTurnInterval = 5.0, -- INCREASED
-		OrbSeekRadius = 150, -- MUCH INCREASED
-		Description = "Orb-focused with smooth movement",
-		Erratic = false,
-		PackHunter = false,
-		PredictionTime = 0,
-		TrapStyle = "none",
+		SpeedMultiplier = 1.1,
+		TurnBias = 0.05,
+		BoostChance = 0.04,
+		CombatRadius = 25,
+		RandomTurnInterval = 4.0,
+		OrbSeekRadius = 200,  -- Excellent orb vision
+		Description = "Peaceful orb collector - avoids all conflict",
+		FleeThreshold = 5,
+		AggressionLevel = 0.0,
+		PatrolRadius = 300,
 	},
-	Trickster = {
-		Type = "Trickster",
+	Guardian = {
+		Type = "Guardian",
 		TargetPlayers = true,
 		TargetOrbs = true,
 		AvoidOthers = false,
-		SpeedMultiplier = 1.15, -- REDUCED from 1.2
-		TurnBias = 0.1, -- REDUCED from 0.3
-		BoostChance = 0.1, -- REDUCED from 0.2
-		CombatRadius = 30,
-		RandomTurnInterval = 4.0,
-		OrbSeekRadius = 150,
-		Description = "Unpredictable but smoother",
-		Erratic = false, -- CHANGED from true
-		PackHunter = false,
-		PredictionTime = 0.5,
-		TrapStyle = "zigzag",
+		SpeedMultiplier = 1.05,
+		TurnBias = 0.02,
+		BoostChance = 0.03,
+		CombatRadius = 60,
+		RandomTurnInterval = 6.0,
+		OrbSeekRadius = 120,
+		Description = "Territory defender - patrols specific areas",
+		FleeThreshold = 30,
+		AggressionLevel = 0.5,
+		PatrolRadius = 150,  -- Stays in smaller area
+		TerritoryCenter = Vector3.new(0, 0, 0),  -- Set randomly on spawn
 	},
-	Coward = {
-		Type = "Coward",
-		TargetPlayers = false,
+	Opportunist = {
+		Type = "Opportunist",
+		TargetPlayers = true,
 		TargetOrbs = true,
-		AvoidOthers = true,
-		SpeedMultiplier = 1.0, -- INCREASED from 0.9
-		TurnBias = 0.1, -- REDUCED from 0.25
-		BoostChance = 0.15, -- REDUCED from 0.3
-		CombatRadius = 30,
-		RandomTurnInterval = 5.0,
-		OrbSeekRadius = 180,
-		Description = "Cautious but efficient",
-		Erratic = false,
-		PackHunter = false,
-		PredictionTime = 0,
-		TrapStyle = "none",
+		AvoidOthers = false,
+		SpeedMultiplier = 1.2,
+		TurnBias = 0.04,
+		BoostChance = 0.08,
+		CombatRadius = 40,
+		RandomTurnInterval = 3.5,
+		OrbSeekRadius = 140,
+		Description = "Smart fighter - only attacks smaller snakes",
+		FleeThreshold = 0,  -- Never flees from equal/smaller
+		AggressionLevel = 0.8,
+		PatrolRadius = 250,
+		OnlyAttackSmaller = true,
 	},
 	Hunter = {
 		Type = "Hunter",
 		TargetPlayers = true,
 		TargetOrbs = true,
 		AvoidOthers = false,
-		SpeedMultiplier = 1.2, -- REDUCED from 1.25
-		TurnBias = 0.02, -- REDUCED from 0.05
-		BoostChance = 0.08, -- REDUCED from 0.12
-		CombatRadius = 40,
-		RandomTurnInterval = 5.0,
-		OrbSeekRadius = 140,
-		Description = "Strategic and smooth",
-		Erratic = false,
-		PackHunter = true,
-		PredictionTime = 1.0, -- REDUCED from 1.2
-		TrapStyle = "cutoff",
+		SpeedMultiplier = 1.18,
+		TurnBias = 0.02,
+		BoostChance = 0.07,
+		CombatRadius = 50,
+		RandomTurnInterval = 5.5,
+		OrbSeekRadius = 130,
+		Description = "Persistent hunter - tracks targets",
+		FleeThreshold = 25,
+		AggressionLevel = 0.75,
+		PatrolRadius = 220,
+		TrackingDuration = 10,  -- Seconds to track a target
 	},
-	Trapper = {
-		Type = "Trapper",
+	Nomad = {
+		Type = "Nomad",
+		TargetPlayers = false,
+		TargetOrbs = true,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.12,
+		TurnBias = 0.06,
+		BoostChance = 0.05,
+		CombatRadius = 30,
+		RandomTurnInterval = 2.5,  -- Frequent direction changes
+		OrbSeekRadius = 160,
+		Description = "Wanderer - explores the entire map",
+		FleeThreshold = 10,
+		AggressionLevel = 0.2,
+		PatrolRadius = 400,  -- Roams widely
+		ExplorationBias = 0.8,
+	},
+	Shadow = {
+		Type = "Shadow",
 		TargetPlayers = true,
 		TargetOrbs = true,
 		AvoidOthers = false,
-		SpeedMultiplier = 1.1, -- REDUCED from 1.15
-		TurnBias = 0.01, -- REDUCED from 0.02
-		BoostChance = 0.05, -- REDUCED from 0.08
+		SpeedMultiplier = 1.22,
+		TurnBias = 0.01,
+		BoostChance = 0.02,  -- Rarely boosts
+		CombatRadius = 55,
+		RandomTurnInterval = 8.0,
+		OrbSeekRadius = 110,
+		Description = "Stealthy assassin - strikes from behind",
+		FleeThreshold = 15,
+		AggressionLevel = 0.6,
+		PatrolRadius = 180,
+		PreferRearAttack = true,
+		StalkDistance = 30,
+	},
+	Berserker = {
+		Type = "Berserker",
+		TargetPlayers = true,
+		TargetOrbs = false,  -- Ignores orbs when hunting
+		AvoidOthers = false,
+		SpeedMultiplier = 1.25,
+		TurnBias = 0.05,
+		BoostChance = 0.12,  -- Boosts frequently
 		CombatRadius = 35,
 		RandomTurnInterval = 6.0,
-		OrbSeekRadius = 160,
-		Description = "Patient spiral trapper",
-		Erratic = false,
-		PackHunter = false,
-		PredictionTime = 1.0, -- INCREASED from 0.8
-		TrapStyle = "spiral",
-	},
-	Assassin = {
-		Type = "Assassin",
-		TargetPlayers = true,
-		TargetOrbs = true,
-		AvoidOthers = false,
-		SpeedMultiplier = 1.25, -- REDUCED from 1.3
-		TurnBias = 0.0,
-		BoostChance = 0.03, -- REDUCED from 0.05
-		CombatRadius = 45,
-		RandomTurnInterval = 7.0,
-		OrbSeekRadius = 130,
-		Description = "Patient stalker",
-		Erratic = false,
-		PackHunter = false,
-		PredictionTime = 1.2, -- INCREASED from 1.0
-		TrapStyle = "stalk",
+		OrbSeekRadius = 50,  -- Poor orb vision
+		Description = "Reckless fighter - all aggression",
+		FleeThreshold = 40,  -- Only flees from much larger
+		AggressionLevel = 1.0,
+		PatrolRadius = 200,
+		RageMode = true,  -- Gets faster when smaller
 	},
 }
 
@@ -1084,9 +1100,9 @@ function AISnake:_determineAction()
 		elseif #threats >= 3 and closestThreat.distance < 25 then
 			shouldFlee = true
 			fleeReason = "surrounded"
-		elseif p.Type == "Coward" and closestThreat.lengthDiff > 15 and closestThreat.distance < 40 then
+		elseif p.FleeThreshold and closestThreat.lengthDiff > p.FleeThreshold and closestThreat.distance < 40 then
 			shouldFlee = true
-			fleeReason = "coward_instinct"
+			fleeReason = "personality_threshold"
 		end
 
 		-- Aggressive types are braver but still cautious
@@ -1199,41 +1215,45 @@ function AISnake:_determineAction()
 		end
 	end
 
-	-- Priority 6: Wandering (MUCH smoother)
+	-- Priority 6: Wandering with personality-based patrol
 	if state == "WANDER" then
-		local mapCenter = Vector3new(0, headPos.Y, 0)
-		local toCenter = mapCenter - headPos
+		-- Use territory center for Guardians, map center for others
+		local patrolCenter = p.TerritoryCenter or Vector3new(0, headPos.Y, 0)
+		local toCenter = patrolCenter - headPos
 		local distFromCenter = toCenter.Magnitude
+		local patrolRadius = p.PatrolRadius or 200
 
 		-- SMOOTHER random turning
 		if (now - (self.LastTurn or 0) > p.RandomTurnInterval) then
-			-- MUCH gentler turns
-			local maxTurn = 30 -- REDUCED from 60
+			-- Turn amount based on personality
+			local maxTurn = p.Type == "Nomad" and 45 or 30
 			self.TargetYaw = self.TargetYaw + mathRad(mathRandom(-maxTurn, maxTurn))
 			self.LastTurn = now
 		end
 
 		local baseSteer = Vector3new(mathSin(self.TargetYaw), 0, mathCos(self.TargetYaw))
 
-		-- Center bias (ADJUSTED FOR MORE CENTER PREFERENCE)
-		if distFromCenter > 200 then
-			-- Far from center - strong pull back
+		-- Patrol radius enforcement based on personality
+		if distFromCenter > patrolRadius * 0.9 then
+			-- Too far - strong pull back
 			steer = toCenter.Unit
-		elseif distFromCenter > 150 then
-			-- Getting far - moderate center bias
-			local centerBias = toCenter.Unit * 0.6
+		elseif distFromCenter > patrolRadius * 0.7 then
+			-- Getting far - moderate pull
+			local centerBias = toCenter.Unit * 0.5
 			steer = (baseSteer + centerBias).Unit
-		elseif distFromCenter > 100 then 
-			-- Medium distance - light center bias
-			local centerBias = toCenter.Unit * 0.3
-			steer = (baseSteer + centerBias).Unit
-		elseif distFromCenter > 60 then
-			-- Good distance - very light center bias
-			local centerBias = toCenter.Unit * 0.15
+		elseif distFromCenter > patrolRadius * 0.5 then 
+			-- Medium distance - light bias
+			local centerBias = toCenter.Unit * 0.2
 			steer = (baseSteer + centerBias).Unit
 		else
-			-- Close to center - mostly random movement
+			-- Within patrol area - free movement
 			steer = baseSteer
+			
+			-- Nomads prefer exploring edges of their patrol area
+			if p.Type == "Nomad" and p.ExplorationBias and mathRandom() < p.ExplorationBias then
+				-- Bias away from center occasionally
+				steer = (baseSteer - toCenter.Unit * 0.3).Unit
+			end
 		end
 	end
 
@@ -1311,6 +1331,18 @@ function AISnake.new(startPosition)
 	local pType = AISnake.PersonalityTypes[mathRandom(1, #AISnake.PersonalityTypes)]
 	self.Personality = deepCopy(AISnake.PersonalityDefinitions[pType])
 	self._personalityType = pType
+	
+	-- Set up Guardian territory if needed
+	if self.Personality.Type == "Guardian" then
+		-- Random territory center within map
+		local territoryAngle = mathRandom() * 2 * mathPi
+		local territoryRadius = mathRandom(100, 200)
+		self.Personality.TerritoryCenter = Vector3new(
+			mathCos(territoryAngle) * territoryRadius,
+			0,
+			mathSin(territoryAngle) * territoryRadius
+		)
+	end
 
 	self.Model = getOrCreateSnakeModel(tostring(self) .. "_" .. mathRandom(100000,999999))
 	for _, obj in self.Model:GetChildren() do
@@ -1545,7 +1577,7 @@ function AISnake:updateMovement(dt)
 	-- If somehow out of bounds, teleport to center
 	if self.Position.X < MAP_BOUNDS.minX - 10 or self.Position.X > MAP_BOUNDS.maxX + 10 or
 	   self.Position.Z < MAP_BOUNDS.minZ - 10 or self.Position.Z > MAP_BOUNDS.maxZ + 10 then
-		warn("AI Snake out of bounds! Teleporting to safe position")
+		-- Teleporting out-of-bounds snake to safe position
 		-- Random safe position near center
 		local safeAngle = mathRandom() * 2 * mathPi
 		local safeRadius = mathRandom(50, 150)
@@ -1730,7 +1762,7 @@ function AISnake:updateMovement(dt)
 		self.TargetSnake = nil
 		self.State = "WANDER"
 		
-		warn("AI Snake boundary clamp at", newPosition, "->", Vector3new(clampedX, newPosition.Y, clampedZ))
+		-- Boundary clamped silently
 	end
 	
 	-- Update position
@@ -1755,7 +1787,7 @@ function AISnake:updateMovement(dt)
 			
 			-- If barely moved in 10 seconds (5 checks * 2 seconds)
 			if totalMovement < 50 then
-				warn("AI Snake appears stuck! Total movement:", totalMovement)
+				-- Snake appears stuck, teleporting to new position
 				-- Teleport to random safe position
 				local safeAngle = mathRandom() * 2 * mathPi
 				local safeRadius = mathRandom(100, 200)
@@ -1803,7 +1835,7 @@ function AISnake:updateMovement(dt)
 						-- Give upgrade to AI snake
 						SnakeUpgrades.GiveUpgrade(self)
 						orb:Destroy()
-						print("🎯 AI Snake picked up upgrade orb!")
+						-- Silently picked up upgrade orb
 					else
 						-- Regular orb - grow the snake
 						local valueObj = orb:FindFirstChild("Value")

@@ -53,7 +53,7 @@ RunService.Stepped:Connect(function()
 		if not snake or not snake.RootPart or not snake.RootPart.Parent then
 			-- Respawn at random position
 			local pos = getRandomSpawnPosition()
-			print("Respawning AI snake", i, "at position:", pos)
+			-- Respawning AI snake silently
 			aiSnakes[i] = AISnake.new(pos)
 			task.wait(0.1) -- Small delay to prevent spawn spam
 		end
