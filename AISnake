@@ -491,10 +491,62 @@ task.spawn(function()
 	end
 end)
 
+-- Ground-based boundary detection
+local ground = Workspace:FindFirstChild("SlitherIOGround")
+local MAP_BOUNDS = {
+	minX = -500,
+	maxX = 500,
+	minZ = -500,
+	maxZ = 500
+}
+
+-- Update bounds based on ground if it exists
+if ground and ground:IsA("BasePart") then
+	local halfSizeX = ground.Size.X / 2
+	local halfSizeZ = ground.Size.Z / 2
+	MAP_BOUNDS.minX = ground.Position.X - halfSizeX + 30  -- 30 stud buffer
+	MAP_BOUNDS.maxX = ground.Position.X + halfSizeX - 30
+	MAP_BOUNDS.minZ = ground.Position.Z - halfSizeZ + 30
+	MAP_BOUNDS.maxZ = ground.Position.Z + halfSizeZ - 30
+	print("AI Snake map bounds set:", MAP_BOUNDS.minX, MAP_BOUNDS.maxX, MAP_BOUNDS.minZ, MAP_BOUNDS.maxZ)
+end
+
 local function getWallAvoidanceVector(headPos)
 	local avoidVec = Vector3new(0, 0, 0)
 	local avoidStrength = 0
+	
+	-- Check ground boundaries first (more reliable than walls)
+	local boundaryThreshold = 50
+	local strongThreshold = 25
+	
+	-- Check X boundaries
+	if headPos.X < MAP_BOUNDS.minX + boundaryThreshold then
+		local dist = MAP_BOUNDS.minX - headPos.X + boundaryThreshold
+		avoidVec = avoidVec + Vector3new(1, 0, 0) * (dist / boundaryThreshold)
+		avoidStrength = math.max(avoidStrength, dist < strongThreshold and 1 or 0.5)
+	elseif headPos.X > MAP_BOUNDS.maxX - boundaryThreshold then
+		local dist = headPos.X - MAP_BOUNDS.maxX + boundaryThreshold
+		avoidVec = avoidVec + Vector3new(-1, 0, 0) * (dist / boundaryThreshold)
+		avoidStrength = math.max(avoidStrength, dist < strongThreshold and 1 or 0.5)
+	end
+	
+	-- Check Z boundaries
+	if headPos.Z < MAP_BOUNDS.minZ + boundaryThreshold then
+		local dist = MAP_BOUNDS.minZ - headPos.Z + boundaryThreshold
+		avoidVec = avoidVec + Vector3new(0, 0, 1) * (dist / boundaryThreshold)
+		avoidStrength = math.max(avoidStrength, dist < strongThreshold and 1 or 0.5)
+	elseif headPos.Z > MAP_BOUNDS.maxZ - boundaryThreshold then
+		local dist = headPos.Z - MAP_BOUNDS.maxZ + boundaryThreshold
+		avoidVec = avoidVec + Vector3new(0, 0, -1) * (dist / boundaryThreshold)
+		avoidStrength = math.max(avoidStrength, dist < strongThreshold and 1 or 0.5)
+	end
+	
+	-- If we have boundary avoidance, use it
+	if avoidStrength > 0 then
+		return avoidVec.Unit * avoidStrength * 2, avoidStrength
+	end
 
+	-- Fall back to wall detection if no boundary issues
 	for i = 1, #wallParts do
 		local wall = wallParts[i]
 		if wall and wall.Parent then
@@ -1479,6 +1531,14 @@ function AISnake:updateMovement(dt)
 	end
 
 	self.Position = self.Position + self.Direction * self.Speed * dt
+	
+	-- HARD CLAMP to prevent going out of bounds
+	self.Position = Vector3new(
+		mathClamp(self.Position.X, MAP_BOUNDS.minX, MAP_BOUNDS.maxX),
+		self.Position.Y,
+		mathClamp(self.Position.Z, MAP_BOUNDS.minZ, MAP_BOUNDS.maxZ)
+	)
+	
 	self.RootPart.Position = self.Position
 
 	local headOffset = self.Direction * 1.5
