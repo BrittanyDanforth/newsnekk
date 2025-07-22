@@ -1,0 +1,189 @@
+-- IMPROVED SNAKE SKINS WITH UNIQUE VISUALS
+-- Each skin has distinct colors and patterns to avoid looking similar
+
+return {
+	-- CLASSIC TIER (Simple but clean)
+	["Default"] = {
+		HeadColor = Color3.fromRGB(76, 217, 100),
+		BodyColors = {
+			Color3.fromRGB(60, 180, 80),
+			Color3.fromRGB(80, 200, 100),
+			Color3.fromRGB(100, 220, 120),
+			Color3.fromRGB(80, 200, 100),
+			Color3.fromRGB(60, 180, 80),
+		},
+		HeadSize = Vector3.new(3, 3, 3),
+		SegmentSize = Vector3.new(2.5, 2.5, 2.5),
+		SegmentSpacing = 2.2,
+		HeadMaterial = Enum.Material.ForceField,
+		BodyMaterial = Enum.Material.Neon,
+		GlowIntensity = 1.5,
+		GlowRange = 4,
+	},
+
+	["Crimson"] = {
+		HeadColor = Color3.fromRGB(255, 0, 0),
+		BodyColors = {
+			Color3.fromRGB(139, 0, 0), -- Dark red
+			Color3.fromRGB(255, 20, 20), -- Bright red
+			Color3.fromRGB(178, 34, 34), -- Firebrick
+			Color3.fromRGB(220, 20, 60), -- Crimson
+			Color3.fromRGB(139, 0, 0), -- Dark red
+		},
+		HeadSize = Vector3.new(3, 3, 3),
+		SegmentSize = Vector3.new(2.5, 2.5, 2.5),
+		SegmentSpacing = 2.2,
+		HeadMaterial = Enum.Material.ForceField,
+		BodyMaterial = Enum.Material.Neon,
+		GlowIntensity = 2.5,
+		GlowRange = 6,
+	},
+
+	["Arctic"] = {
+		HeadColor = Color3.fromRGB(240, 248, 255), -- Alice blue
+		BodyColors = {
+			Color3.fromRGB(176, 224, 230), -- Powder blue
+			Color3.fromRGB(255, 255, 255), -- White
+			Color3.fromRGB(230, 230, 250), -- Lavender
+			Color3.fromRGB(240, 248, 255), -- Alice blue
+			Color3.fromRGB(176, 196, 222), -- Light steel blue
+		},
+		HeadSize = Vector3.new(3, 3, 3),
+		SegmentSize = Vector3.new(2.5, 2.5, 2.5),
+		SegmentSpacing = 2.2,
+		HeadMaterial = Enum.Material.Ice,
+		BodyMaterial = Enum.Material.ForceField,
+		GlowIntensity = 1.8,
+		GlowRange = 5,
+	},
+
+	["Emerald"] = {
+		HeadColor = Color3.fromRGB(0, 255, 0),
+		BodyColors = {
+			Color3.fromRGB(0, 100, 0), -- Dark green
+			Color3.fromRGB(50, 205, 50), -- Lime green
+			Color3.fromRGB(0, 255, 0), -- Green
+			Color3.fromRGB(34, 139, 34), -- Forest green
+			Color3.fromRGB(0, 128, 0), -- Green
+		},
+		HeadSize = Vector3.new(3, 3, 3),
+		SegmentSize = Vector3.new(2.5, 2.5, 2.5),
+		SegmentSpacing = 2.2,
+		HeadMaterial = Enum.Material.ForceField,
+		BodyMaterial = Enum.Material.Neon,
+		GlowIntensity = 2.0,
+		GlowRange = 5,
+	},
+
+	["Golden"] = {
+		HeadColor = Color3.fromRGB(255, 215, 0), -- Gold
+		BodyColors = {
+			Color3.fromRGB(218, 165, 32), -- Goldenrod
+			Color3.fromRGB(255, 215, 0), -- Gold
+			Color3.fromRGB(255, 223, 0), -- Golden yellow
+			Color3.fromRGB(255, 215, 0), -- Gold
+			Color3.fromRGB(184, 134, 11), -- Dark goldenrod
+		},
+		HeadSize = Vector3.new(3.2, 3.2, 3.2),
+		SegmentSize = Vector3.new(2.7, 2.7, 2.7),
+		SegmentSpacing = 2.3,
+		HeadMaterial = Enum.Material.ForceField,
+		BodyMaterial = Enum.Material.Neon,
+		GlowIntensity = 3.0,
+		GlowRange = 8,
+	},
+
+	-- PREMIUM TIER (Complex patterns)
+	["Void"] = {
+		HeadColor = Color3.fromRGB(20, 20, 20),
+		BodyColors = {
+			Color3.fromRGB(0, 0, 0), -- Black
+			Color3.fromRGB(40, 40, 40), -- Dark gray
+			Color3.fromRGB(20, 20, 20), -- Very dark gray
+			Color3.fromRGB(60, 0, 60), -- Dark purple tint
+			Color3.fromRGB(0, 0, 0), -- Black
+		},
+		HeadSize = Vector3.new(3, 3, 3),
+		SegmentSize = Vector3.new(2.5, 2.5, 2.5),
+		SegmentSpacing = 2.2,
+		HeadMaterial = Enum.Material.ForceField,
+		BodyMaterial = Enum.Material.Neon,
+		GlowIntensity = 1.0,
+		GlowRange = 3,
+	},
+
+	["Ocean"] = {
+		HeadColor = Color3.fromRGB(0, 119, 190),
+		BodyColors = {
+			Color3.fromRGB(0, 77, 64), -- Dark teal
+			Color3.fromRGB(0, 119, 190), -- Ocean blue
+			Color3.fromRGB(0, 150, 199), -- Light ocean
+			Color3.fromRGB(0, 119, 190), -- Ocean blue
+			Color3.fromRGB(0, 77, 64), -- Dark teal
+		},
+		HeadSize = Vector3.new(3, 3, 3),
+		SegmentSize = Vector3.new(2.5, 2.5, 2.5),
+		SegmentSpacing = 2.2,
+		HeadMaterial = Enum.Material.ForceField,
+		BodyMaterial = Enum.Material.Neon,
+		GlowIntensity = 2.0,
+		GlowRange = 6,
+	},
+
+	["Plasma"] = {
+		HeadColor = Color3.fromRGB(255, 0, 255), -- Magenta
+		BodyColors = {
+			Color3.fromRGB(138, 43, 226), -- Blue violet
+			Color3.fromRGB(255, 0, 255), -- Magenta
+			Color3.fromRGB(186, 85, 211), -- Medium orchid
+			Color3.fromRGB(255, 20, 147), -- Deep pink
+			Color3.fromRGB(138, 43, 226), -- Blue violet
+		},
+		HeadSize = Vector3.new(3, 3, 3),
+		SegmentSize = Vector3.new(2.5, 2.5, 2.5),
+		SegmentSpacing = 2.2,
+		HeadMaterial = Enum.Material.ForceField,
+		BodyMaterial = Enum.Material.Neon,
+		GlowIntensity = 3.0,
+		GlowRange = 8,
+	},
+
+	["Lightning"] = {
+		HeadColor = Color3.fromRGB(255, 255, 0), -- Yellow
+		BodyColors = {
+			Color3.fromRGB(255, 255, 0), -- Yellow
+			Color3.fromRGB(255, 255, 255), -- White (lightning flash)
+			Color3.fromRGB(255, 255, 0), -- Yellow
+			Color3.fromRGB(255, 255, 224), -- Light yellow
+			Color3.fromRGB(255, 215, 0), -- Gold
+		},
+		HeadSize = Vector3.new(3, 3, 3),
+		SegmentSize = Vector3.new(2.5, 2.5, 2.5),
+		SegmentSpacing = 2.2,
+		HeadMaterial = Enum.Material.ForceField,
+		BodyMaterial = Enum.Material.Neon,
+		GlowIntensity = 4.0,
+		GlowRange = 10,
+	},
+
+	-- SPECIAL TIER
+	["Rainbow"] = {
+		HeadColor = Color3.fromRGB(255, 0, 0),
+		BodyColors = {
+			Color3.fromRGB(255, 0, 0), -- Red
+			Color3.fromRGB(255, 127, 0), -- Orange
+			Color3.fromRGB(255, 255, 0), -- Yellow
+			Color3.fromRGB(0, 255, 0), -- Green
+			Color3.fromRGB(0, 0, 255), -- Blue
+			Color3.fromRGB(75, 0, 130), -- Indigo
+			Color3.fromRGB(148, 0, 211), -- Violet
+		},
+		HeadSize = Vector3.new(3, 3, 3),
+		SegmentSize = Vector3.new(2.5, 2.5, 2.5),
+		SegmentSpacing = 2.2,
+		HeadMaterial = Enum.Material.ForceField,
+		BodyMaterial = Enum.Material.Neon,
+		GlowIntensity = 3.0,
+		GlowRange = 8,
+	},
+}
