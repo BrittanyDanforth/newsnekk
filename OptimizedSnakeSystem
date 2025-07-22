@@ -129,7 +129,7 @@ function Snake.new(character, config)
 	
 	-- Snake data
 	self.length = config.InitialLength or 55
-	self.segments = {}
+	self.segments = {}  -- Array of segment parts for collision detection
 	self.visibleSegments = {}
 	
 	print("Creating snake with initial length:", self.length)

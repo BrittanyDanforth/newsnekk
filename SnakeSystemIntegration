@@ -124,6 +124,12 @@ local function onCharacterAdded(character)
 	end
 	activeSnakes[player] = snake
 	
+	-- Add to global table for collision handler
+	if not _G.PlayerSnakes then
+		_G.PlayerSnakes = {}
+	end
+	_G.PlayerSnakes[player] = snake
+	
 	-- Ensure leaderstats exist
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if not leaderstats then
@@ -227,6 +233,11 @@ local function onCharacterAdded(character)
 			-- Clean up snake
 			activeSnakes[player]:destroy()
 			activeSnakes[player] = nil
+			
+			-- Remove from global table
+			if _G.PlayerSnakes then
+				_G.PlayerSnakes[player] = nil
+			end
 		end
 	end)
 end
