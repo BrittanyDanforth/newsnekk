@@ -132,6 +132,8 @@ function Snake.new(character, config)
 	self.segments = {}
 	self.visibleSegments = {}
 	
+	print("Creating snake with initial length:", self.length)
+	
 	-- Position history buffer (like original)
 	local maxHistorySize = mathMin(mathFloor(config.MaxSegments * 0.6), 30000)  -- Increased from 6000
 	self.positionHistory = {}
@@ -274,7 +276,7 @@ function Snake:calculateGrowthFactor()
 end
 
 function Snake:createInitialSegments()
-	local visibleLength = mathMin(self.length, MAX_VISIBLE_SEGMENTS)
+	local visibleSegments = mathMin(self.length, MAX_VISIBLE_SEGMENTS)
 	local startPos = self.rootPart.Position
 	
 	-- Calculate growth factor
@@ -282,50 +284,48 @@ function Snake:createInitialSegments()
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	
-	-- Calculate segment distribution across the full length
-	local segmentStep = mathMax(1, mathFloor(self.length / MAX_VISIBLE_SEGMENTS))
+	-- Adjusted spacing for growth
+	local spacing = (self.config.SegmentSpacing or 3.2) * growthFactor * 0.8
 	
-	-- Create initial segments spread across the snake's length
-	local segmentCount = 0
-	for i = 1, self.length, segmentStep do
-		segmentCount = segmentCount + 1
-		if segmentCount > MAX_VISIBLE_SEGMENTS then break end
-		
+	-- Create all visible segments
+	for i = 1, visibleSegments do
 		local segment = getSegmentFromPool()
 		if segment then
 			segment.Name = "Segment" .. i
 			
-			-- Position behind head with adjusted spacing for larger segments
-			local spacing = (self.config.SegmentSpacing or 3.2) * (growthFactor * 0.8)
-			local totalDistance = i * spacing
+			-- Calculate position for this segment
+			-- Spread them evenly across the snake's total length
+			local positionRatio = i / visibleSegments
+			local totalSnakeLength = self.length * spacing
+			local distanceFromHead = totalSnakeLength * positionRatio
 			
-			-- Create a longer initial trail
+			-- Create a curved trail
 			local direction = self.rootPart.CFrame.LookVector
 			local rightVector = self.rootPart.CFrame.RightVector
 			
-			-- Add some curve to make it look more natural
-			local curve = math.sin(i * 0.1) * 2
-			local pos = startPos - direction * totalDistance + rightVector * curve
+			-- Add curve for natural look
+			local curve = math.sin(i * 0.05) * (10 * growthFactor)
+			local pos = startPos - direction * distanceFromHead + rightVector * curve
 			
 			-- Apply color
 			local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
 			segment.Color = self.config.BodyColors[colorIndex]
 			segment.Size = currentSize
-			segment.CFrame = CFramenew(pos)
+			segment.CFrame = CFramenew(pos, pos - direction)
 			segment.Parent = self.model
 			
 			-- Update glow
 			local glow = segment:FindFirstChild("glow")
 			if glow then
 				glow.Color = segment.Color
-				glow.Range = 5 * growthFactor  -- Scale glow with size
+				glow.Range = 5 * growthFactor
 			end
 			
-			self.segments[segmentCount] = segment
+			self.segments[i] = segment
 		end
 	end
 	
-	print("Created", segmentCount, "visible segments for length", self.length)
+	print("Snake spawned: Length", self.length, "Growth", growthFactor, "Segments", #self.segments)
 end
 
 function Snake:setupNetworking()
@@ -399,11 +399,19 @@ function Snake:update(dt)
 	-- Update segments to follow history with dynamic spacing
 	local growthFactor = self:calculateGrowthFactor()
 	local baseSpacing = self.config.SegmentSpacing or 3.2
-	local adjustedSpacing = baseSpacing * (growthFactor * 0.7)  -- Closer spacing for larger snakes
-	local historyStepsPerSegment = mathMax(1, mathFloor(adjustedSpacing / 3))
+	local adjustedSpacing = baseSpacing * (growthFactor * 0.7)
+	
+	-- Calculate how much of the snake each visible segment represents
+	local segmentStep = mathMax(1, mathFloor(self.length / #self.segments))
 	
 	for i, segment in pairs(self.segments) do
-		local historySteps = i * historyStepsPerSegment
+		-- Calculate which part of the snake this segment represents
+		local snakePosition = i * segmentStep
+		
+		-- Calculate history steps needed for this position
+		local historyStepsPerUnit = mathMax(1, mathFloor(3 / adjustedSpacing))
+		local historySteps = mathMin(snakePosition * historyStepsPerUnit, self.historyCount - 1)
+		
 		local historyData = self:getFromHistory(historySteps)
 		
 		if historyData then
