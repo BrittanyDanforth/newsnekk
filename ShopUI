@@ -506,179 +506,311 @@ local PREVIEW_CONFIG = {
 	SNAKE_CENTER_Z = 0,
 }
 
--- Create preview snake
 function CharacterPreview.create(viewport)
-	-- FIXED: Add safety checks
-	if not viewport or not viewport.Parent then
-		warn("Invalid viewport provided to CharacterPreview.create")
-		return
-	end
-	
-	-- FIXED: Clean up any existing preview first
-	CharacterPreview.cleanup()
+	if not viewport then return end
 
-	-- Create preview model
-	CharacterPreview.model = Instance.new("Model")
-	CharacterPreview.model.Name = "PreviewSnake"
+	-- Clear viewport efficiently
+	viewport:ClearAllChildren()
 
-	-- FIXED: Safe config retrieval
-	local skinName = uiState.selectedSkin or "Default"
-	local config = nil
-	
-	if SnakeSkins and SnakeSkins.Configurations then
-		config = SnakeSkins.Configurations[skinName] or SnakeSkins.Configurations.Default
-	else
-		-- Fallback config if SnakeSkins module isn't loaded
-		config = {
-			HeadSize = Vector3.new(1.8, 1.8, 1.8),
-			HeadColor = Color3.fromRGB(0, 255, 0),
-			HeadMaterial = Enum.Material.Neon,
-			BodyColor = Color3.fromRGB(34, 139, 34),
-			BodyMaterial = Enum.Material.Neon,
-			GlowIntensity = 0.5,
-			GlowRange = 10
-		}
-	end
+	-- CRITICAL FIX: Create WorldModel for proper rendering in real game
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Parent = viewport
 
-	-- Create root part for positioning
-	local rootPart = Instance.new("Part")
-	rootPart.Name = "RootPart"
-	rootPart.Size = Vector3.new(1, 1, 1)
-	rootPart.Transparency = 1
-	rootPart.Anchored = true
-	rootPart.CanCollide = false
-	rootPart.Position = Vector3.new(0, 0, 0)
-	rootPart.Parent = CharacterPreview.model
+	-- Create massive reference part to establish scale
+	local scaleReference = Instance.new("Part")
+	scaleReference.Name = "ScaleReference"
+	scaleReference.Size = Vector3.new(1000, 1, 1000)
+	scaleReference.Position = Vector3.new(0, -100, 0)
+	scaleReference.Transparency = 1
+	scaleReference.Anchored = true
+	scaleReference.CanCollide = false
+	scaleReference.Parent = worldModel
 
-	-- FIXED: Use pcall for visual creation to prevent errors
-	local success, err = pcall(function()
-		-- Create head
-		createVisualHead(rootPart, config, CharacterPreview.model)
-
-		-- Create body segments
-		for i = 1, 5 do
-			local segment = Instance.new("Part")
-			segment.Name = "BodySegment" .. i
-			segment.Size = Vector3.new(1.6 - i * 0.1, 1.6 - i * 0.1, 1.6 - i * 0.1)
-			segment.Material = config.BodyMaterial
-			segment.Color = config.BodyColor
-			segment.Shape = Enum.PartType.Ball
-			segment.CanCollide = false
-			segment.Anchored = true
-			segment.Position = Vector3.new(0, 0, i * 1.5)
-			segment.Parent = CharacterPreview.model
-
-			local light = Instance.new("PointLight")
-			light.Color = config.BodyColor
-			light.Brightness = config.GlowIntensity
-			light.Range = config.GlowRange * 0.5
-			light.Parent = segment
-		end
-	end)
-	
-	if not success then
-		warn("Failed to create preview snake:", err)
-		-- Create basic fallback preview
-		local head = Instance.new("Part")
-		head.Name = "SnakeHead"
-		head.Size = Vector3.new(2, 2, 2)
-		head.Shape = Enum.PartType.Ball
-		head.Material = Enum.Material.Neon
-		head.Color = Color3.fromRGB(0, 255, 0)
-		head.Anchored = true
-		head.CanCollide = false
-		head.Parent = CharacterPreview.model
-	end
-
-	-- Set up camera
+	-- Create camera with proper FOV for viewport
 	local camera = Instance.new("Camera")
-	camera.CFrame = CFrame.new(Vector3.new(10, 10, 10), Vector3.new(0, 0, 2))
-	camera.FieldOfView = 30
+	camera.FieldOfView = 70 -- Standard FOV that works well in ViewportFrames
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.Focus = CFrame.new(0, 0, 0) -- Set focus point
+	camera.Parent = viewport
 	viewport.CurrentCamera = camera
 
-	-- Parent model to viewport
-	CharacterPreview.model.Parent = viewport
+	-- Create model INSIDE WorldModel
+	local model = Instance.new("Model")
+	model.Name = "SnakePreview"
+	model.Parent = worldModel
 
-	-- Start rotation animation
-	CharacterPreview.startRotation()
-end
+	-- Get skin data
+	local skin = SnakeSkinsData["Default"] or {
+		HeadColor = Color3.fromRGB(76, 217, 100),
+		BodyColors = {
+			Color3.fromRGB(60, 180, 80),
+			Color3.fromRGB(80, 200, 100),
+			Color3.fromRGB(100, 220, 120),
+			Color3.fromRGB(80, 200, 100),
+			Color3.fromRGB(60, 180, 80),
+		},
+		HeadMaterial = Enum.Material.ForceField,
+		BodyMaterial = Enum.Material.Neon,
+		GlowIntensity = 2,
+		GlowRange = 6,
+	}
 
--- Start rotation animation
-function CharacterPreview.startRotation()
-	-- FIXED: Cancel any existing rotation
-	if CharacterPreview.rotationConnection then
-		CharacterPreview.rotationConnection:Disconnect()
-		CharacterPreview.rotationConnection = nil
+	-- Create head using ACTUAL skin size
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Size = skin.HeadSize or PREVIEW_CONFIG.HEAD_SIZE -- Use skin's head size!
+	head.Shape = Enum.PartType.Ball
+	head.Material = skin.HeadMaterial
+	head.Color = skin.HeadColor
+	head.TopSurface = Enum.SurfaceType.Smooth
+	head.BottomSurface = Enum.SurfaceType.Smooth
+	head.CanCollide = false
+	head.CanQuery = false
+	head.CanTouch = false
+	head.Anchored = true
+	head.Position = Vector3.new(0, 0, PREVIEW_CONFIG.SNAKE_CENTER_Z)
+	head.Parent = model
+
+	-- Head glow
+	local headGlow = Instance.new("PointLight")
+	headGlow.Brightness = skin.GlowIntensity * 1.5
+	headGlow.Range = skin.GlowRange * 1.5
+	headGlow.Color = skin.HeadColor
+	headGlow.Parent = head
+
+	-- Create eyes
+	local function createEye(xOffset)
+		local eye = Instance.new("Part")
+		eye.Size = Vector3.new(0.6, 0.6, 0.6)
+		eye.Shape = Enum.PartType.Ball
+		eye.Material = Enum.Material.Neon
+		eye.Color = Color3.fromRGB(255, 255, 255)
+		eye.CanCollide = false
+		eye.Anchored = true
+		eye.Parent = model
+
+		-- Eye glow for visibility
+		local eyeGlow = Instance.new("PointLight")
+		eyeGlow.Brightness = 8
+		eyeGlow.Range = 40
+		eyeGlow.Color = Color3.fromRGB(255, 255, 255)
+		eyeGlow.Parent = eye
+
+		local pupil = Instance.new("Part")
+		pupil.Size = Vector3.new(0.3, 0.3, 0.3)
+		pupil.Shape = Enum.PartType.Ball
+		pupil.Material = Enum.Material.Neon
+		pupil.Color = Color3.fromRGB(0, 0, 0)
+		pupil.CanCollide = false
+		pupil.Anchored = true
+		pupil.Parent = model
+
+		return eye, pupil
 	end
-	
-	if not CharacterPreview.model then
-		return
+
+	local leftEye, leftPupil = createEye(-0.6)
+	local rightEye, rightPupil = createEye(0.6)
+
+	-- Create body segments with proper spacing
+	local segments = {}
+	local currentSize = PREVIEW_CONFIG.SEGMENT_SIZE
+
+	for i = 1, PREVIEW_CONFIG.SEGMENT_COUNT do
+		local segment = Instance.new("Part")
+		segment.Name = "Segment" .. i
+		segment.Size = currentSize
+		segment.Shape = Enum.PartType.Ball
+		segment.Material = skin.BodyMaterial
+		segment.TopSurface = Enum.SurfaceType.Smooth
+		segment.BottomSurface = Enum.SurfaceType.Smooth
+		segment.CanCollide = false
+		segment.CanQuery = false
+		segment.CanTouch = false
+		segment.Anchored = true
+		segment.Parent = model
+
+		-- Initial position - spread out in Z axis
+		segment.Position = Vector3.new(0, 0, -i * PREVIEW_CONFIG.SEGMENT_SPACING * 3)
+
+		-- Color pattern
+		local colorIndex = ((i - 1) % #skin.BodyColors) + 1
+		segment.Color = skin.BodyColors[colorIndex]
+
+		-- Segment glow
+		local glow = Instance.new("PointLight")
+		glow.Brightness = skin.GlowIntensity
+		glow.Range = skin.GlowRange
+		glow.Color = segment.Color
+		glow.Parent = segment
+
+		-- Store segment data with PROPER Z offset
+		table.insert(segments, {
+			part = segment,
+			offset = Vector3.new(0, 0, -i * PREVIEW_CONFIG.SEGMENT_SPACING * 2), -- Double spacing in Z
+			size = currentSize,
+			colorIndex = colorIndex
+		})
+
+		-- No size reduction - keep segments same size like CharacterSetup
+		-- currentSize = currentSize * PREVIEW_CONFIG.SIZE_REDUCTION
 	end
-	
-	-- FIXED: Set primary part if not already set
-	if not CharacterPreview.model.PrimaryPart then
-		local rootPart = CharacterPreview.model:FindFirstChild("RootPart")
-		if rootPart then
-			CharacterPreview.model.PrimaryPart = rootPart
-		else
-			-- Find any part to use as primary
-			for _, child in pairs(CharacterPreview.model:GetChildren()) do
-				if child:IsA("BasePart") then
-					CharacterPreview.model.PrimaryPart = child
-					break
-				end
+
+	-- Animation variables
+	local time = 0
+	local rotationConnection
+	local segmentTrail = {} -- Store trail positions for smooth following
+
+	-- Initialize segment positions in a straight line WITH PROPER SPACING
+	for i, seg in ipairs(segments) do
+		-- Exact same spacing as CharacterSetup
+		seg.part.Position = head.Position + Vector3.new(0, 0, -i * PREVIEW_CONFIG.SEGMENT_SPACING)
+		seg.part.Size = PREVIEW_CONFIG.SEGMENT_SIZE -- Force consistent size
+		segmentTrail[i] = {}
+	end
+
+	-- Main animation loop - PERFECT SLITHERING
+	rotationConnection = RunService.RenderStepped:Connect(function(dt)
+		time = time + dt
+
+		-- Camera rotation with proper positioning
+		local camAngle = time * PREVIEW_CONFIG.ROTATION_SPEED
+		local focusPoint = Vector3.new(0, 0, PREVIEW_CONFIG.SNAKE_CENTER_Z)
+
+		camera.CFrame = CFrame.lookAt(
+			focusPoint + Vector3.new(
+				math.sin(camAngle) * PREVIEW_CONFIG.CAMERA_DISTANCE,
+				PREVIEW_CONFIG.CAMERA_HEIGHT,
+				math.cos(camAngle) * PREVIEW_CONFIG.CAMERA_DISTANCE
+			),
+			focusPoint
+		)
+
+		-- Ensure camera type is scriptable
+		camera.CameraType = Enum.CameraType.Scriptable
+
+		-- SMOOTH INFINITY LOOP SLITHERING
+		local moveTime = time * PREVIEW_CONFIG.SLITHER_SPEED
+		local radius = PREVIEW_CONFIG.SNAKE_RADIUS
+
+		-- Create infinity symbol (∞) path for interesting movement
+		local t = moveTime * 2
+		local scale = radius
+
+		-- Parametric equations for infinity symbol
+		local headX = scale * math.sin(t) / (1 + math.cos(t)^2)
+		local headZ = scale * math.sin(t) * math.cos(t) / (1 + math.cos(t)^2)
+
+		-- Add additional wave for more fluid motion
+		local waveOffset = math.sin(moveTime * 3) * 3
+		headX = headX + waveOffset
+
+		-- Gentle vertical movement
+		local headY = math.sin(moveTime * 2) * 1
+
+		local finalPos = Vector3.new(headX, headY, headZ)
+
+		-- Calculate movement direction by looking slightly ahead
+		local dt = 0.1
+		local futureT = (moveTime + dt) * 2
+		local futureX = scale * math.sin(futureT) / (1 + math.cos(futureT)^2) + math.sin((moveTime + dt) * 3) * 3
+		local futureZ = scale * math.sin(futureT) * math.cos(futureT) / (1 + math.cos(futureT)^2)
+		local futureY = math.sin((moveTime + dt) * 2) * 1
+
+		-- Smooth head orientation
+		head.CFrame = CFrame.lookAt(finalPos, Vector3.new(futureX, futureY, futureZ))
+
+		-- Position eyes properly on the FRONT of the head
+		-- The -Z direction is forward when using CFrame
+		local eyeHeight = 0.6
+		local eyeForward = -1.4 -- Negative Z is forward
+		local eyeSeparation = 0.55 -- Reduced from 0.7 for closer eyes
+
+		leftEye.CFrame = head.CFrame * CFrame.new(-eyeSeparation, eyeHeight, eyeForward)
+		rightEye.CFrame = head.CFrame * CFrame.new(eyeSeparation, eyeHeight, eyeForward)
+
+		-- Pupils slightly in front of eyes
+		leftPupil.CFrame = leftEye.CFrame * CFrame.new(0, 0, -0.25)
+		rightPupil.CFrame = rightEye.CFrame * CFrame.new(0, 0, -0.25)
+
+		-- SMOOTH FOLLOWING ANIMATION
+		-- Store head positions for trail
+		if not CharacterPreview.positionHistory then
+			CharacterPreview.positionHistory = {}
+			CharacterPreview.historyTimer = 0
+		end
+
+		-- Add positions at FIXED intervals (not every frame) for consistency
+		CharacterPreview.historyTimer = (CharacterPreview.historyTimer or 0) + dt
+		local historyInterval = 1/60 -- Record at 60Hz regardless of actual framerate
+
+		if CharacterPreview.historyTimer >= historyInterval then
+			CharacterPreview.historyTimer = CharacterPreview.historyTimer - historyInterval
+
+			-- Add current head position to history
+			table.insert(CharacterPreview.positionHistory, 1, head.Position)
+
+			-- Keep history limited to prevent memory issues
+			local maxHistory = PREVIEW_CONFIG.SEGMENT_COUNT * 10
+			if #CharacterPreview.positionHistory > maxHistory then
+				table.remove(CharacterPreview.positionHistory)
 			end
 		end
-	end
-	
-	local rotation = 0
-	CharacterPreview.rotationConnection = RunService.Heartbeat:Connect(function(dt)
-		if CharacterPreview.model and CharacterPreview.model.Parent and CharacterPreview.model.PrimaryPart then
-			rotation = rotation + dt * 30 -- 30 degrees per second
-			
-			-- FIXED: Use safe rotation method
-			local cf = CFrame.new(0, 0, 0) * CFrame.Angles(0, math.rad(rotation), 0)
-			CharacterPreview.model:SetPrimaryPartCFrame(cf)
-			
-			-- Also update all parts manually as backup
-			for _, part in pairs(CharacterPreview.model:GetDescendants()) do
-				if part:IsA("BasePart") and part ~= CharacterPreview.model.PrimaryPart then
-					local offset = CharacterPreview.model.PrimaryPart.CFrame:ToObjectSpace(part.CFrame)
-					part.CFrame = cf * offset
+
+		-- SMOOTH SEGMENT FOLLOWING - THIS CONTROLS THE ACTUAL SPACING!
+		for i, seg in ipairs(segments) do
+			-- Each segment follows based on delay
+			-- Lower delay = segments closer together (less gappy)
+			local delay = i * 3 -- Reduced from 6 for tighter following
+			local historyIndex = math.floor(delay)
+			historyIndex = math.clamp(historyIndex, 1, #CharacterPreview.positionHistory)
+
+			if CharacterPreview.positionHistory[historyIndex] then
+				local targetPos = CharacterPreview.positionHistory[historyIndex]
+
+				-- TRUE FRAMERATE-INDEPENDENT SMOOTH FOLLOWING
+				local currentPos = seg.part.Position
+
+				-- This formula makes it look IDENTICAL at 30, 60, or 240 FPS!
+				-- The key is using exponential decay based on delta time
+				local responsiveness = 8 -- How quickly segments follow (higher = faster)
+				local frameIndependentLerp = 1 - math.exp(-responsiveness * dt)
+
+				-- Smooth movement that looks the same at ANY framerate
+				local newPos = currentPos:Lerp(targetPos, frameIndependentLerp)
+
+				seg.part.Position = newPos
+
+				-- Orient segment to face previous segment
+				if i > 1 then
+					local prevSeg = segments[i-1].part
+					local direction = (prevSeg.Position - newPos).Unit
+					if direction.Magnitude > 0 then
+						seg.part.CFrame = CFrame.lookAt(newPos, prevSeg.Position)
+					end
 				end
-			end
-		else
-			-- Model was destroyed, disconnect
-			if CharacterPreview.rotationConnection then
-				CharacterPreview.rotationConnection:Disconnect()
-				CharacterPreview.rotationConnection = nil
 			end
 		end
 	end)
-end
 
--- Cleanup preview
-function CharacterPreview.cleanup()
-	-- FIXED: Safe cleanup
-	if CharacterPreview.rotationConnection then
-		CharacterPreview.rotationConnection:Disconnect()
-		CharacterPreview.rotationConnection = nil
-	end
-	
-	if CharacterPreview.model then
-		CharacterPreview.model:Destroy()
-		CharacterPreview.model = nil
-	end
-end
+	-- Store references
+	CharacterPreview.currentModel = model
+	CharacterPreview.currentHead = head
+	CharacterPreview.currentSegments = segments
+	CharacterPreview.rotationConnection = rotationConnection
+	CharacterPreview.leftEye = leftEye
+	CharacterPreview.rightEye = rightEye
+	CharacterPreview.leftPupil = leftPupil
+	CharacterPreview.rightPupil = rightPupil
+	CharacterPreview.currentCamera = camera
+	CharacterPreview.currentSkinName = "Default"
 
--- Destroy preview
-function CharacterPreview.destroy(viewport)
-	CharacterPreview.cleanup()
-	
-	-- Clear viewport if provided
-	if viewport and viewport.Parent then
-		viewport:ClearAllChildren()
+	-- Compatibility properties
+	CharacterPreview.currentBody = {}
+	for i, seg in ipairs(segments) do
+		CharacterPreview.currentBody[i] = seg.part
 	end
+
+	return model
 end
 
 -- OPTIMIZED: Update preview with no lag
@@ -889,14 +1021,11 @@ end
 -- UI State (moved to top to be accessible everywhere)
 local uiState = {
 	currentCategory = 1,
-	selectedSkin = nil,
+	selectedSkin = "Default",
 	isShopOpen = false,
-	isOpening = false,  -- FIXED: Added missing property
-	isClosing = false,  -- FIXED: Added missing property
-	animations = {},
-	particles = {},
 	previewViewport = nil,
-	activeButtons = {}
+	animations = {},
+	particles = {}
 }
 
 -- Ultra Modern Configuration
@@ -1493,19 +1622,13 @@ end
 
 -- Create main shop interface
 local function createMainShop()
-	-- Create ScreenGui with proper parenting
 	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "SlitherShopUltraUI"
+	screenGui.Name = "SlitherShopUI"
 	screenGui.ResetOnSpawn = false
-	screenGui.DisplayOrder = 10
-	screenGui.IgnoreGuiInset = true
-	screenGui.Enabled = false -- Start disabled
-	
-	-- FIXED: Ensure proper parenting to PlayerGui
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.DisplayOrder = 15
+	-- CRITICAL FIX: Ensure parent is set
 	screenGui.Parent = playerGui
-	
-	-- Store reference immediately
-	ShopUI.uiElements.screenGui = screenGui
 
 	-- Main container
 	local mainFrame = Instance.new("Frame")
@@ -1879,10 +2002,10 @@ local function createMainShop()
 	createCorner(favoriteBtn, 8)
 	createStroke(favoriteBtn, SHOP_CONFIG.COLORS.WARNING, 1, 0.8)
 
-	-- Store UI elements for later use WITH PROPER REFERENCES
+	-- FIXED: Store UI references in ShopUI scope
 	ShopUI.uiElements = {
 		screenGui = screenGui,
-		blur = blur,
+		mainFrame = mainFrame,
 		contentWindow = contentWindow,
 		sidebar = sidebar,
 		gridScroll = gridScroll,
@@ -1895,13 +2018,12 @@ local function createMainShop()
 		robuxBtn = robuxBtn,
 		applyBtn = applyBtn,
 		favoriteBtn = favoriteBtn,
-		closeBtn = closeBtn,
 		coinAmount = coinAmount,
+		closeBtn = closeBtn,
 		inventoryBtn = inventoryBtn,
-		categoryButtons = {}
+		blur = blur,
 	}
 
-	-- FIXED: Ensure screenGui is returned properly
 	return screenGui
 end
 
@@ -2877,15 +2999,10 @@ end
 
 -- FIXED: Update info function with STABILITY
 function ShopUI.updateInfo()
-	-- FIXED: Add comprehensive safety checks
-	if not ShopUI.isInitialized then
-		warn("Shop not initialized yet")
-		return
-	end
-	
-	if not ShopUI.uiElements then
+	-- FULL VALIDATION
+	if not ShopUI.uiElements then 
 		warn("UI elements not ready")
-		return
+		return 
 	end
 
 	if not ShopUI.playerData then
@@ -2899,9 +3016,9 @@ function ShopUI.updateInfo()
 		return 
 	end
 
-	-- FIXED: Check each UI element before using
-	local requiredElements = {"skinName", "skinTag", "priceLabel", "coinAmount", "purchaseBtn", "robuxBtn", "applyBtn", "favoriteBtn"}
-	for _, elem in ipairs(requiredElements) do
+	-- Ensure all required UI elements exist
+	local required = {"skinName", "skinTag", "priceLabel", "purchaseBtn", "robuxBtn", "applyBtn", "favoriteBtn"}
+	for _, elem in ipairs(required) do
 		if not ShopUI.uiElements[elem] then
 			warn("Missing UI element:", elem)
 			return
@@ -3427,104 +3544,62 @@ end
 
 -- Open shop
 function ShopUI.open()
-	-- FIXED: Check if already opening or open
-	if uiState.isShopOpen or uiState.isOpening then
-		return
-	end
-	
-	-- FIXED: Set opening flag to prevent double opens
-	uiState.isOpening = true
-	
-	-- FIXED: Ensure player data is loaded
-	if not ShopUI.playerData or not ShopUI.playerData.coins then
-		loadPlayerData()
-	end
-	
-	local gui = ShopUI.init()
-	if not gui then
-		warn("Failed to create shop GUI")
-		uiState.isOpening = false
-		return
-	end
-	
-	gui.Enabled = true
+	if not uiState.isShopOpen then
+		local gui = ShopUI.init()
+		gui.Enabled = true
 
-	local contentWindow = ShopUI.uiElements.contentWindow
-	if not contentWindow then
-		warn("Content window not found")
-		uiState.isOpening = false
-		return
+		local contentWindow = ShopUI.uiElements.contentWindow
+		contentWindow.Position = UDim2.new(0.5, 0, 1.4, 0)
+		contentWindow.Size = UDim2.new(0.75, 0, 0.75, 0)
+
+		TweenService:Create(contentWindow, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			Size = UDim2.new(0.85, 0, 0.8, 0)
+		}):Play()
+
+		playSound("WHOOSH", 0.3)
 	end
-	
-	contentWindow.Position = UDim2.new(0.5, 0, 1.4, 0)
-	contentWindow.Size = UDim2.new(0.75, 0, 0.75, 0)
-
-	TweenService:Create(contentWindow, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-		Position = UDim2.new(0.5, 0, 0.5, 0),
-		Size = UDim2.new(0.85, 0, 0.8, 0)
-	}):Play()
-
-	playSound("WHOOSH", 0.3)
-	
-	-- FIXED: Clear opening flag after animation
-	task.wait(0.35)
-	uiState.isOpening = false
 end
 
 -- Close shop
 function ShopUI.close()
-	-- FIXED: Check if actually open and not already closing
-	if not uiState.isShopOpen or uiState.isClosing then
-		return
-	end
-	
-	-- FIXED: Set closing flag
-	uiState.isClosing = true
-	
-	playSound("WHOOSH", 0.2)
+	if uiState.isShopOpen then
+		playSound("WHOOSH", 0.2)
 
-	local contentWindow = ShopUI.uiElements.contentWindow
-	if contentWindow then
+		local contentWindow = ShopUI.uiElements.contentWindow
 		TweenService:Create(contentWindow, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
 			Position = UDim2.new(0.5, 0, 1.4, 0),
 			Size = UDim2.new(0.75, 0, 0.75, 0)
 		}):Play()
-	end
 
-	task.wait(0.2)
+		task.wait(0.2)
 
-	-- Cleanup
-	for _, particle in ipairs(uiState.particles) do
-		if particle.tween then
-			particle.tween:Cancel()
+		-- Cleanup
+		for _, particle in ipairs(uiState.particles) do
+			if particle.tween then
+				particle.tween:Cancel()
+			end
 		end
-	end
 
-	if ShopUI.uiElements.blur then
-		ShopUI.uiElements.blur:Destroy()
-	end
+		if ShopUI.uiElements.blur then
+			ShopUI.uiElements.blur:Destroy()
+		end
 
-	-- FIXED: Safe cleanup of preview
-	if uiState.previewViewport then
 		CharacterPreview.destroy(uiState.previewViewport)
-	end
-	
-	if ShopUI.uiElements.screenGui then
 		ShopUI.uiElements.screenGui:Destroy()
-	end
 
-	-- FIXED: Reset state properly
-	ShopUI.isInitialized = false
-	uiState.isShopOpen = false
-	uiState.isClosing = false
-	ShopUI.uiElements = {}
-	uiState.animations = {}
-	uiState.particles = {}
+		-- FIXED: Reset state properly
+		ShopUI.isInitialized = false
+		uiState.isShopOpen = false
+		ShopUI.uiElements = {}
+		uiState.animations = {}
+		uiState.particles = {}
 
-	-- Re-enable the SlitherIOMenu if it exists
-	local menuGui = Players.LocalPlayer.PlayerGui:FindFirstChild("SlitherIOMenu")
-	if menuGui then
-		menuGui.Enabled = true
+		-- Re-enable the SlitherIOMenu if it exists
+		local menuGui = Players.LocalPlayer.PlayerGui:FindFirstChild("SlitherIOMenu")
+		if menuGui then
+			menuGui.Enabled = true
+		end
 	end
 end
 
@@ -3560,23 +3635,8 @@ end)
 local function initialize()
 	print("🐍 Initializing Slither.io Shop Integration...")
 
-	-- FIXED: Add small delay to ensure game is loaded
-	task.wait(1)
-	
-	-- FIXED: Ensure playerGui exists
-	if not playerGui then
-		playerGui = localPlayer:WaitForChild("PlayerGui", 10)
-		if not playerGui then
-			warn("Failed to get PlayerGui!")
-			return
-		end
-	end
-
 	-- Load player data from attributes (with JSON fix)
 	loadPlayerData()
-	
-	-- FIXED: Setup server sync after data is loaded
-	setupServerSync()
 
 	print("✅ Slither.io Shop Integration ready!")
 	print("⌨️ Press F to toggle shop anytime")
@@ -3590,8 +3650,7 @@ end
 
 -- Start system
 task.spawn(function()
-	-- FIXED: Increased wait time for game to fully load
-	wait(2)
+	wait(0.5)
 	initialize()
 end)
 
