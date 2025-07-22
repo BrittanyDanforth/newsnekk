@@ -1,0 +1,1522 @@
+--[[
+ULTRA-SMOOTH & HIGH-PERFORMANCE SLITHER.IO SNAKE SYSTEM V5.2 - SKIN SYSTEM INTEGRATED
+- Fixed segment pooling to remove segments from workspace
+- Added periodic cleanup for orphaned segments
+- Optimized memory management
+- ENHANCED: Full skin system integration with proper attribute monitoring
+- ENHANCED: Real-time skin changes without breaking movement or performance
+- ENHANCED: Automatic skin application on spawn and skin changes
+--]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Helper function to get table keys (moved up to be available)
+local function getTableKeys(tbl)
+	local keys = {}
+	for k, _ in pairs(tbl or {}) do
+		table.insert(keys, tostring(k))
+	end
+	return keys
+end
+
+-- ENHANCED: Direct SnakeSkins loading from server module
+local SnakeSkins = nil
+local function loadSnakeSkins()
+	-- Try direct server module first
+	local success, result = pcall(function()
+		return require(script.Parent:WaitForChild("SnakeSkinsData", 2))
+	end)
+
+	if success and result then
+		SnakeSkins = result
+		print("✅ SnakeSkins loaded directly from server module with", #getTableKeys(result), "skins")
+		for name, _ in pairs(result) do
+			print("  - Found skin:", name)
+		end
+		return
+	else
+		warn("❌ Failed to load SnakeSkinsData:", tostring(result))
+	end
+
+	-- Fallback to ReplicatedStorage
+	success, result = pcall(function()
+		local module = ReplicatedStorage:WaitForChild("SnakeSkins", 2)
+		if module then
+			return require(module)
+		end
+	end)
+
+	if success and result then
+		SnakeSkins = result
+		print("✅ SnakeSkins loaded from ReplicatedStorage")
+	else
+		warn("❌ Failed to load SnakeSkins from any source")
+		SnakeSkins = {}
+	end
+end
+
+-- Load skins immediately and retry if needed
+loadSnakeSkins()
+task.spawn(function()
+	for i = 1, 5 do
+		if SnakeSkins and next(SnakeSkins) then 
+			print("✅ SnakeSkins loaded with", #getTableKeys(SnakeSkins), "skins")
+			break 
+		end
+		task.wait(2)
+		print("⏳ Retrying SnakeSkins load, attempt", i + 1)
+		loadSnakeSkins()
+	end
+end)
+
+-- Fast aliases
+local Vector3new = Vector3.new
+local CFramenew = CFrame.new
+local CFramelookAt = CFrame.lookAt
+local mathMin = math.min
+local mathMax = math.max
+local mathFloor = math.floor
+local taskSpawn = task.spawn
+local taskWait = task.wait
+
+-- ENHANCED: Base config with skin override capability (Classic green colors)
+local Config = {
+	HeadSize = Vector3new(4.5, 4.5, 4.5),  -- Bigger head
+	SegmentSize = Vector3new(3.5, 3.5, 4),  -- Thinner but still good
+	SegmentSpacing = 3.2,  -- Tighter for more segments visible
+	InitialLength = 55,  -- Starting length
+	MaxSegments = 3000,  -- MANY MORE segments for HUGE length
+	HeadColor = Color3.fromRGB(76, 217, 100), -- Classic green
+	BodyColors = {
+		Color3.fromRGB(60, 180, 80),
+		Color3.fromRGB(80, 200, 100),
+		Color3.fromRGB(100, 220, 120),
+		Color3.fromRGB(80, 200, 100),
+		Color3.fromRGB(60, 180, 80),
+	},
+	FollowSpeed = 0.92,
+	UpdateRate = 30,
+	MinDistance = 0.02,
+	BoostSpeed = 32,
+	BoostFollowSpeed = 0.99, -- Increased for tighter following when boosting
+	HeadMaterial = Enum.Material.ForceField,
+	BodyMaterial = Enum.Material.Neon,
+	GlowIntensity = 1.5,
+	GlowRange = 4,
+}
+
+-- ENHANCED: Get active config with skin overrides
+local function getActiveConfig(player)
+	local activeConfig = {}
+	for k, v in pairs(Config) do 
+		activeConfig[k] = v 
+	end
+
+	-- Apply skin overrides if available
+	local playerSkinName = player:GetAttribute("SelectedSkin")
+	print("🔍 Getting skin config for:", playerSkinName, "Player:", player.Name)
+
+	if playerSkinName and playerSkinName ~= "" then
+		if not SnakeSkins then
+			warn("❌ SnakeSkins module not loaded!")
+			-- Try one more time
+			loadSnakeSkins()
+		end
+
+		if SnakeSkins and SnakeSkins[playerSkinName] then
+			local skinData = SnakeSkins[playerSkinName]
+			print("📋 Applying skin data:", playerSkinName)
+			print("   HeadColor:", tostring(skinData.HeadColor))
+			print("   BodyColors count:", skinData.BodyColors and #skinData.BodyColors or "nil")
+
+			for key, value in pairs(skinData) do
+				if key ~= "Price" and key ~= "Description" then
+					activeConfig[key] = value
+					print("   Set", key, "to", tostring(value))
+				end
+			end
+			print("✅ Applied skin config for", playerSkinName, "to player", player.Name)
+			print("   Final HeadColor:", tostring(activeConfig.HeadColor))
+			print("   Final BodyColors count:", #activeConfig.BodyColors)
+			print("   First body color:", tostring(activeConfig.BodyColors[1]))
+		else
+			warn("❌ Skin", playerSkinName, "not found in SnakeSkins module!")
+			if SnakeSkins then
+				warn("   Available skins:", table.concat(getTableKeys(SnakeSkins), ", "))
+			end
+			-- Try to apply Classic skin as fallback
+			if SnakeSkins and SnakeSkins["Classic"] then
+				print("⚠️ Applying Classic skin as fallback")
+				local classicData = SnakeSkins["Classic"]
+				for key, value in pairs(classicData) do
+					if key ~= "Price" and key ~= "Description" then
+						activeConfig[key] = value
+					end
+				end
+			end
+		end
+	end
+
+	return activeConfig
+end
+
+-- Enhanced Segment Pooling with better cleanup
+local SegmentPool = {}
+local PoolSize = 0
+local MAX_POOL_SIZE = 500  -- Reduced to save memory
+
+-- Dedicated container for better organization
+local SegmentContainer = workspace:FindFirstChild("SegmentContainer")
+if not SegmentContainer then
+	SegmentContainer = Instance.new("Folder")
+	SegmentContainer.Name = "SegmentContainer"
+	SegmentContainer.Parent = workspace
+end
+
+local function resetSegment(segment)
+	segment.Anchored = true
+	segment.CanCollide = false
+	segment.CanQuery = false
+	segment.CanTouch = false
+	segment.Transparency = 0
+	segment.Size = Config.SegmentSize
+	segment.Material = Config.BodyMaterial
+	segment.Shape = Enum.PartType.Ball
+	segment.TopSurface = Enum.SurfaceType.Smooth
+	segment.BottomSurface = Enum.SurfaceType.Smooth
+	segment.Color = Config.BodyColors[1]
+	segment.Name = "Segment"
+
+	-- Clean up all children efficiently
+	for _, child in segment:GetChildren() do
+		if child:IsA("PointLight") or child:IsA("SelectionBox") or child:IsA("Attachment") then
+			child:Destroy()
+		end
+	end
+end
+
+local function getSegment()
+	if PoolSize > 0 then
+		local segment = SegmentPool[PoolSize]
+		SegmentPool[PoolSize] = nil
+		PoolSize = PoolSize - 1
+		resetSegment(segment)
+		-- Re-parent to container when getting from pool
+		segment.Parent = SegmentContainer
+		return segment
+	else
+		local segment = Instance.new("Part")
+		resetSegment(segment)
+		segment.Parent = SegmentContainer
+		return segment
+	end
+end
+
+-- FIXED: Properly remove segments from workspace
+local function returnSegment(segment)
+	if not segment or not segment.Parent then return end
+
+	-- Clean up the segment
+	segment.Transparency = 1
+	segment.CanCollide = false
+	segment.CanQuery = false
+	segment.CanTouch = false
+	segment.Anchored = true
+
+	-- Turn off lights and effects
+	for _, child in segment:GetChildren() do
+		if child:IsA("PointLight") then
+			child.Enabled = false
+		elseif child:IsA("SelectionBox") then
+			child.Adornee = nil
+		elseif child:IsA("Attachment") then
+			child:Destroy()
+		end
+	end
+
+	-- Only return to pool if we haven't exceeded max size
+	if PoolSize < MAX_POOL_SIZE then
+		PoolSize = PoolSize + 1
+		SegmentPool[PoolSize] = segment
+		-- CRITICAL FIX: Remove from workspace to prevent lag
+		segment.Parent = nil
+	else
+		-- Destroy excess segments
+		segment:Destroy()
+	end
+end
+
+local function getOrCreateSnakeModel(player)
+	local modelName = "SnakeModel_" .. player.UserId
+	local existing = workspace:FindFirstChild(modelName)
+	if existing and existing:IsA("Model") then
+		return existing
+	end
+	local model = Instance.new("Model")
+	model.Name = modelName
+	model.Parent = workspace
+	model:SetAttribute("IsSnakeModel", true)
+	model:SetAttribute("OwnerUserId", player.UserId)
+	return model
+end
+
+local function createSegment(index, position, color, config, parentModel, currentLength)
+	local segment = getSegment()
+	segment.Name = "Segment" .. index
+
+	-- Apply growth factor based on current snake length
+	local growthFactor = 1
+	if currentLength and currentLength > 200 then
+		growthFactor = 1 + ((currentLength - 200) / 2800) * 1.0  -- Match moderate growth
+	end
+
+	segment.Size = config.SegmentSize * mathMin(growthFactor, 2.0)  -- Match new max
+
+	-- CHECK GRAPHICS MODE BEFORE SETTING MATERIAL
+	local player = Players:GetPlayerFromCharacter(parentModel.Parent)
+	if not player then
+		-- Try to get player from model attributes
+		local userId = parentModel:GetAttribute("OwnerUserId")
+		if userId then
+			for _, p in pairs(Players:GetPlayers()) do
+				if p.UserId == userId then
+					player = p
+					break
+				end
+			end
+		end
+	end
+
+	local graphicsMode = player and player:GetAttribute("GraphicsMode") or "High"
+	if graphicsMode == "Low" then
+		segment.Material = Enum.Material.SmoothPlastic
+	else
+		segment.Material = config.BodyMaterial
+	end
+
+	segment.Color = color
+	segment.CFrame = CFramenew(position)
+	segment.Parent = parentModel
+	segment.Transparency = 0
+
+	segment:SetAttribute("IsSnakeSegment", true)
+	segment:SetAttribute("SegmentIndex", index)
+
+	-- Add glow to head segments and every 10th segment for performance
+	-- DISABLE GLOW IN LOW GRAPHICS MODE
+	if graphicsMode ~= "Low" and (index <= 30 or index % 10 == 0) then
+		local light = segment:FindFirstChild("Glow")
+		if not light then
+			light = Instance.new("PointLight")
+			light.Name = "Glow"
+			light.Parent = segment
+		end
+		light.Color = color
+		light.Brightness = config.GlowIntensity
+		light.Range = config.GlowRange
+		light.Enabled = true
+	end
+
+	local outline = segment:FindFirstChild("Outline")
+	if not outline then
+		outline = Instance.new("SelectionBox")
+		outline.Name = "Outline"
+		outline.Parent = segment
+	end
+	outline.Adornee = segment
+	outline.Color3 = Color3.fromRGB(255, 255, 255)
+	outline.LineThickness = 0.03
+	outline.Transparency = 1
+
+	return segment
+end
+
+local function createVisualHead(rootPart, config, parentModel)
+	-- Get player to check graphics mode
+	local player = Players:GetPlayerFromCharacter(rootPart.Parent)
+	if not player then
+		local userId = parentModel:GetAttribute("OwnerUserId")
+		if userId then
+			for _, p in pairs(Players:GetPlayers()) do
+				if p.UserId == userId then
+					player = p
+					break
+				end
+			end
+		end
+	end
+
+	local graphicsMode = player and player:GetAttribute("GraphicsMode") or "High"
+
+	local headPart = Instance.new("Part")
+	headPart.Name = "SnakeHead"
+	headPart.Size = config.HeadSize
+	-- Apply material based on graphics mode
+	if graphicsMode == "Low" then
+		headPart.Material = Enum.Material.SmoothPlastic
+	else
+		headPart.Material = config.HeadMaterial
+	end
+	headPart.Color = config.HeadColor
+	headPart.Shape = Enum.PartType.Ball
+	headPart.CanCollide = false
+	headPart.CanQuery = false
+	headPart.CanTouch = false
+	headPart.Anchored = true
+	headPart.TopSurface = Enum.SurfaceType.Smooth
+	headPart.BottomSurface = Enum.SurfaceType.Smooth
+	headPart.Parent = parentModel
+
+	headPart:SetAttribute("IsSnakeHead", true)
+	headPart:SetAttribute("IsSnakeSegment", true)
+
+	-- MAKE HEAD COMPLETELY INVISIBLE - Eyes will still show
+	headPart.Transparency = 1
+
+	-- Only add light if not in Low graphics mode
+	local headLight = nil
+	if graphicsMode ~= "Low" then
+		headLight = Instance.new("PointLight")
+		headLight.Color = config.HeadColor
+		headLight.Brightness = config.GlowIntensity + 1
+		headLight.Range = config.GlowRange + 2
+		headLight.Parent = headPart
+	end
+
+	local headOutline = Instance.new("SelectionBox")
+	headOutline.Adornee = headPart
+	headOutline.Color3 = Color3.fromRGB(255, 255, 255)
+	headOutline.LineThickness = 0.08
+	headOutline.Transparency = 1
+	headOutline.Parent = headPart
+
+	local function createEye(name, position, parent)
+		local eye = Instance.new("Part")
+		eye.Name = name
+		eye.Size = Vector3new(0.6, 0.6, 0.6)  -- Match reference code size
+		-- Eyes always use SmoothPlastic in low graphics
+		if graphicsMode == "Low" then
+			eye.Material = Enum.Material.SmoothPlastic
+		else
+			eye.Material = Enum.Material.Neon
+		end
+		eye.Color = Color3.fromRGB(255, 255, 255)
+		eye.Shape = Enum.PartType.Ball
+		eye.CanCollide = false
+		eye.CanQuery = false
+		eye.CanTouch = false
+		eye.Anchored = false
+		eye.Massless = true  -- Make eyes massless
+		eye.CastShadow = false  -- No shadows for performance
+		eye.Parent = parent
+		-- Position FIRST, then weld
+		eye.CFrame = parent.CFrame * CFramenew(position)
+
+		-- Create weld AFTER positioning
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = parent
+		weld.Part1 = eye
+		weld.Parent = parent
+
+		-- No rigid constraint - it was causing conflicts!
+
+		return eye, weld
+	end
+
+	local function createPupil(name, position, parent)
+		local pupil = Instance.new("Part")
+		pupil.Name = name
+		pupil.Size = Vector3new(0.25, 0.25, 0.25)  -- Match reference code size
+		-- Pupils always use SmoothPlastic in low graphics
+		if graphicsMode == "Low" then
+			pupil.Material = Enum.Material.SmoothPlastic
+		else
+			pupil.Material = Enum.Material.Neon
+		end
+		pupil.Color = Color3.fromRGB(0, 0, 0)
+		pupil.Shape = Enum.PartType.Ball
+		pupil.CanCollide = false
+		pupil.CanQuery = false
+		pupil.CanTouch = false
+		pupil.Anchored = false
+		pupil.Massless = true
+		pupil.CastShadow = false  -- No shadows
+		pupil.Parent = parent
+		pupil.CFrame = parent.CFrame * CFramenew(position)
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = parent
+		weld.Part1 = pupil
+		weld.Parent = parent
+
+		return pupil, weld
+	end
+
+	-- PERFECT positioning for baby snake: X=0.6, Y=0.55, Z=1.1
+	local leftEye, leftEyeWeld = createEye("LeftEye", Vector3new(-0.6, 0.55, 1.1), headPart)
+	local rightEye, rightEyeWeld = createEye("RightEye", Vector3new(0.6, 0.55, 1.1), headPart)
+	local leftPupil, leftPupilWeld = createPupil("LeftPupil", Vector3new(0, 0, -0.2), leftEye)
+	local rightPupil, rightPupilWeld = createPupil("RightPupil", Vector3new(0, 0, -0.2), rightEye)
+
+	return {
+		head = headPart,
+		headLight = headLight,
+		headOutline = headOutline,
+		leftEye = leftEye,
+		rightEye = rightEye,
+		leftPupil = leftPupil,
+		rightPupil = rightPupil,
+		leftEyeWeld = leftEyeWeld,
+		rightEyeWeld = rightEyeWeld,
+		leftPupilWeld = leftPupilWeld,
+		rightPupilWeld = rightPupilWeld,
+	}
+end
+
+local playerSnakes = {}
+if not _G.PlayerSnakes then
+	_G.PlayerSnakes = {}
+end
+
+-- ENHANCED: Apply skin changes to existing snake without recreating
+local function applySkinToExistingSnake(player, snakeInstance)
+	if not snakeInstance or not snakeInstance.isActive() then return end
+
+	local activeConfig = getActiveConfig(player)
+
+	-- Update head appearance
+	if snakeInstance.headParts and snakeInstance.headParts.head then
+		snakeInstance.headParts.head.Color = activeConfig.HeadColor
+		snakeInstance.headParts.head.Material = activeConfig.HeadMaterial
+
+		-- Update head light
+		if snakeInstance.headParts.headLight then
+			snakeInstance.headParts.headLight.Color = activeConfig.HeadColor
+			snakeInstance.headParts.headLight.Brightness = activeConfig.GlowIntensity + 1
+			snakeInstance.headParts.headLight.Range = activeConfig.GlowRange + 2
+		end
+	end
+
+	-- Update segment appearances
+	if snakeInstance.segments then
+		for i, segment in pairs(snakeInstance.segments) do
+			if segment and segment.Parent then
+				local colorIndex = ((i - 1) % #activeConfig.BodyColors) + 1
+				segment.Color = activeConfig.BodyColors[colorIndex]
+				-- Check graphics mode before setting material
+				local graphicsMode = player:GetAttribute("GraphicsMode") or "High"
+				if graphicsMode == "Low" then
+					segment.Material = Enum.Material.SmoothPlastic
+				else
+					segment.Material = activeConfig.BodyMaterial
+				end
+
+				-- Update segment light
+				local light = segment:FindFirstChild("Glow")
+				if light then
+					light.Color = activeConfig.BodyColors[colorIndex]
+					light.Brightness = activeConfig.GlowIntensity
+					light.Range = activeConfig.GlowRange
+				end
+			end
+		end
+	end
+
+	print("🎨 Applied skin changes to existing snake for", player.Name)
+end
+
+-- NEW: Apply graphics mode changes to existing snake
+local function applyGraphicsModeToSnake(player, snakeInstance)
+	if not snakeInstance or not snakeInstance.isActive() then return end
+
+	local graphicsMode = player:GetAttribute("GraphicsMode") or "High"
+	local activeConfig = getActiveConfig(player)
+
+	print("🎮 Applying graphics mode:", graphicsMode, "to", player.Name)
+
+	-- Update head
+	if snakeInstance.headParts and snakeInstance.headParts.head then
+		-- Update material
+		if graphicsMode == "Low" then
+			snakeInstance.headParts.head.Material = Enum.Material.SmoothPlastic
+			-- Update eyes and pupils
+			if snakeInstance.headParts.leftEye then
+				snakeInstance.headParts.leftEye.Material = Enum.Material.SmoothPlastic
+			end
+			if snakeInstance.headParts.rightEye then
+				snakeInstance.headParts.rightEye.Material = Enum.Material.SmoothPlastic
+			end
+			if snakeInstance.headParts.leftPupil then
+				snakeInstance.headParts.leftPupil.Material = Enum.Material.SmoothPlastic
+			end
+			if snakeInstance.headParts.rightPupil then
+				snakeInstance.headParts.rightPupil.Material = Enum.Material.SmoothPlastic
+			end
+		else
+			snakeInstance.headParts.head.Material = activeConfig.HeadMaterial
+			-- Update eyes and pupils
+			if snakeInstance.headParts.leftEye then
+				snakeInstance.headParts.leftEye.Material = Enum.Material.Neon
+			end
+			if snakeInstance.headParts.rightEye then
+				snakeInstance.headParts.rightEye.Material = Enum.Material.Neon
+			end
+			if snakeInstance.headParts.leftPupil then
+				snakeInstance.headParts.leftPupil.Material = Enum.Material.Neon
+			end
+			if snakeInstance.headParts.rightPupil then
+				snakeInstance.headParts.rightPupil.Material = Enum.Material.Neon
+			end
+		end
+
+		-- ENSURE HEAD STAYS INVISIBLE REGARDLESS OF GRAPHICS MODE
+		snakeInstance.headParts.head.Transparency = 1
+
+		-- Handle head light
+		if graphicsMode == "Low" then
+			-- Remove or disable light
+			if snakeInstance.headParts.headLight then
+				snakeInstance.headParts.headLight.Enabled = false
+			end
+		else
+			-- Enable or create light
+			if snakeInstance.headParts.headLight then
+				snakeInstance.headParts.headLight.Enabled = true
+			elseif snakeInstance.headParts.head then
+				-- Create light if it doesn't exist
+				local headLight = Instance.new("PointLight")
+				headLight.Color = activeConfig.HeadColor
+				headLight.Brightness = activeConfig.GlowIntensity + 1
+				headLight.Range = activeConfig.GlowRange + 2
+				headLight.Parent = snakeInstance.headParts.head
+				snakeInstance.headParts.headLight = headLight
+			end
+		end
+	end
+
+	-- Update all segments
+	if snakeInstance.segments then
+		for i, segment in pairs(snakeInstance.segments) do
+			if segment and segment.Parent then
+				-- Update material
+				if graphicsMode == "Low" then
+					segment.Material = Enum.Material.SmoothPlastic
+					-- Remove or disable glow
+					local light = segment:FindFirstChild("Glow")
+					if light then
+						light.Enabled = false
+					end
+				else
+					segment.Material = activeConfig.BodyMaterial
+					-- Enable glow for appropriate segments
+					if i <= 30 or i % 10 == 0 then
+						local light = segment:FindFirstChild("Glow")
+						if light then
+							light.Enabled = true
+						else
+							-- Create light if it doesn't exist
+							light = Instance.new("PointLight")
+							light.Name = "Glow"
+							light.Color = segment.Color
+							light.Brightness = activeConfig.GlowIntensity
+							light.Range = activeConfig.GlowRange
+							light.Parent = segment
+						end
+					end
+				end
+			end
+		end
+	end
+
+	print("✅ Graphics mode applied successfully")
+end
+
+local function createUltraSmoothSnake(character)
+	print("🐍 Creating snake for character:", character.Name)
+
+	-- ENSURE SnakeSkins is loaded before creating snake
+	if not SnakeSkins or not next(SnakeSkins) then
+		print("⏳ Waiting for SnakeSkins to load...")
+		loadSnakeSkins()
+		task.wait(0.5)
+
+		-- Check again
+		if not SnakeSkins or not next(SnakeSkins) then
+			warn("❌ SnakeSkins still not loaded after waiting!")
+		else
+			print("✅ SnakeSkins now loaded with", #getTableKeys(SnakeSkins), "skins")
+		end
+	else
+		print("✅ SnakeSkins already loaded with", #getTableKeys(SnakeSkins), "skins")
+	end
+
+	local humanoid = character:FindFirstChild("Humanoid") or character:WaitForChild("Humanoid", 5)
+	local rootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 5)
+
+	-- Try multiple ways to get the player
+	local player = Players:GetPlayerFromCharacter(character)
+	if not player then
+		-- Try by name
+		player = Players:FindFirstChild(character.Name)
+	end
+
+	if not humanoid then
+		warn("❌ No humanoid found for", character.Name)
+		return
+	end
+	if not rootPart then
+		warn("❌ No HumanoidRootPart found for", character.Name)
+		return
+	end
+	if not player then
+		warn("❌ No player found for", character.Name)
+		return
+	end
+
+	local oldSnakeInstance = character:FindFirstChild("__SnakeInstance")
+	if oldSnakeInstance then
+		oldSnakeInstance:Destroy()
+	end
+
+	-- ENHANCED: Use new skin system
+	local activeConfig = getActiveConfig(player)
+
+	-- Validate config
+	if not activeConfig.BodyColors or #activeConfig.BodyColors == 0 then
+		warn("❌ Invalid skin config - missing BodyColors!")
+		activeConfig.BodyColors = Config.BodyColors -- Fallback to default
+	end
+	if not activeConfig.HeadColor then
+		warn("❌ Invalid skin config - missing HeadColor!")
+		activeConfig.HeadColor = Config.HeadColor -- Fallback to default
+	end
+
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if leaderstats then
+		local lengthValue = leaderstats:FindFirstChild("Length")
+		if lengthValue then
+			lengthValue.Value = activeConfig.InitialLength
+		end
+	end
+
+	-- IMMEDIATELY hide the character to prevent ANY flashing
+	rootPart.Transparency = 1
+	-- Keep CanCollide true for orb collection!
+
+	-- Specifically hide the head to remove any face decals
+	local head = character:FindFirstChild("Head")
+	if head then
+		head.Transparency = 1
+		-- Remove face decal
+		local face = head:FindFirstChild("face") or head:FindFirstChild("Face")
+		if face then
+			face:Destroy()
+		end
+	end
+
+	for _, part in character:GetChildren() do
+		if part:IsA("BasePart") then
+			part.Transparency = 1
+			part.CanCollide = false
+			-- Also remove any effects that might be visible
+			for _, effect in part:GetChildren() do
+				if effect:IsA("ParticleEmitter") or effect:IsA("Fire") or effect:IsA("Smoke") or 
+					effect:IsA("Sparkles") or effect:IsA("PointLight") or effect:IsA("SpotLight") or
+					effect:IsA("SurfaceLight") then
+					effect.Enabled = false
+					effect:Destroy()
+				end
+			end
+		elseif part:IsA("Accessory") or part:IsA("Tool") then
+			part:Destroy()
+		end
+	end
+
+	-- Also hide the humanoid root part's selection box if any
+	for _, child in rootPart:GetChildren() do
+		if child:IsA("SelectionBox") or child:IsA("SelectionSphere") or 
+			child:IsA("SurfaceGui") or child:IsA("BillboardGui") then
+			child:Destroy()
+		end
+	end
+
+	-- Clean up any debug visuals on the player's model in workspace
+	task.spawn(function()
+		wait(0.1)
+		local playerModel = workspace:FindFirstChild(player.Name)
+		if playerModel then
+			for _, obj in playerModel:GetDescendants() do
+				if obj:IsA("SelectionBox") or obj:IsA("Highlight") or 
+					(obj:IsA("Part") and obj.Name:match("Debug")) then
+					obj:Destroy()
+				end
+			end
+		end
+	end)
+
+	local snakeModel = getOrCreateSnakeModel(player)
+	for _, obj in snakeModel:GetChildren() do
+		if obj:IsA("BasePart") then
+			for _, child in obj:GetChildren() do
+				if child:IsA("Attachment") then
+					child:Destroy()
+				end
+			end
+		end
+		obj:Destroy()
+	end
+
+	-- Don't clean up heads here - it's too aggressive
+
+	-- Don't create visual parts yet
+	local headParts = nil
+	local segments = {}
+	local currentLength = 0 -- Start with 0 segments
+	local targetLength = activeConfig.InitialLength
+
+	-- Create initial segments spread out behind spawn position (like reference)
+	local startPos = rootPart.Position
+	for i = 1, activeConfig.InitialLength do
+		local pos = startPos - rootPart.CFrame.LookVector * (i * activeConfig.SegmentSpacing)
+		local colorIndex = ((i - 1) % #activeConfig.BodyColors) + 1
+		local color = activeConfig.BodyColors[colorIndex]
+		local segment = createSegment(i, pos, color, activeConfig, snakeModel, i)
+		segments[i] = segment
+		currentLength = i
+	end
+
+	-- OPTIMIZED: Buffer sized for 3000 segments
+	local maxHistorySize = mathMin(mathFloor(activeConfig.MaxSegments * 0.6), 1800) -- 1800 for longer snake
+	local positionHistory = {}
+	local historyHead = 1
+	local historyCount = 0
+
+	-- Start small and grow
+	local initialHistoryPoint = { position = rootPart.Position, lookVector = rootPart.CFrame.LookVector }
+	for i = 1, mathMin(100, maxHistorySize) do
+		positionHistory[i] = initialHistoryPoint
+		historyCount = i
+	end
+
+	local function addToHistory(data)
+		-- Grow dynamically
+		if historyCount < maxHistorySize then
+			historyCount = historyCount + 1
+			positionHistory[historyCount] = data
+			historyHead = historyCount
+		else
+			historyHead = (historyHead % maxHistorySize) + 1
+			positionHistory[historyHead] = data
+		end
+	end
+
+	local function getFromHistory(stepsBack)
+		-- Handle dynamic buffer size
+		if stepsBack > historyCount then
+			return positionHistory[1]
+		end
+
+		local index = historyHead - stepsBack
+		if index < 1 then
+			if historyCount >= maxHistorySize then
+				index = index + maxHistorySize
+			else
+				index = 1
+			end
+		end
+		return positionHistory[index] or positionHistory[1]
+	end
+
+	local connections = {}
+	local isActive = true
+	local updateCounter = 0
+	local networkUpdateInterval = 2
+	local lastNetworkUpdate = 0
+
+	local function growSnake(amount)
+		amount = amount or 5
+		local grew = false
+		for i = 1, amount do
+			if currentLength < activeConfig.MaxSegments then
+				grew = true
+				currentLength = currentLength + 1
+				-- Ensure we have colors to use
+				local bodyColors = activeConfig.BodyColors
+				if not bodyColors or #bodyColors == 0 then
+					bodyColors = Config.BodyColors  -- Fallback to default
+				end
+				local colorIndex = ((currentLength - 1) % #bodyColors) + 1
+				local color = bodyColors[colorIndex]
+				local lastSegment = segments[#segments]
+				local newPos = lastSegment and lastSegment.Position or rootPart.Position
+				local segment = createSegment(currentLength, newPos, color, activeConfig, snakeModel, currentLength)
+				segments[currentLength] = segment
+
+				-- Dynamic sizing: new segments match uniform growth
+				local growthFactor = 1
+				if currentLength > 200 then
+					-- Same uniform growth as all other segments
+					growthFactor = 1 + ((currentLength - 200) / 2800) * 1.0  -- Match moderate growth
+				end
+				local targetSize = activeConfig.SegmentSize * mathMin(growthFactor, 2.0)  -- Match new max
+
+				segment.Transparency = 1
+				segment.Size = Vector3new(0.05, 0.05, 0.05)
+				taskSpawn(function()
+					local growTime = 0.15
+					local t = 0
+					local startSize = Vector3new(0.05, 0.05, 0.05)
+					local endSize = targetSize
+					local heartbeat = RunService.Heartbeat
+
+					while t < growTime and segment.Parent do
+						t = t + heartbeat:Wait()
+						if segment.Parent then
+							local alpha = mathMin(t / growTime, 1)
+							segment.Size = startSize:Lerp(endSize, alpha)
+							segment.Transparency = 1 - alpha
+						end
+					end
+					if segment.Parent then
+						segment.Size = endSize
+						segment.Transparency = 0
+					end
+				end)
+			end
+		end
+
+		if grew and leaderstats and updateCounter % 5 == 0 then
+			local lengthValue = leaderstats:FindFirstChild("Length")
+			if lengthValue then
+				lengthValue.Value = currentLength
+			end
+		end
+	end
+
+	local function cleanup()
+		if not isActive then return end
+		isActive = false
+
+		for _, conn in connections do
+			if typeof(conn) == "RBXScriptConnection" then
+				conn:Disconnect()
+			end
+		end
+
+		for i, segment in pairs(segments) do
+			if segment then
+				returnSegment(segment)
+			end
+		end
+
+		if headParts then
+			-- Specifically destroy the head first to prevent orphaning
+			if headParts.head and headParts.head.Parent then
+				headParts.head:Destroy()
+			end
+
+			-- Then clean up all other parts
+			for name, part in pairs(headParts) do
+				if typeof(part) == "Instance" and part.Parent then
+					for _, child in part:GetChildren() do
+						if child:IsA("Attachment") or child:IsA("WeldConstraint") then
+							child:Destroy()
+						end
+					end
+					part:Destroy()
+				end
+			end
+			headParts = nil
+		end
+
+		if snakeModel and snakeModel.Parent then
+			snakeModel:SetAttribute("BeingDestroyed", true)
+			taskSpawn(function()
+				taskWait(0.05)
+				if snakeModel.Parent then
+					snakeModel:Destroy()
+				end
+			end)
+		end
+
+		playerSnakes[player] = nil
+		_G.PlayerSnakes[player] = nil
+
+		local oldSnakeInstance = character:FindFirstChild("__SnakeInstance")
+		if oldSnakeInstance then
+			oldSnakeInstance:Destroy()
+		end
+	end
+
+	local diedConn = humanoid.Died:Connect(cleanup)
+	local ancestryConn = character.AncestryChanged:Connect(function()
+		if not character.Parent then
+			cleanup()
+		end
+	end)
+	table.insert(connections, diedConn)
+	table.insert(connections, ancestryConn)
+
+	-- ADD SPAWN STABILIZATION DELAY
+	local spawnStabilizing = true
+	local framesSinceSpawn = 0
+	task.spawn(function()
+		task.wait(0.2) -- Increased delay
+		spawnStabilizing = false
+		print("✅ Spawn stabilization complete")
+	end)
+
+	local heartbeatConn
+	heartbeatConn = RunService.Heartbeat:Connect(function(dt)
+		if not isActive or not rootPart.Parent then return end
+
+		updateCounter = updateCounter + 1
+
+		-- ENSURE ALL CHARACTER PARTS STAY INVISIBLE
+		if updateCounter % 10 == 0 then -- Check every 10 frames for performance
+			for _, part in character:GetChildren() do
+				if part:IsA("BasePart") and part ~= rootPart then
+					if part.Transparency ~= 1 then
+						part.Transparency = 1
+					end
+				end
+			end
+			-- Ensure root part is also invisible
+			if rootPart.Transparency ~= 1 then
+				rootPart.Transparency = 1
+			end
+		end
+
+		-- Calculate uniform size ONCE per frame for ALL segments
+		local currentGrowthFactor = 1
+		if currentLength > 200 then
+			-- Moderate growth to stay long not just thick
+			currentGrowthFactor = 1 + ((currentLength - 200) / 2800) * 1.0  -- Less growth
+		end
+		local uniformTargetSize = activeConfig.SegmentSize * mathMin(currentGrowthFactor, 2.0)  -- Max 2x size only
+
+		-- Remove selection box every frame to ensure it stays gone
+		if rootPart:FindFirstChild("SelectionBox") then
+			rootPart.SelectionBox:Destroy()
+		end
+		for _, child in rootPart:GetChildren() do
+			if child:IsA("SelectionBox") then
+				child:Destroy()
+			end
+		end
+
+		-- Also check workspace for any selection boxes targeting this rootPart
+		if updateCounter % 10 == 0 then  -- Check every 10 frames
+			for _, obj in workspace:GetDescendants() do
+				if obj:IsA("SelectionBox") and obj.Adornee == rootPart then
+					obj:Destroy()
+				elseif obj:IsA("Highlight") and obj.Adornee == rootPart then
+					obj:Destroy()
+				end
+			end
+		end
+
+		local isBoosting = humanoid.WalkSpeed > 16.1
+		local followSpeed = isBoosting and activeConfig.BoostFollowSpeed or activeConfig.FollowSpeed
+
+		local currentPos = rootPart.Position
+		local currentCFrame = rootPart.CFrame
+		local lookVector = currentCFrame.LookVector
+		local headOffset = lookVector * 1.5
+		local headPos = currentPos + headOffset
+
+		-- Create head after 3 frames to prevent flash
+		if not headParts and framesSinceSpawn == 3 then
+			headParts = createVisualHead(rootPart, activeConfig, snakeModel)
+		end
+
+		-- Remove RootOutline if it exists (Roblox creates this automatically)
+		if rootPart:FindFirstChild("RootOutline") then
+			rootPart:FindFirstChild("RootOutline"):Destroy()
+		end
+
+		if headParts and headParts.head and headParts.head.Parent then
+			-- Position head properly without creating duplicates
+			headParts.head.CFrame = CFrame.lookAt(headPos, headPos + lookVector)
+
+			-- ENSURE HEAD STAYS INVISIBLE
+			if headParts.head.Transparency ~= 1 then
+				headParts.head.Transparency = 1
+			end
+
+			-- Update eye positions to maintain EXACT proportions as head grows
+			if headParts.leftEye and headParts.rightEye and updateCounter % 30 == 0 then  -- Less frequent for performance
+				local headSize = headParts.head.Size.X
+				local baseHeadSize = activeConfig.HeadSize.X
+
+				-- PROPORTIONAL SCALING - keep exact same look at all sizes
+				-- These ratios make eyes look perfect on small snake
+				local eyeSpacingRatio = 0.6 / baseHeadSize  -- Side spacing as ratio of head
+				local eyeUpRatio = 0.55 / baseHeadSize      -- Height as ratio of head  
+				local eyeForwardRatio = 1.1 / baseHeadSize  -- Forward as ratio of head
+
+				-- Apply ratios to current head size - maintains EXACT proportions
+				local eyeSpacing = headSize * eyeSpacingRatio
+				local eyeUp = headSize * eyeUpRatio
+				local eyeForward = headSize * eyeForwardRatio
+
+				-- Update positions - eyes stay proportional to head
+				headParts.leftEye.CFrame = headParts.head.CFrame * CFramenew(-eyeSpacing, eyeUp, eyeForward)
+				headParts.rightEye.CFrame = headParts.head.CFrame * CFramenew(eyeSpacing, eyeUp, eyeForward)
+
+				-- Scale eyes slightly with head too for better look
+				local eyeScale = headSize / baseHeadSize * 0.8  -- Eyes grow but not as fast as head
+				headParts.leftEye.Size = Vector3new(0.8, 0.8, 0.8) * eyeScale
+				headParts.rightEye.Size = Vector3new(0.8, 0.8, 0.8) * eyeScale
+			end
+
+			-- LOD for performance
+			if headParts.leftPupil and headParts.rightPupil then
+				local pupilTransparency = currentLength > 2000 and 1 or 0
+				headParts.leftPupil.Transparency = pupilTransparency
+				headParts.rightPupil.Transparency = pupilTransparency
+			end
+
+			-- Dynamic head sizing - same growth as body segments
+			if updateCounter % 20 == 0 and currentLength > 200 then
+				local headGrowth = 1 + ((currentLength - 200) / 2800) * 1.0  -- Match body growth
+				local targetHeadSize = activeConfig.HeadSize * mathMin(headGrowth, 2.0)  -- Match max
+				headParts.head.Size = headParts.head.Size:Lerp(targetHeadSize, 0.15)
+
+				-- Scale eyes proportionally with head
+				if headParts.leftEye and headParts.rightEye then
+					-- Eyes should scale with head but stay attached via welds
+					local eyeScale = headGrowth * 0.8  -- Eyes grow less than head
+					local targetEyeSize = Vector3new(0.6, 0.6, 0.6) * mathMin(eyeScale, 1.5)
+					headParts.leftEye.Size = headParts.leftEye.Size:Lerp(targetEyeSize, 0.15)
+					headParts.rightEye.Size = headParts.rightEye.Size:Lerp(targetEyeSize, 0.15)
+
+					-- Scale pupils too
+					if headParts.leftPupil and headParts.rightPupil then
+						local targetPupilSize = Vector3new(0.25, 0.25, 0.25) * mathMin(eyeScale, 1.5)
+						headParts.leftPupil.Size = headParts.leftPupil.Size:Lerp(targetPupilSize, 0.15)
+						headParts.rightPupil.Size = headParts.rightPupil.Size:Lerp(targetPupilSize, 0.15)
+					end
+				end
+			end
+
+			-- Ensure eyes stay visible
+			if headParts.leftEye then
+				headParts.leftEye.Transparency = 0
+			end
+			if headParts.rightEye then  
+				headParts.rightEye.Transparency = 0
+			end
+		end
+
+		-- OPTIMIZED Position history updates
+		local lastHistoryPoint = getFromHistory(1)
+		local dist = (currentPos - lastHistoryPoint.position).Magnitude
+
+		-- Skip some updates at very long lengths to reduce lag
+		local historySkip = 1
+		if currentLength > 2000 then
+			historySkip = 2  -- Update every other frame
+		elseif currentLength > 2500 then
+			historySkip = 3  -- Update every 3rd frame
+		end
+
+		if dist > 0.02 and updateCounter % historySkip == 0 then
+			-- Balanced interpolations
+			if dist > activeConfig.SegmentSpacing * 0.7 then
+				local maxInterp = isBoosting and 6 or 3
+				local numInterpolations = mathMin(mathFloor(dist / (activeConfig.SegmentSpacing * 0.35)), maxInterp)
+				for i = 1, numInterpolations do
+					local fraction = i / (numInterpolations + 1)
+					local interpPos = lastHistoryPoint.position:Lerp(currentPos, fraction)
+					local interpLook = lastHistoryPoint.lookVector:Lerp(lookVector, fraction).Unit
+					addToHistory({ position = interpPos, lookVector = interpLook })
+				end
+			end
+			addToHistory({ position = currentPos, lookVector = lookVector })
+		end
+
+		local currentTime = tick()
+
+		-- POSITION HISTORY BASED MOVEMENT WITH ANTI-GAP FOR BOOSTING
+		framesSinceSpawn = framesSinceSpawn + 1
+
+		for i = 1, currentLength do
+			local segment = segments[i]
+			if segment and segment.Parent then
+				-- AGGRESSIVE LOD: Prioritize performance
+				local updateFrequency = 1
+
+				if i > 100 then
+					updateFrequency = 2
+				elseif i > 300 then
+					updateFrequency = 4
+				elseif i > 600 then
+					updateFrequency = 8
+				elseif i > 1000 then
+					updateFrequency = 12
+				elseif i > 1400 then
+					updateFrequency = 16
+				elseif i > 2000 then
+					updateFrequency = 20  -- Very far tail for 3000 segments
+				elseif i > 2500 then
+					updateFrequency = 30  -- Extreme tail barely updates
+				end
+
+				if updateCounter % updateFrequency == 0 then
+					-- Dynamic delay based on length to prevent pattern bunching
+					local baseMultiplier = isBoosting and 0.8 or 1.0
+					-- Increase spacing as snake gets longer to preserve pattern visibility
+					if currentLength > 1000 then
+						baseMultiplier = baseMultiplier * 1.2  -- 20% more spread
+					elseif currentLength > 1500 then
+						baseMultiplier = baseMultiplier * 1.4  -- 40% more spread
+					elseif currentLength > 2000 then
+						baseMultiplier = baseMultiplier * 1.6  -- 60% more spread
+					end
+					local delay = mathFloor(i * baseMultiplier)
+					-- Ensure we don't exceed buffer
+					delay = mathMin(delay, historyCount - 1)
+					local targetData = getFromHistory(delay)
+					if targetData then
+						-- Dynamic spacing to prevent pattern loss at high lengths
+						local spacingMultiplier = 0.15  -- Base spacing
+						if currentLength > 1500 then
+							spacingMultiplier = 0.2  -- More spacing to show pattern
+						end
+						local segmentPos = targetData.position - targetData.lookVector * (activeConfig.SegmentSpacing * spacingMultiplier)
+						local currentSegmentPos = segment.Position
+
+						-- Simple anti-gap check when boosting
+						if isBoosting and i > 1 then
+							local prevSegment = segments[i - 1]
+							if prevSegment and prevSegment.Parent then
+								local gap = (currentSegmentPos - prevSegment.Position).Magnitude
+								if gap > activeConfig.SegmentSpacing * 1.5 then
+									-- Too far, pull it closer
+									local dir = (prevSegment.Position - currentSegmentPos).Unit
+									segmentPos = prevSegment.Position - dir * activeConfig.SegmentSpacing
+								end
+							end
+						end
+
+						-- Smoother interpolation for distant segments
+						local lerpSpeed = followSpeed
+						if i > 300 then
+							lerpSpeed = followSpeed * 0.95  -- Slightly slower for smoother tail
+						end
+
+						local newPos = currentSegmentPos:Lerp(segmentPos, lerpSpeed)
+
+						segment.CFrame = CFramenew(newPos)
+					end
+				end
+
+				-- UNIFORM SIZE: All segments MUST be the same size
+				local sizeDiff = (uniformTargetSize - segment.Size).Magnitude
+				if sizeDiff > 0.01 then  -- Very small threshold
+					segment.Size = uniformTargetSize  -- Instant update for ALL
+				end
+			end
+		end
+
+		if currentTime - lastNetworkUpdate > 0.1 then
+			lastNetworkUpdate = currentTime
+		end
+	end)
+	table.insert(connections, heartbeatConn)
+
+	local function shrinkSnake(amount)
+		amount = amount or 1
+		local shrunk = false
+
+		-- Don't shrink below minimum length
+		if currentLength <= 10 then
+			return false
+		end
+
+		for i = 1, amount do
+			if currentLength > 10 then
+				shrunk = true
+				local segment = segments[currentLength]
+				if segment and segment.Parent then
+					segment:Destroy()
+				end
+				segments[currentLength] = nil
+				currentLength = currentLength - 1
+			end
+		end
+
+		-- Update leaderstats
+		if shrunk and leaderstats then
+			local lengthValue = leaderstats:FindFirstChild("Length")
+			if lengthValue then
+				lengthValue.Value = currentLength
+			end
+		end
+
+		return shrunk
+	end
+
+	local snakeInstance
+	snakeInstance = {
+		segments = segments,
+		headParts = headParts,
+		cleanup = cleanup,
+		grow = growSnake,
+		shrink = shrinkSnake,
+		model = snakeModel,
+		length = function() return currentLength end,
+		isActive = function() return isActive end,
+		-- ENHANCED: Add skin update capability
+		updateSkin = function()
+			applySkinToExistingSnake(player, snakeInstance)
+		end,
+		-- NEW: Add graphics mode update capability
+		updateGraphicsMode = function()
+			applyGraphicsModeToSnake(player, snakeInstance)
+		end,
+	}
+	playerSnakes[player] = snakeInstance
+	_G.PlayerSnakes[player] = snakeInstance
+
+	-- ENHANCED: Monitor skin changes for real-time updates
+	local skinChangeConn = player.AttributeChanged:Connect(function(attributeName)
+		if attributeName == "SelectedSkin" and isActive then
+			applySkinToExistingSnake(player, snakeInstance)
+		elseif attributeName == "GraphicsMode" and isActive then
+			-- NEW: Handle graphics mode changes
+			applyGraphicsModeToSnake(player, snakeInstance)
+		end
+	end)
+	table.insert(connections, skinChangeConn)
+
+	return snakeInstance
+end
+
+-- ENHANCED: Handle player with skin monitoring
+local function handlePlayer(player)
+	-- Check if UnifiedSkinSystem already created leaderstats
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		leaderstats = Instance.new("Folder")
+		leaderstats.Name = "leaderstats"
+		leaderstats.Parent = player
+	end
+
+	local length = leaderstats:FindFirstChild("Length")
+	if not length then
+		length = Instance.new("NumberValue")
+		length.Name = "Length"
+		length.Value = 0
+		length.Parent = leaderstats
+	end
+
+	-- REMOVED: Let UnifiedSkinSystem handle skin initialization
+	-- if not player:GetAttribute("SelectedSkin") then
+	-- 	player:SetAttribute("SelectedSkin", "Classic") -- Server's default skin name
+	-- end
+
+	-- ENHANCED: Store the selected skin persistently
+	local selectedSkinValue = Instance.new("StringValue")
+	selectedSkinValue.Name = "PersistentSelectedSkin"
+	selectedSkinValue.Value = player:GetAttribute("SelectedSkin") or "Classic"
+	selectedSkinValue.Parent = player
+
+	-- Monitor for skin changes and sync
+	player:GetAttributeChangedSignal("SelectedSkin"):Connect(function()
+		local newSkin = player:GetAttribute("SelectedSkin")
+		if newSkin and newSkin ~= "" then
+			selectedSkinValue.Value = newSkin
+			print("📝 Skin preference updated for", player.Name, ":", newSkin)
+		end
+	end)
+
+	local function onCharacterAdded(character)
+		-- ENHANCED: Ensure skin persists through respawns
+		task.wait(0.1) -- Small delay to ensure attributes are set
+
+		-- Double-check skin is still set (in case something reset it)
+		local currentSkin = player:GetAttribute("SelectedSkin")
+		local persistentSkin = selectedSkinValue.Value
+
+		if not currentSkin or currentSkin == "" then
+			-- Restore from persistent value
+			if persistentSkin and persistentSkin ~= "" then
+				print("⚠️ SelectedSkin was reset, restoring from persistent:", persistentSkin)
+				player:SetAttribute("SelectedSkin", persistentSkin)
+			else
+				print("⚠️ SelectedSkin was reset, waiting for UnifiedSkinSystem")
+				-- Don't set it here, let UnifiedSkinSystem handle it
+			end
+		else
+			print("✅ Spawning with skin:", currentSkin)
+			-- Update persistent value if different
+			if currentSkin ~= persistentSkin then
+				selectedSkinValue.Value = currentSkin
+			end
+		end
+
+		taskSpawn(createUltraSmoothSnake, character)
+	end
+
+	if player.Character then
+		onCharacterAdded(player.Character)
+	end
+	player.CharacterAdded:Connect(onCharacterAdded)
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	local snakeInstance = playerSnakes[player]
+	if snakeInstance then
+		snakeInstance.cleanup()
+	end
+	playerSnakes[player] = nil
+	_G.PlayerSnakes[player] = nil
+end)
+
+-- ENHANCED: More aggressive cleanup to prevent lag
+task.spawn(function()
+	while true do
+		task.wait(5) -- Check every 5 seconds for better performance
+
+		local validSegments = {}
+
+		-- Collect all valid segments from active snakes
+		for _, player in pairs(Players:GetPlayers()) do
+			local snake = playerSnakes[player] or _G.PlayerSnakes[player]
+			if snake and snake.segments then
+				for _, seg in pairs(snake.segments) do
+					if seg and seg.Parent then
+						validSegments[seg] = true
+					end
+				end
+			end
+		end
+
+		-- Check SegmentContainer for orphaned segments
+		if SegmentContainer then
+			for _, child in pairs(SegmentContainer:GetChildren()) do
+				if child:IsA("BasePart") and child.Name:match("^Segment") then
+					if not validSegments[child] then
+						-- This is an orphaned segment, destroy it
+						child:Destroy()
+					end
+				end
+			end
+		end
+
+		-- Clean up snake models without active players
+		for _, child in pairs(workspace:GetChildren()) do
+			if child:IsA("Model") and child:GetAttribute("IsSnakeModel") then
+				local userId = child:GetAttribute("OwnerUserId")
+				local playerExists = false
+
+				for _, player in pairs(Players:GetPlayers()) do
+					if player.UserId == userId then
+						playerExists = true
+						break
+					end
+				end
+
+				if not playerExists then
+					child:Destroy()
+				end
+			end
+		end
+
+		-- ENHANCED: More aggressive AI snake cleanup
+		for _, child in pairs(workspace:GetChildren()) do
+			if child:IsA("Model") and child.Name:match("^AISnakeModel_") then
+				-- Check if model has any valid AI snake using it
+				local hasActiveSnake = false
+
+				-- Check if any segments exist in the model
+				local hasSegments = false
+				for _, part in pairs(child:GetDescendants()) do
+					if part:IsA("BasePart") and (part.Name:match("Segment") or part.Name == "AISnakeHead") then
+						hasSegments = true
+						break
+					end
+				end
+
+				-- If model has no segments, destroy it
+				if not hasSegments then
+					child:Destroy()
+				end
+			end
+		end
+
+		-- Clean up orphaned AI segments anywhere in workspace
+		for _, obj in pairs(workspace:GetDescendants()) do
+			if obj:IsA("BasePart") and obj.Name:match("^AISegment") then
+				-- Check if this segment belongs to any model
+				local parent = obj.Parent
+				if not parent or not parent:IsA("Model") or not parent.Name:match("^AISnakeModel_") then
+					-- Orphaned segment, destroy it
+					obj:Destroy()
+				end
+			end
+		end
+
+		-- Clean up AISegmentContainer
+		local aiContainer = workspace:FindFirstChild("AISegmentContainer")
+		if aiContainer then
+			-- Clear any segments that shouldn't be in the container (they should be invisible in pool)
+			for _, child in pairs(aiContainer:GetChildren()) do
+				if child:IsA("BasePart") then
+					-- If it's visible or has non-standard properties, it's likely orphaned
+					if child.Transparency < 1 or child.Parent ~= aiContainer then
+						child:Destroy()
+					end
+				end
+			end
+		end
+	end
+end)
+
+local function initialize()
+	print("SLITHER.IO SYSTEM V5.2 - SKIN SYSTEM INTEGRATED")
+	for _, player in Players:GetPlayers() do
+		handlePlayer(player)
+	end
+	Players.PlayerAdded:Connect(handlePlayer)
+	print("✅ System ready with improved performance and skin integration!")
+end
+
+-- ENHANCED: Handle respawn events
+local function handleRespawnEvent()
+	local respawnEvent = ReplicatedStorage:FindFirstChild("RespawnSnake")
+	if respawnEvent then
+		respawnEvent.OnServerEvent:Connect(function(player)
+			if not player then return end
+			print("🔄 Respawning player with current skin:", player.Name)
+			player:LoadCharacter()
+		end)
+	end
+end
+
+-- Initialize respawn handler with retry
+handleRespawnEvent()
+task.spawn(function()
+	for i = 1, 5 do
+		if ReplicatedStorage:FindFirstChild("RespawnSnake") then break end
+		task.wait(1)
+		handleRespawnEvent()
+	end
+end)
+
+-- ENHANCED: Global skin update function for external calls
+_G.UpdatePlayerSkin = function(player, skinName)
+	if player and skinName then
+		player:SetAttribute("SelectedSkin", skinName)
+		local snakeInstance = playerSnakes[player] or _G.PlayerSnakes[player]
+		if snakeInstance and snakeInstance.updateSkin then
+			snakeInstance.updateSkin()
+		end
+	end
+end
+
+taskSpawn(initialize)
