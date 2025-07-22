@@ -455,6 +455,9 @@ function Snake:updateLength(newLength)
 	local targetVisibleSegments = mathMin(self.length, MAX_VISIBLE_SEGMENTS)
 	
 	if targetVisibleSegments > currentVisibleSegments then
+		-- Batch segment creation to reduce lag
+		local segmentsToAdd = {}
+		
 		for i = currentVisibleSegments + 1, targetVisibleSegments do
 			local segment = getSegmentFromPool()
 			if segment then
@@ -469,7 +472,6 @@ function Snake:updateLength(newLength)
 				segment.Color = self.config.BodyColors[colorIndex]
 				segment.Size = currentSize
 				segment.CFrame = CFramenew(pos)
-				segment.Parent = self.model
 				
 				-- Tag for collision detection
 				CollectionService:AddTag(segment, "SnakeSegment")
@@ -483,7 +485,13 @@ function Snake:updateLength(newLength)
 				end
 				
 				self.segments[i] = segment
+				segmentsToAdd[#segmentsToAdd + 1] = segment
 			end
+		end
+		
+		-- Parent all segments at once to reduce lag
+		for _, segment in ipairs(segmentsToAdd) do
+			segment.Parent = self.model
 		end
 	end
 	
@@ -494,13 +502,6 @@ function Snake:updateLength(newLength)
 end
 
 function Snake:grow(amount)
-	-- Debug check
-	print("grow called - self type:", typeof(self), "amount:", amount)
-	if typeof(self) == "number" then
-		error("grow was called with dot (.) instead of colon (:) - self is a number!")
-		return
-	end
-	
 	-- Increase length by amount (default 1)
 	amount = amount or 1
 	local newLength = self.length + amount
@@ -519,8 +520,6 @@ function Snake:grow(amount)
 			end
 		end
 	end
-	
-	print("Snake grew by", amount, "- New length:", self.length)
 end
 
 function Snake:sendNetworkUpdate()
