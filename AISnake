@@ -885,6 +885,7 @@ function AISnake:findNearbyThreats()
 				local threatLevel = mathMax(lengthDiff + 10, 5) / mathMax(dist, 1)
 				table.insert(threats, {
 					part = entity.part,
+					position = entity.part.Position,  -- Add position field for convenience
 					isPlayer = entity.type == "PLAYER_HEAD",
 					owner = entity.owner,
 					distance = dist,
@@ -1051,18 +1052,22 @@ function AISnake:getSmartFleeDirection(threats)
 	-- Calculate danger zones from all threats
 	local dangerVectors = {}
 	for _, threat in ipairs(threats) do
-		local awayFromThreat = (myPos - threat.position).Unit
-		local weight = 1 / mathMax(threat.distance, 5) -- Closer = more weight
-		
-		-- Extra weight for bigger snakes
-		if threat.lengthDiff > 20 then
-			weight = weight * 2
+		-- Safety check
+		if threat.part and threat.part.Parent then
+			local threatPos = threat.part.Position
+			local awayFromThreat = (myPos - threatPos).Unit
+			local weight = 1 / mathMax(threat.distance, 5) -- Closer = more weight
+			
+			-- Extra weight for bigger snakes
+			if threat.lengthDiff > 20 then
+				weight = weight * 2
+			end
+			
+			table.insert(dangerVectors, {
+				direction = awayFromThreat,
+				weight = weight
+			})
 		end
-		
-		table.insert(dangerVectors, {
-			direction = awayFromThreat,
-			weight = weight
-		})
 	end
 	
 	-- Combine all danger vectors
