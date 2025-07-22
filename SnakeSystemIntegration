@@ -40,18 +40,16 @@ spawnSnake.Name = "SpawnSnake"
 local respawnSnake = remoteEvents:FindFirstChild("RespawnSnake") or Instance.new("RemoteEvent", remoteEvents)
 respawnSnake.Name = "RespawnSnake"
 
--- Configuration (matches your existing setup)
+-- Default configuration
 local DEFAULT_CONFIG = {
-	HeadSize = Vector3.new(4.5, 4.5, 4.5),
-	SegmentSize = Vector3.new(3.5, 3.5, 4),
-	SegmentSpacing = 3.2,
 	InitialLength = 55,
-	MaxSegments = 5000, -- Increased for extreme lengths
+	MaxSegments = 10000,
+	SegmentSpacing = 1.2,  -- Space between segments
+	SegmentSize = Vector3.new(3.5, 3.5, 3.5),  -- Body segment size
+	HeadSize = Vector3.new(4.5, 4.5, 4.5),
 	HeadColor = Color3.fromRGB(76, 217, 100),
 	BodyColors = {
-		Color3.fromRGB(60, 180, 80),
-		Color3.fromRGB(80, 200, 100),
-		Color3.fromRGB(100, 220, 120),
+		Color3.fromRGB(50, 170, 70),
 		Color3.fromRGB(80, 200, 100),
 		Color3.fromRGB(60, 180, 80),
 	},

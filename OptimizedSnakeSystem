@@ -38,6 +38,7 @@ local function initializeSegmentPool()
 	for i = 1, SEGMENT_POOL_SIZE do
 		local segment = Instance.new("Part")
 		segment.Name = "PooledSegment"
+		segment.Size = Vector3.new(3.5, 3.5, 3.5)  -- Default size
 		segment.Shape = Enum.PartType.Ball
 		segment.Material = Enum.Material.Neon
 		segment.TopSurface = Enum.SurfaceType.Smooth
@@ -47,6 +48,13 @@ local function initializeSegmentPool()
 		segment.CanTouch = false
 		segment.Anchored = true
 		segment.Parent = nil -- Keep in memory but not in workspace
+		
+		-- Add glow effect
+		local glow = Instance.new("PointLight")
+		glow.Name = "glow"
+		glow.Brightness = 0.7  -- Subtle glow as requested
+		glow.Range = 4
+		glow.Parent = segment
 		
 		SegmentPool[i] = segment
 	end
@@ -288,6 +296,11 @@ end
 function Snake:setupNetworking()
 	if not self.player then return end
 	
+	-- Setup update loop for all snakes
+	self.updateConnection = RunService.Heartbeat:Connect(function(dt)
+		self:update(dt)
+	end)
+	
 	-- Only setup networking for local player
 	if self.player == Players.LocalPlayer then
 		self.networkConnection = RunService.Heartbeat:Connect(function()
@@ -335,6 +348,11 @@ function Snake:update(dt)
 	local lastPoint = self.path.points[1]
 	if not lastPoint or (pos - lastPoint.pos).Magnitude > 0.5 then
 		self.path:addPoint(pos, look)
+		
+		-- Debug: Print path info periodically
+		if math.random() < 0.1 then  -- 10% chance to print
+			print("Snake path points:", #self.path.points, "Length:", self.length)
+		end
 	end
 	
 	-- Update head and eyes
@@ -395,8 +413,16 @@ function Snake:streamSegments()
 					if segment then
 						-- Configure segment
 						local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
-						segment.Color = self.config.BodyColors[colorIndex]
-						segment.Size = self.config.SegmentSize
+						local bodyColor = self.config.BodyColors[colorIndex]
+						segment.Color = bodyColor
+						segment.Size = self.config.SegmentSize or Vector3.new(3.5, 3.5, 3.5)
+						
+						-- Update glow color
+						local glow = segment:FindFirstChild("glow")
+						if glow then
+							glow.Color = bodyColor
+						end
+						
 						segment.Parent = self.model
 						
 						self.visibleSegments[i] = segment
@@ -431,6 +457,10 @@ function Snake:destroy()
 	-- Cleanup
 	if self.networkConnection then
 		self.networkConnection:Disconnect()
+	end
+	
+	if self.updateConnection then
+		self.updateConnection:Disconnect()
 	end
 	
 	if self.model then
