@@ -190,6 +190,26 @@ function Snake.new(character, config)
 	self.player = Players:GetPlayerFromCharacter(character)
 	self.config = config
 	
+	-- Ensure we have a valid player
+	if not self.player then
+		warn("Failed to get player from character")
+		return nil
+	end
+	
+	-- Make character invisible (like original system)
+	for _, part in pairs(character:GetDescendants()) do
+		if part:IsA("BasePart") and part ~= self.rootPart then
+			part.Transparency = 1
+			part.CanCollide = false
+		elseif part:IsA("Decal") or part:IsA("Texture") then
+			part.Transparency = 1
+		end
+	end
+	
+	-- Also make root part invisible
+	self.rootPart.Transparency = 1
+	self.rootPart.CanCollide = true -- Keep collision for movement
+	
 	-- Snake data
 	self.length = config.InitialLength
 	self.path = SnakePath.new()
@@ -199,7 +219,7 @@ function Snake.new(character, config)
 	
 	-- Create snake model
 	self.model = Instance.new("Model")
-	self.model.Name = self.player.Name .. "_Snake"
+	self.model.Name = (self.player.Name or "Unknown") .. "_Snake"
 	self.model.Parent = workspace
 	
 	-- Initialize
@@ -213,10 +233,10 @@ function Snake:createHead()
 	-- Create visual head
 	local head = Instance.new("Part")
 	head.Name = "SnakeHead"
-	head.Size = self.config.HeadSize
+	head.Size = self.config.HeadSize or Vector3.new(4.5, 4.5, 4.5)
 	head.Shape = Enum.PartType.Ball
-	head.Material = self.config.HeadMaterial
-	head.Color = self.config.HeadColor
+	head.Material = self.config.HeadMaterial or Enum.Material.Neon
+	head.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	head.CanCollide = false
 	head.CanQuery = false
 	head.CanTouch = false
@@ -225,10 +245,42 @@ function Snake:createHead()
 	
 	-- Add glow
 	local glow = Instance.new("PointLight")
-	glow.Brightness = self.config.GlowIntensity
-	glow.Range = self.config.GlowRange
-	glow.Color = self.config.HeadColor
+	glow.Brightness = self.config.GlowIntensity or 2
+	glow.Range = self.config.GlowRange or 6
+	glow.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	glow.Parent = head
+	
+	-- Create eyes for visibility
+	local function createEye(xOffset)
+		local eye = Instance.new("Part")
+		eye.Name = "Eye"
+		eye.Size = Vector3.new(0.8, 0.8, 0.8)
+		eye.Shape = Enum.PartType.Ball
+		eye.Material = Enum.Material.Neon
+		eye.Color = Color3.fromRGB(255, 255, 255)
+		eye.CanCollide = false
+		eye.CanQuery = false
+		eye.CanTouch = false
+		eye.Anchored = true
+		eye.Parent = self.model
+		
+		local pupil = Instance.new("Part")
+		pupil.Name = "Pupil"
+		pupil.Size = Vector3.new(0.4, 0.4, 0.4)
+		pupil.Shape = Enum.PartType.Ball
+		pupil.Material = Enum.Material.Neon
+		pupil.Color = Color3.fromRGB(0, 0, 0)
+		pupil.CanCollide = false
+		pupil.CanQuery = false
+		pupil.CanTouch = false
+		pupil.Anchored = true
+		pupil.Parent = self.model
+		
+		return eye, pupil
+	end
+	
+	self.leftEye, self.leftPupil = createEye(-0.7)
+	self.rightEye, self.rightPupil = createEye(0.7)
 	
 	self.head = head
 end
@@ -285,9 +337,25 @@ function Snake:update(dt)
 		self.path:addPoint(pos, look)
 	end
 	
-	-- Update head
+	-- Update head and eyes
 	if self.head then
-		self.head.CFrame = CFramenew(pos + look * 2, pos + look * 3)
+		local headCF = CFramenew(pos + look * 2, pos + look * 3)
+		self.head.CFrame = headCF
+		
+		-- Update eyes
+		if self.leftEye and self.rightEye then
+			local eyeHeight = 0.7
+			local eyeForward = -1.5
+			local eyeSeparation = 0.7
+			
+			self.leftEye.CFrame = headCF * CFramenew(-eyeSeparation, eyeHeight, eyeForward)
+			self.rightEye.CFrame = headCF * CFramenew(eyeSeparation, eyeHeight, eyeForward)
+			
+			if self.leftPupil and self.rightPupil then
+				self.leftPupil.CFrame = self.leftEye.CFrame * CFramenew(0, 0, -0.3)
+				self.rightPupil.CFrame = self.rightEye.CFrame * CFramenew(0, 0, -0.3)
+			end
+		end
 	end
 	
 	-- Stream segments (only render visible ones)

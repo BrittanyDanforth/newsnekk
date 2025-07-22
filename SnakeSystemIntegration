@@ -108,10 +108,29 @@ local function onCharacterAdded(character)
 	
 	-- Create optimized snake
 	local snake = OptimizedSnakeSystem.createSnake(character, config)
+	if not snake then
+		warn("Failed to create snake for", player.Name)
+		return
+	end
 	activeSnakes[player] = snake
 	
+	-- Ensure leaderstats exist
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		leaderstats = Instance.new("Folder")
+		leaderstats.Name = "leaderstats"
+		leaderstats.Parent = player
+	end
+	
+	local lengthValue = leaderstats:FindFirstChild("Length")
+	if not lengthValue then
+		lengthValue = Instance.new("IntValue")
+		lengthValue.Name = "Length"
+		lengthValue.Value = config.InitialLength or 55
+		lengthValue.Parent = leaderstats
+	end
+	
 	-- Handle length updates
-	local lengthValue = player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Length")
 	if lengthValue then
 		-- Initial length
 		snake:updateLength(lengthValue.Value)
