@@ -957,42 +957,36 @@ local SKIN_CATEGORIES = {
 	{
 		name = "Featured",
 		description = "Hot & Trending",
-		icon = "🔥",
 		color = Color3.fromRGB(255, 72, 176),
 		skins = {"Default", "Plasma", "Cyber", "Rainbow", "Phoenix"}
 	},
 	{
 		name = "Classic",
 		description = "Timeless Designs",
-		icon = "⭐",
 		color = Color3.fromRGB(88, 101, 242),
 		skins = {"Default", "Crimson", "Arctic", "Emerald", "Golden"}
 	},
 	{
 		name = "Premium",
 		description = "Enhanced Effects",
-		icon = "💎",
 		color = Color3.fromRGB(147, 51, 234),
 		skins = {"Void", "Plasma", "Galaxy", "Ocean", "Shadow", "Cyber", "Dragon", "Phoenix", "Toxic", "Lightning"}
 	},
 	{
 		name = "VIP Elite",
 		description = "Ultimate Power",
-		icon = "👑",
 		color = Color3.fromRGB(255, 215, 0),
 		skins = {"VIP Diamond", "VIP Inferno", "VIP Nebula", "VIP Crystal"}
 	},
 	{
 		name = "Special",
 		description = "Limited Edition",
-		icon = "✨",
 		color = Color3.fromRGB(255, 72, 176),
 		skins = {"Rainbow", "Quantum", "Prismatic"}
 	},
 	{
 		name = "Gamepasses",
 		description = "Power-Ups & Boosts",
-		icon = "🚀",
 		color = Color3.fromRGB(87, 242, 135),
 		skins = {} -- Will show gamepasses instead
 	}
@@ -1740,14 +1734,7 @@ local function createMainShop()
 	inventoryBtn.Parent = header
 	buttonStyle(inventoryBtn, "📦")
 
-	-- Settings button
-	local settingsBtn = Instance.new("TextButton")
-	settingsBtn.Name = "SettingsButton"
-	settingsBtn.Position = UDim2.new(0.88, 0, 0.15, 0)
-	settingsBtn.Parent = header
-	buttonStyle(settingsBtn, "⚙️")
-
-	-- Modern close button
+	-- Modern close button (moved to where settings was)
 	local closeBtn = Instance.new("TextButton")
 	closeBtn.Name = "CloseButton"
 	closeBtn.Position = UDim2.new(0.94, 0, 0.15, 0)
@@ -2022,7 +2009,6 @@ local function createMainShop()
 		coinAmount = coinAmount,
 		closeBtn = closeBtn,
 		inventoryBtn = inventoryBtn,
-		settingsBtn = settingsBtn,
 		blur = blur,
 		colorCorrection = colorCorrection,
 		shopFrame = screenGui, -- Added for compatibility
@@ -2045,41 +2031,10 @@ local function createCategoryButton(category, index)
 	createCorner(btn, 14)
 	local stroke = createStroke(btn, SHOP_CONFIG.COLORS.TERTIARY, 1, 0.8)
 
-	-- Modern category layout
-	local iconBg = Instance.new("Frame")
-	iconBg.Name = "IconBackground"
-	iconBg.Size = UDim2.new(0.28, 0, 0.65, 0)
-	iconBg.Position = UDim2.new(0.06, 0, 0.175, 0)
-	iconBg.BackgroundColor3 = category.color
-	iconBg.BackgroundTransparency = 0.85
-	iconBg.Parent = btn
-
-	createCorner(iconBg, 10)
-
-	-- Icon glow
-	local iconGlow = Instance.new("Frame")
-	iconGlow.Size = UDim2.new(1.3, 0, 1.3, 0)
-	iconGlow.Position = UDim2.new(-0.15, 0, -0.15, 0)
-	iconGlow.BackgroundColor3 = category.color
-	iconGlow.BackgroundTransparency = 0.95
-	iconGlow.ZIndex = iconBg.ZIndex - 1
-	iconGlow.Parent = iconBg
-	createCorner(iconGlow, 12)
-
-	local icon = Instance.new("TextLabel")
-	icon.Name = "Icon"
-	icon.Size = UDim2.new(1, 0, 1, 0)
-	icon.BackgroundTransparency = 1
-	icon.Text = category.icon
-	icon.TextScaled = true
-	icon.TextColor3 = category.color
-	icon.Font = Enum.Font.SourceSans
-	icon.Parent = iconBg
-
-	-- Category text
+	-- Category text (no icon anymore)
 	local textContainer = Instance.new("Frame")
-	textContainer.Size = UDim2.new(0.6, 0, 0.8, 0)
-	textContainer.Position = UDim2.new(0.36, 0, 0.1, 0)
+	textContainer.Size = UDim2.new(0.85, 0, 0.8, 0)
+	textContainer.Position = UDim2.new(0.08, 0, 0.1, 0)
 	textContainer.BackgroundTransparency = 1
 	textContainer.Parent = btn
 
@@ -2135,7 +2090,7 @@ local function createCategoryButton(category, index)
 			BackgroundTransparency = 0.5,
 			Size = UDim2.new(0.92, 0, 0, 72)
 		}):Play()
-		TweenService:Create(iconGlow, TweenInfo.new(0.2), {
+		TweenService:Create(indicatorGlow, TweenInfo.new(0.2), {
 			BackgroundTransparency = 0.85,
 			Size = UDim2.new(1.5, 0, 1.5, 0),
 			Position = UDim2.new(-0.25, 0, -0.25, 0)
@@ -2148,7 +2103,7 @@ local function createCategoryButton(category, index)
 				BackgroundTransparency = 0.7,
 				Size = UDim2.new(0.9, 0, 0, 70)
 			}):Play()
-			TweenService:Create(iconGlow, TweenInfo.new(0.2), {
+			TweenService:Create(indicatorGlow, TweenInfo.new(0.2), {
 				BackgroundTransparency = 0.95,
 				Size = UDim2.new(1.3, 0, 1.3, 0),
 				Position = UDim2.new(-0.15, 0, -0.15, 0)
@@ -2381,16 +2336,6 @@ local function createGamepassCard(passName, index)
 	iconLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 	iconLabel.Parent = iconContainer
 
-	-- Animated glow ring
-	local glowRing = Instance.new("ImageLabel")
-	glowRing.Size = UDim2.new(1.4, 0, 1.4, 0)
-	glowRing.Position = UDim2.new(-0.2, 0, -0.2, 0)
-	glowRing.BackgroundTransparency = 1
-	glowRing.Image = "rbxassetid://5553946593"
-	glowRing.ImageColor3 = passData.color
-	glowRing.ImageTransparency = 0.8
-	glowRing.Parent = iconContainer
-
 	-- Name with modern styling
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Size = UDim2.new(0.9, 0, 0.12, 0)
@@ -2456,13 +2401,7 @@ local function createGamepassCard(passName, index)
 				0, SHOP_CONFIG.CARD_HEIGHT * 1.05)
 		}):Play()
 
-		-- Animate glow ring
-		TweenService:Create(glowRing, TweenInfo.new(0.3), {
-			ImageTransparency = 0.5,
-			Size = UDim2.new(1.6, 0, 1.6, 0),
-			Position = UDim2.new(-0.3, 0, -0.3, 0),
-			Rotation = 180
-		}):Play()
+
 
 		-- Animate gradient
 		TweenService:Create(overlayGrad, TweenInfo.new(0.3), {
@@ -2485,12 +2424,7 @@ local function createGamepassCard(passName, index)
 			Size = UDim2.new(0, SHOP_CONFIG.CARD_WIDTH, 0, SHOP_CONFIG.CARD_HEIGHT)
 		}):Play()
 
-		TweenService:Create(glowRing, TweenInfo.new(0.2), {
-			ImageTransparency = 0.8,
-			Size = UDim2.new(1.4, 0, 1.4, 0),
-			Position = UDim2.new(-0.2, 0, -0.2, 0),
-			Rotation = 0
-		}):Play()
+
 
 		TweenService:Create(overlayGrad, TweenInfo.new(0.2), {
 			Rotation = 0
@@ -3780,11 +3714,6 @@ function ShopUI.init()
 		end
 	end)
 
-	ShopUI.uiElements.settingsBtn.MouseButton1Click:Connect(function()
-		-- Placeholder for settings
-		print("⚙️ Settings button clicked - Not implemented yet")
-	end)
-
 	ShopUI.uiElements.purchaseBtn.MouseButton1Click:Connect(function()
 		print("💰 Purchase button clicked! Selected skin:", uiState.selectedSkin)
 		if not uiState.selectedSkin then
@@ -3925,20 +3854,24 @@ function ShopUI.close()
 		TweenService:Create(contentWindow, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
 			Position = UDim2.new(0.5, 0, 1.5, 0),
 			Size = UDim2.new(0.8, 0, 0.8, 0),
-			GroupTransparency = 0.3
+			BackgroundTransparency = 0.3
 		}):Play()
 
-		-- Animate blur removal
-		TweenService:Create(ShopUI.uiElements.blur, TweenInfo.new(0.3), {
-			Size = 0
-		}):Play()
+		-- Animate blur removal if it exists
+		if ShopUI.uiElements.blur then
+			TweenService:Create(ShopUI.uiElements.blur, TweenInfo.new(0.3), {
+				Size = 0
+			}):Play()
+		end
 
-		-- Animate color correction removal
-		TweenService:Create(ShopUI.uiElements.colorCorrection, TweenInfo.new(0.3), {
-			Brightness = 0,
-			Contrast = 0,
-			Saturation = 0
-		}):Play()
+		-- Animate color correction removal if it exists
+		if ShopUI.uiElements.colorCorrection then
+			TweenService:Create(ShopUI.uiElements.colorCorrection, TweenInfo.new(0.3), {
+				Brightness = 0,
+				Contrast = 0,
+				Saturation = 0
+			}):Play()
+		end
 
 		task.wait(0.3)
 
