@@ -160,9 +160,6 @@ function Snake.new(character, config)
 	self.model:SetAttribute("OwnerUserId", self.player.UserId)
 	self.model.Parent = workspace
 	
-	-- Store reference in character for collision handler
-	self.character:SetAttribute("SnakeModel", self.model)
-	
 	-- Initialize
 	self:createHead()
 	self:createInitialSegments()
@@ -522,11 +519,6 @@ function Snake:destroy()
 			CollectionService:RemoveTag(self.head, "SnakeHead")
 		end
 		self.model:Destroy()
-	end
-	
-	-- Clear character attribute
-	if self.character and self.character.Parent then
-		self.character:SetAttribute("SnakeModel", nil)
 	end
 end
 

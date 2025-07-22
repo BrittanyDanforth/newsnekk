@@ -89,7 +89,15 @@ end
 -- Handle character spawning
 local function onCharacterAdded(character)
 	local player = Players:GetPlayerFromCharacter(character)
-	if not player then return end
+	if not player then 
+		-- Try again after a short wait
+		wait(0.1)
+		player = Players:GetPlayerFromCharacter(character)
+		if not player then
+			warn("Could not get player from character")
+			return
+		end
+	end
 	
 	-- Clean up old snake
 	if activeSnakes[player] then
