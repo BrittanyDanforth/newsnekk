@@ -1,0 +1,54 @@
+--[[
+MENU SPAWN FIX
+This script ensures SlitherIOMenu works with the optimized snake system
+Place this in ServerScriptService as a regular Script
+--]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+-- Create RemoteEvents if they don't exist
+local function ensureRemoteEvent(name)
+	local event = ReplicatedStorage:FindFirstChild(name)
+	if not event then
+		event = Instance.new("RemoteEvent")
+		event.Name = name
+		event.Parent = ReplicatedStorage
+		print("✅ Created RemoteEvent:", name)
+	end
+	return event
+end
+
+-- Ensure spawn events exist
+local spawnSnake = ensureRemoteEvent("SpawnSnake")
+local respawnSnake = ensureRemoteEvent("RespawnSnake")
+
+-- Handle spawn requests
+local function handleSpawn(player)
+	-- Add a small delay to ensure cleanup
+	task.wait(0.1)
+	
+	-- Load character
+	if player.Parent then
+		player:LoadCharacter()
+		print("🐍 Spawned player:", player.Name)
+	end
+end
+
+-- Connect events
+spawnSnake.OnServerEvent:Connect(handleSpawn)
+respawnSnake.OnServerEvent:Connect(handleSpawn)
+
+-- Also handle default spawn on join if needed
+Players.PlayerAdded:Connect(function(player)
+	-- Wait for other systems to initialize
+	task.wait(2)
+	
+	-- Auto-spawn if no character yet
+	if not player.Character then
+		player:LoadCharacter()
+		print("🐍 Auto-spawned player:", player.Name)
+	end
+end)
+
+print("✅ Menu Spawn Fix loaded - SlitherIOMenu will now work!")

@@ -204,20 +204,6 @@ for _, player in pairs(Players:GetPlayers()) do
 	Players.PlayerAdded:Fire(player)
 end
 
--- Handle spawn requests from menu
-spawnSnake.OnServerEvent:Connect(function(player)
-	if player.Character then
-		player.Character:Destroy()
-	end
-	player:LoadCharacter()
-end)
-
-respawnSnake.OnServerEvent:Connect(function(player)
-	if player.Character then
-		player.Character:Destroy()
-	end
-	wait(0.1)
-	player:LoadCharacter()
-end)
+-- Spawn handling moved to MenuSpawnFix script
 
 print("✅ Snake System Integration loaded!")
