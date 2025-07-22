@@ -218,7 +218,13 @@ end)
 
 -- Handle existing players
 for _, player in pairs(Players:GetPlayers()) do
-	Players.PlayerAdded:Fire(player)
+	if player.Character then
+		onCharacterAdded(player.Character)
+	else
+		-- Wait for character to spawn
+		player.CharacterAdded:Connect(onCharacterAdded)
+		player:LoadCharacter()
+	end
 end
 
 -- Handle spawn requests from menu
