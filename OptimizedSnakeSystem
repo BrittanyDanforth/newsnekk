@@ -245,9 +245,28 @@ function Snake:createHead()
 	self.head = head
 end
 
+function Snake:calculateGrowthFactor()
+	local growthFactor = 1
+	if self.length > 200 then
+		if self.length <= 2000 then
+			growthFactor = 1 + ((self.length - 200) / 1800) * 1.0
+		elseif self.length <= 5000 then
+			growthFactor = 2 + ((self.length - 2000) / 3000) * 0.5
+		else
+			growthFactor = 2.5 + ((self.length - 5000) / 5000) * 0.5
+		end
+	end
+	return mathMin(growthFactor, 3.0)
+end
+
 function Snake:createInitialSegments()
 	local visibleLength = mathMin(self.length, MAX_VISIBLE_SEGMENTS)
 	local startPos = self.rootPart.Position
+	
+	-- Calculate growth factor
+	local growthFactor = self:calculateGrowthFactor()
+	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
+	local currentSize = baseSize * growthFactor
 	
 	-- Create initial segments
 	for i = 1, visibleLength do
@@ -255,13 +274,14 @@ function Snake:createInitialSegments()
 		if segment then
 			segment.Name = "Segment" .. i
 			
-			-- Position behind head
-			local pos = startPos - self.rootPart.CFrame.LookVector * (i * (self.config.SegmentSpacing or 3.2))
+			-- Position behind head with adjusted spacing for larger segments
+			local spacing = (self.config.SegmentSpacing or 3.2) * (growthFactor * 0.8)
+			local pos = startPos - self.rootPart.CFrame.LookVector * (i * spacing)
 			
 			-- Apply color
 			local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
 			segment.Color = self.config.BodyColors[colorIndex]
-			segment.Size = self.config.SegmentSize or Vector3.new(4, 4, 4)
+			segment.Size = currentSize
 			segment.CFrame = CFramenew(pos)
 			segment.Parent = self.model
 			
@@ -269,6 +289,7 @@ function Snake:createInitialSegments()
 			local glow = segment:FindFirstChild("glow")
 			if glow then
 				glow.Color = segment.Color
+				glow.Range = 5 * growthFactor  -- Scale glow with size
 			end
 			
 			self.segments[i] = segment
@@ -307,30 +328,48 @@ function Snake:update(dt)
 		lookVector = currentLook
 	})
 	
-	-- Update head position
+	-- Update head position and size based on growth
 	if self.head then
+		local growthFactor = self:calculateGrowthFactor()
+		local headSize = (self.config.HeadSize or Vector3.new(4.5, 4.5, 4.5)) * growthFactor
+		self.head.Size = headSize
+		
 		local headCF = CFramenew(currentPos, currentPos + currentLook)
 		self.head.CFrame = headCF
 		
+		-- Update head glow
+		local headGlow = self.head:FindFirstChild("PointLight")
+		if headGlow then
+			headGlow.Range = (self.config.GlowRange or 6) * growthFactor
+		end
+		
 		-- Update eyes
 		if self.leftEye and self.rightEye then
-			local eyeHeight = 0.7
-			local eyeForward = -1.5
-			local eyeSeparation = 0.7
+			local eyeScale = growthFactor * 0.8
+			self.leftEye.Size = Vector3.new(0.8, 0.8, 0.8) * eyeScale
+			self.rightEye.Size = Vector3.new(0.8, 0.8, 0.8) * eyeScale
+			self.leftPupil.Size = Vector3.new(0.4, 0.4, 0.4) * eyeScale
+			self.rightPupil.Size = Vector3.new(0.4, 0.4, 0.4) * eyeScale
+			
+			local eyeHeight = 0.7 * growthFactor
+			local eyeForward = -1.5 * growthFactor
+			local eyeSeparation = 0.7 * growthFactor
 			
 			self.leftEye.CFrame = headCF * CFramenew(-eyeSeparation, eyeHeight, eyeForward)
 			self.rightEye.CFrame = headCF * CFramenew(eyeSeparation, eyeHeight, eyeForward)
 			
 			if self.leftPupil and self.rightPupil then
-				self.leftPupil.CFrame = self.leftEye.CFrame * CFramenew(0, 0, -0.3)
-				self.rightPupil.CFrame = self.rightEye.CFrame * CFramenew(0, 0, -0.3)
+				self.leftPupil.CFrame = self.leftEye.CFrame * CFramenew(0, 0, -0.3 * growthFactor)
+				self.rightPupil.CFrame = self.rightEye.CFrame * CFramenew(0, 0, -0.3 * growthFactor)
 			end
 		end
 	end
 	
-	-- Update segments to follow history
-	local segmentSpacing = self.config.SegmentSpacing or 3.2
-	local historyStepsPerSegment = mathMax(1, mathFloor(segmentSpacing / 2))
+	-- Update segments to follow history with dynamic spacing
+	local growthFactor = self:calculateGrowthFactor()
+	local baseSpacing = self.config.SegmentSpacing or 3.2
+	local adjustedSpacing = baseSpacing * (growthFactor * 0.7)  -- Closer spacing for larger snakes
+	local historyStepsPerSegment = mathMax(1, mathFloor(adjustedSpacing / 3))
 	
 	for i, segment in pairs(self.segments) do
 		local historySteps = i * historyStepsPerSegment
@@ -338,12 +377,27 @@ function Snake:update(dt)
 		
 		if historyData then
 			segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+			
+			-- Update segment size
+			local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
+			segment.Size = baseSize * growthFactor
+			
+			-- Update glow
+			local glow = segment:FindFirstChild("glow")
+			if glow then
+				glow.Range = 5 * growthFactor
+			end
 		end
 	end
 end
 
 function Snake:updateLength(newLength)
 	self.length = mathMin(newLength, self.config.MaxSegments)
+	
+	-- Calculate growth factor
+	local growthFactor = self:calculateGrowthFactor()
+	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
+	local currentSize = baseSize * growthFactor
 	
 	-- Add new segments if growing
 	local currentVisibleSegments = #self.segments
@@ -362,7 +416,7 @@ function Snake:updateLength(newLength)
 				-- Apply color
 				local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
 				segment.Color = self.config.BodyColors[colorIndex]
-				segment.Size = self.config.SegmentSize or Vector3.new(4, 4, 4)
+				segment.Size = currentSize
 				segment.CFrame = CFramenew(pos)
 				segment.Parent = self.model
 				
@@ -370,6 +424,7 @@ function Snake:updateLength(newLength)
 				local glow = segment:FindFirstChild("glow")
 				if glow then
 					glow.Color = segment.Color
+					glow.Range = 5 * growthFactor
 				end
 				
 				self.segments[i] = segment
