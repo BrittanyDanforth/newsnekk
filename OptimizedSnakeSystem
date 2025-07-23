@@ -449,102 +449,72 @@ function Snake:update(dt)
 		end
 	end
 	
-	-- SMOOTH HISTORY SYSTEM with visual gap filling
+	-- CONSTRAINT-BASED SYSTEM - History + No Gaps
 	local growthFactor = self:calculateGrowthFactor()
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	local segmentDiameter = currentSize.X
+	local maxDistance = segmentDiameter * 0.9  -- Maximum allowed distance
 	
-	-- KEEP ORIGINAL SPACING - don't change it!
-	local spacing = segmentDiameter * 0.85
-	
-	-- More history samples when boosting
-	local historyMultiplier = self.isBoosting and 2 or 1
+	-- First pass: Position from history (smooth movement)
+	local tempPositions = {}
+	local tempDirections = {}
 	
 	for i, segment in pairs(self.segments) do
-		-- Use history for smooth following - ORIGINAL SYSTEM
+		local spacing = segmentDiameter * 0.85
 		local distanceBehind = i * spacing
-		local historySteps = mathFloor(distanceBehind * historyMultiplier / 3.2)
+		local historySteps = mathFloor(distanceBehind * 2 / 3.2)
 		historySteps = mathMin(historySteps, self.historyCount - 1)
 		
 		local historyData = self:getFromHistory(historySteps)
-		
 		if historyData then
-			-- Normal history-based positioning
-			segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
-			
-			-- VISUAL GAP FILLING for small snakes when boosting
-			if self.isBoosting and self.length < 200 and i > 1 then
-				local prevSegment = self.segments[i-1]
-				if prevSegment and prevSegment.Parent then
-					local distance = (segment.Position - prevSegment.Position).Magnitude
-					
-					-- If gap detected, create visual filler
-					if distance > segmentDiameter * 1.5 then
-						-- Get or create gap filler for this position
-						local fillerId = "gapfiller_" .. i
-						local filler = self.gapFillers[fillerId]
-						
-						if not filler then
-							-- Create new filler segment
-							filler = Instance.new("Part")
-							filler.Name = fillerId
-							filler.Shape = Enum.PartType.Ball
-							filler.Material = Enum.Material.Neon
-							filler.Size = currentSize * 0.9  -- Slightly smaller
-							filler.CanCollide = false
-							filler.CanQuery = false
-							filler.CanTouch = false
-							filler.Anchored = true
-							
-							local glow = Instance.new("PointLight")
-							glow.Brightness = 0.5
-							glow.Range = 4 * growthFactor
-							glow.Parent = filler
-							
-							self.gapFillers[fillerId] = filler
-						end
-						
-						-- Position between segments
-						local midPos = prevSegment.Position:Lerp(segment.Position, 0.5)
-						local midLook = prevSegment.CFrame.LookVector:Lerp(segment.CFrame.LookVector, 0.5).Unit
-						filler.CFrame = CFramenew(midPos, midPos + midLook)
-						
-						-- Match color
-						local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
-						filler.Color = self.config.BodyColors[colorIndex]
-						filler.Size = currentSize * 0.9
-						
-						-- Make visible
-						filler.Parent = self.model
-						filler.Transparency = 0
-					else
-						-- Hide filler if no gap
-						local fillerId = "gapfiller_" .. i
-						local filler = self.gapFillers[fillerId]
-						if filler then
-							filler.Parent = nil
-						end
-					end
+			tempPositions[i] = historyData.position
+			tempDirections[i] = historyData.lookVector
+		end
+	end
+	
+	-- Second pass: CONSTRAINT SOLVING - Pull segments together if too far
+	-- Start from head and work backwards
+	local finalPositions = {}
+	local finalDirections = {}
+	
+	-- Head segment follows history closely
+	if tempPositions[1] then
+		finalPositions[1] = tempPositions[1]
+		finalDirections[1] = tempDirections[1]
+		
+		-- Constrain each segment to previous
+		for i = 2, #self.segments do
+			if tempPositions[i] and finalPositions[i-1] then
+				local targetPos = tempPositions[i]
+				local prevPos = finalPositions[i-1]
+				local toTarget = targetPos - prevPos
+				local distance = toTarget.Magnitude
+				
+				-- If too far, pull it closer
+				if distance > maxDistance then
+					-- Constrain to max distance
+					local constrainedPos = prevPos + toTarget.Unit * maxDistance
+					finalPositions[i] = constrainedPos
+				else
+					finalPositions[i] = targetPos
 				end
+				
+				finalDirections[i] = tempDirections[i] or toTarget.Unit
 			end
-			
-			-- Update segment size
+		end
+	end
+	
+	-- Apply final positions
+	for i, segment in pairs(self.segments) do
+		if finalPositions[i] and finalDirections[i] then
+			segment.CFrame = CFramenew(finalPositions[i], finalPositions[i] + finalDirections[i])
 			segment.Size = currentSize
 			
 			-- Update glow
 			local glow = segment:FindFirstChild("glow")
 			if glow then
 				glow.Range = 5 * growthFactor
-			end
-		end
-	end
-	
-	-- Clean up all gap fillers when not boosting
-	if not self.isBoosting then
-		for id, filler in pairs(self.gapFillers) do
-			if filler and filler.Parent then
-				filler.Parent = nil
 			end
 		end
 	end
