@@ -442,54 +442,52 @@ function Snake:update(dt)
 		end
 	end
 	
-	-- HYBRID SYSTEM - History for direction, FORCED positioning for no gaps
+	-- SMOOTH HISTORY SYSTEM with gap prevention
 	local growthFactor = self:calculateGrowthFactor()
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	local segmentDiameter = currentSize.X
+	local spacing = segmentDiameter * 0.85  -- Back to original spacing
 	
-	-- Fixed spacing that GUARANTEES overlap
-	local fixedSpacing = segmentDiameter * 0.8  -- 20% overlap always
+	-- More history samples when boosting to fill gaps
+	local historyMultiplier = self.isBoosting and 3 or 1
 	
-	-- Build segment chain
 	for i, segment in pairs(self.segments) do
-		local targetPos, targetLook
-		
-		if i == 1 then
-			-- First segment follows head
-			targetPos = self.head.Position - self.head.CFrame.LookVector * fixedSpacing
-			targetLook = self.head.CFrame.LookVector
-		else
-			-- Each segment follows previous at EXACT distance
-			local prevSegment = self.segments[i-1]
-			if prevSegment and prevSegment.Parent then
-				targetPos = prevSegment.Position - prevSegment.CFrame.LookVector * fixedSpacing
-				targetLook = prevSegment.CFrame.LookVector
-			else
-				-- Shouldn't happen but fallback
-				targetPos = self.head.Position - self.head.CFrame.LookVector * (fixedSpacing * i)
-				targetLook = self.head.CFrame.LookVector
-			end
-		end
-		
-		-- Use history ONLY for smooth look direction
-		local historySteps = mathFloor(i * 2)
+		-- Use history for smooth following - ORIGINAL SYSTEM
+		local distanceBehind = i * spacing
+		local historySteps = mathFloor(distanceBehind * historyMultiplier / 3.2)
 		historySteps = mathMin(historySteps, self.historyCount - 1)
+		
 		local historyData = self:getFromHistory(historySteps)
 		
 		if historyData then
-			-- Blend look direction with history for smoothness
-			targetLook = targetLook:Lerp(historyData.lookVector, 0.5).Unit
-		end
-		
-		-- FORCE segment to exact position but with smooth rotation
-		segment.CFrame = CFramenew(targetPos, targetPos + targetLook)
-		segment.Size = currentSize
-		
-		-- Update glow
-		local glow = segment:FindFirstChild("glow")
-		if glow then
-			glow.Range = 5 * growthFactor
+			-- Normal history-based positioning
+			segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+			
+			-- GAP PREVENTION: Only when boosting, check distance to previous
+			if self.isBoosting and i > 1 then
+				local prevSegment = self.segments[i-1]
+				if prevSegment and prevSegment.Parent then
+					local distance = (segment.Position - prevSegment.Position).Magnitude
+					-- If gap detected, interpolate positions
+					if distance > segmentDiameter * 1.2 then
+						-- Add interpolated position
+						local midPos = prevSegment.Position:Lerp(segment.Position, 0.5)
+						local midLook = prevSegment.CFrame.LookVector:Lerp(segment.CFrame.LookVector, 0.5).Unit
+						-- Move this segment closer
+						segment.CFrame = CFramenew(midPos, midPos + midLook)
+					end
+				end
+			end
+			
+			-- Update segment size
+			segment.Size = currentSize
+			
+			-- Update glow
+			local glow = segment:FindFirstChild("glow")
+			if glow then
+				glow.Range = 5 * growthFactor
+			end
 		end
 	end
 end
