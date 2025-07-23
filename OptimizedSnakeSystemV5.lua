@@ -236,6 +236,7 @@ function Snake:createHead()
 	head.CanQuery = false
 	head.CanTouch = false
 	head.Anchored = true
+	head.Transparency = 0  -- Make head visible!
 	head.Parent = self.model
 
 	-- Tag for collision detection
@@ -261,6 +262,7 @@ function Snake:createHead()
 		eye.CanQuery = false
 		eye.CanTouch = false
 		eye.Anchored = true
+		eye.Transparency = 0  -- Visible!
 		eye.Parent = self.model
 
 		local pupil = Instance.new("Part")
@@ -273,6 +275,7 @@ function Snake:createHead()
 		pupil.CanQuery = false
 		pupil.CanTouch = false
 		pupil.Anchored = true
+		pupil.Transparency = 0  -- Visible!
 		pupil.Parent = self.model
 
 		return eye, pupil
@@ -476,16 +479,12 @@ function Snake:update(dt)
 				-- Update segment size
 				segment.Size = currentSize
 
-				-- LOD system - only after spawn grace period
+				-- ALWAYS parent the segment to model - never hide it!
+				segment.Parent = self.model
+				
+				-- LOD for glow only (not visibility)
 				if timeSinceSpawn > 3 then
 					local distanceFromCamera = (segment.Position - cameraPos).Magnitude
-					
-					-- Hide far segments for non-local players
-					if distanceFromCamera > VISIBLE_DISTANCE and not self.isLocalPlayer then
-						segment.Parent = nil
-					else
-						segment.Parent = self.model
-					end
 					
 					-- Update glow based on distance
 					local glow = segment:FindFirstChild("glow")
@@ -498,10 +497,10 @@ function Snake:update(dt)
 						end
 					end
 				else
-					-- During spawn grace period, always show
-					segment.Parent = self.model
+					-- During spawn grace period, full glow
 					local glow = segment:FindFirstChild("glow")
 					if glow then
+						glow.Enabled = true
 						glow.Range = 5 * growthFactor
 					end
 				end
