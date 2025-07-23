@@ -452,9 +452,10 @@ function Snake:update(dt)
 	-- Calculate history steps per unit distance
 	local historyStepsPerUnit = 2  -- Original value
 	
-	-- BOOSTING FIX: When boosting, add more history points per segment
+	-- BOOSTING FIX: When boosting, adjust spacing and history resolution
 	if self.isBoosting then
 		historyStepsPerUnit = 4  -- Double the history resolution when boosting
+		spacing = segmentDiameter * 0.75  -- Slightly tighter spacing when boosting for overlap
 	end
 	
 	for i, segment in pairs(self.segments) do
@@ -466,7 +467,22 @@ function Snake:update(dt)
 		local historyData = self:getFromHistory(historySteps)
 		
 		if historyData then
-			segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+			local segmentPos = historyData.position
+			
+			-- SUBTLE OVERLAP FIX: When boosting and segments look separated
+			if self.isBoosting and i > 1 then
+				local prevSegment = self.segments[i-1]
+				if prevSegment and prevSegment.Parent then
+					local distance = (segmentPos - prevSegment.Position).Magnitude
+					-- If segments are too far apart, pull this one slightly closer
+					if distance > segmentDiameter * 0.8 then
+						local pullDirection = (prevSegment.Position - segmentPos).Unit
+						segmentPos = segmentPos + pullDirection * (distance - segmentDiameter * 0.75)
+					end
+				end
+			end
+			
+			segment.CFrame = CFramenew(segmentPos, segmentPos + historyData.lookVector)
 			
 			-- Update segment size
 			segment.Size = currentSize
