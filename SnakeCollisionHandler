@@ -22,7 +22,7 @@ local CACHE_EXPIRY = 1.0
 local YIELD_INTERVAL = 100
 
 -- === IMPROVED COLLISION SETTINGS ===
-local COLLISION_FRAME_SKIP = 6 -- Increased from 4 to reduce lag
+local COLLISION_FRAME_SKIP = 4 -- Balanced for responsiveness and performance
 local BODY_COLLISION_DISTANCE = 2.2 -- Tightened from 2.5 for accuracy
 local HEAD_COLLISION_DISTANCE = 2.8 -- Tightened from 3.0 for accuracy
 local MIN_COLLISION_DISTANCE = 1.8 -- Minimum distance for any collision
@@ -30,6 +30,10 @@ local COLLISION_BUFFER = 0.2 -- Reduced from 0.3 for precision
 local NETWORK_COMPENSATION = 0.15 -- Reduced from 0.2
 local SPAWN_PROTECTION_TIME = 3 -- Reduced from 5 seconds
 local MIN_AI_SPAWN_DISTANCE = 50 -- Minimum distance between AI spawn points
+
+-- === IMMEDIATE ORB SPAWNING ===
+local ORB_SPAWN_HEIGHT = 5 -- Standard orb height
+local GUARANTEED_ORB_COUNT = 3 -- Minimum orbs to spawn
 
 -- === HEAD-TO-HEAD SETTINGS ===
 local HEAD_TO_HEAD_ANGLE_THRESHOLD = 0.5 -- Dot product threshold for frontal collision
@@ -939,7 +943,8 @@ local function queuePlayerDeath(player)
 		print(string.format("[QUEUE] Adding death to queue for player: %s", player.Name))
 	end
 
-	table.insert(deathQueue, {
+	-- Process death immediately instead of queueing
+	processDeathImmediate({
 		type = "player",
 		target = player,
 		timestamp = tick()
@@ -1019,7 +1024,8 @@ local function queueAIDeath(head)
 		print(string.format("[QUEUE] Adding death to queue for AI: %s", tostring(head)))
 	end
 
-	table.insert(deathQueue, {
+	-- Process death immediately instead of queueing
+	processDeathImmediate({
 		type = "ai",
 		target = head,
 		timestamp = tick()
@@ -1027,27 +1033,17 @@ local function queueAIDeath(head)
 end
 
 -- Death processing coroutine with PROPER orb spawning
-task.spawn(function()
-	while true do
-		task.wait(0.1) -- Reduced from 0.033 to 0.1 for better performance
-
-		if #deathQueue > 0 and not isProcessingDeaths then
-			isProcessingDeaths = true
-
-			local death = table.remove(deathQueue, 1)
-
-			-- Add small delay for head-to-head collisions to ensure proper orb spawning
-			if death.type == "player" or death.type == "ai" then
-				task.wait(0.02) -- Small delay to prevent orb spawning conflicts
-			end
+-- IMMEDIATE DEATH PROCESSING - No delays!
+local function processDeathImmediate(death)
+	task.spawn(function()
+		-- Process immediately without queue delays
 
 			if death.type == "player" then
 				local player = death.target
 
 				-- Skip if player disconnected
 				if not player.Parent then
-					isProcessingDeaths = false
-					continue
+					return
 				end
 
 				local character = player.Character
@@ -1155,7 +1151,7 @@ task.spawn(function()
 
 						-- Handle character cleanup
 						task.spawn(function()
-							task.wait(0.2) -- Small delay for orb spawning
+							-- No delays - orbs spawn immediately!
 
 							if character and character.Parent then
 								-- Option 1: Move character far away (safer than destroying)
@@ -1196,8 +1192,7 @@ task.spawn(function()
 
 						-- Force clear all snake parts and model
 						task.spawn(function()
-							-- Wait a tiny bit to ensure orbs spawn first
-							task.wait(0.1)
+							-- Clean up immediately, orbs already spawned
 
 							-- Method 1: Clear from snake instance
 							if snakeInstance and snakeInstance.segments then
@@ -1440,8 +1435,14 @@ task.spawn(function()
 				end
 			end
 
-			isProcessingDeaths = false
-		end
+	end)
+end
+
+-- Clean up old death queue processing since we process immediately now
+task.spawn(function()
+	while true do
+		task.wait(1) -- Just clean up old entries periodically
+		deathQueue = {} -- Clear any old queued deaths
 	end
 end)
 
