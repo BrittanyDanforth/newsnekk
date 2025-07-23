@@ -709,7 +709,7 @@ local function initializeForCharacter(character)
 		
 		-- Reduce turn rate when near walls to prevent shaking
 		if State.wallStuckTime > 0 then
-			turnRate = turnRate * 0.3  -- Much slower turning when stuck
+			turnRate = turnRate * 0.5  -- Slower turning when stuck (increased from 0.3 for more stability)
 		end
 
 		-- PROPER DIRECTION INTERPOLATION - Never let it become invalid
@@ -793,12 +793,12 @@ local function initializeForCharacter(character)
 			-- We're trying to move but stuck
 			State.wallStuckTime = State.wallStuckTime + dt
 			
-			if State.wallStuckTime > 0.5 then
-				-- Been stuck for half a second - force escape
+			if State.wallStuckTime > 0.8 then
+				-- Been stuck for 0.8 seconds - force escape (increased from 0.5 for more stability)
 				local escapeAngle = math.random() * math.pi * 2
 				State.currentDirection = Vector3.new(math.sin(escapeAngle), 0, math.cos(escapeAngle)).Unit
 				State.targetDirection = State.currentDirection
-				newPosition = rootPart.Position + State.currentDirection * 5
+				newPosition = rootPart.Position + State.currentDirection * 3  -- Smaller escape distance
 				State.wallStuckTime = 0
 				
 				if State.debugMode then
