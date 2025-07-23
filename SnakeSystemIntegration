@@ -12,11 +12,25 @@ local RunService = game:GetService("RunService")
 -- Load the optimized system FIRST to create networking folder
 -- Try to use V2 if available, fallback to V1
 local OptimizedSnakeSystem
-pcall(function()
-	OptimizedSnakeSystem = require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV2"))
+local success, result = pcall(function()
+	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV2", 2))
 end)
-if not OptimizedSnakeSystem then
-	OptimizedSnakeSystem = require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
+
+if success and result then
+	OptimizedSnakeSystem = result
+	print("✅ Loaded OptimizedSnakeSystemV2")
+else
+	-- Fallback to V1
+	local v1Success, v1Result = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
+	end)
+	
+	if v1Success and v1Result then
+		OptimizedSnakeSystem = v1Result
+		print("✅ Loaded OptimizedSnakeSystem V1")
+	else
+		error("❌ Failed to load any OptimizedSnakeSystem module!")
+	end
 end
 
 -- Initialize the system (creates networking folder)
@@ -124,11 +138,22 @@ local function onCharacterAdded(character)
 	print("Creating snake with config - InitialLength:", config.InitialLength, "MaxSegments:", config.MaxSegments)
 	
 	-- Create optimized snake
-	local snake = OptimizedSnakeSystem.createSnake(character, config)
-	if not snake then
-		warn("Failed to create snake for", player.Name)
+	print("🐍 Creating snake for", player.Name, "with config:", config.InitialLength, "length")
+	local success, snake = pcall(function()
+		return OptimizedSnakeSystem.createSnake(character, config)
+	end)
+	
+	if not success then
+		warn("❌ Error creating snake:", snake)
 		return
 	end
+	
+	if not snake then
+		warn("❌ Failed to create snake for", player.Name)
+		return
+	end
+	
+	print("✅ Snake created successfully for", player.Name)
 	activeSnakes[player] = snake
 	
 	-- Add to global table for collision handler
@@ -295,11 +320,19 @@ end
 local respawnEvent = ReplicatedStorage:FindFirstChild("RespawnSnake")
 if respawnEvent then
 	respawnEvent.OnServerEvent:Connect(function(player)
+		print("🎮 Respawn requested for:", player.Name)
 		if player.Character then
 			player.Character:Destroy()
 		end
 		wait(0.1)
-		player:LoadCharacter()
+		local success, err = pcall(function()
+			player:LoadCharacter()
+		end)
+		if not success then
+			warn("❌ Failed to load character:", err)
+		else
+			print("✅ Character loaded for:", player.Name)
+		end
 		print("🐍 Respawned player:", player.Name)
 	end)
 end
