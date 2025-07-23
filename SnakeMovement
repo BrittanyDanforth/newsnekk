@@ -485,6 +485,12 @@ local function initializeForCharacter(character)
 		if input.KeyCode == Enum.KeyCode.LeftShift then
 			State.boosting = true
 			State.targetSpeed = Config.BoostSpeed
+			
+			-- Send boost state to server for V6 optimization
+			local boostEvent = game.ReplicatedStorage:FindFirstChild("UpdateBoostState")
+			if boostEvent then
+				boostEvent:FireServer(true)
+			end
 
 			-- Reduced boost effect
 			local boostEffect = Instance.new("ParticleEmitter")
@@ -503,6 +509,12 @@ local function initializeForCharacter(character)
 		if input.KeyCode == Enum.KeyCode.LeftShift then
 			State.boosting = false
 			State.targetSpeed = speedModes[State.speedMode]
+			
+			-- Send boost state to server for V6 optimization
+			local boostEvent = game.ReplicatedStorage:FindFirstChild("UpdateBoostState")
+			if boostEvent then
+				boostEvent:FireServer(false)
+			end
 
 			local boostEffect = rootPart:FindFirstChild("BoostEffect")
 			if boostEffect then

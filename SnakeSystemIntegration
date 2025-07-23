@@ -10,18 +10,27 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 -- Load the optimized system FIRST to create networking folder
--- Try V5 first (fixes body spawning), then V4, V3, V2, V1
+-- Try V6 first (ultra performance), then V5, V4, V3, V2, V1
 local OptimizedSnakeSystem
 
--- Try V5 (Fixed body spawning + performance)
-local v5Success, v5Result = pcall(function()
-	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV5", 2))
+-- Try V6 (Ultra performance mode)
+local v6Success, v6Result = pcall(function()
+	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV6", 2))
 end)
 
-if v5Success and v5Result then
-	OptimizedSnakeSystem = v5Result
-	print("✅ Loaded OptimizedSnakeSystemV5 - FIXED BODY SPAWNING!")
+if v6Success and v6Result then
+	OptimizedSnakeSystem = v6Result
+	print("✅ Loaded OptimizedSnakeSystemV6 - ULTRA PERFORMANCE MODE!")
 else
+	-- Try V5 (Fixed body spawning + performance)
+	local v5Success, v5Result = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV5", 2))
+	end)
+
+	if v5Success and v5Result then
+		OptimizedSnakeSystem = v5Result
+		print("✅ Loaded OptimizedSnakeSystemV5 - FIXED BODY SPAWNING!")
+	else
 	-- Try V4 (Performance focused)
 	local v4Success, v4Result = pcall(function()
 		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV4", 2))
@@ -193,6 +202,31 @@ local function onCharacterAdded(character)
 		_G.PlayerSnakes = {}
 	end
 	_G.PlayerSnakes[player] = snake
+	
+	-- Setup boost tracking for V6
+	if snake.setBoosting then
+		-- Create RemoteEvent for boost state
+		local boostEvent = ReplicatedStorage:FindFirstChild("UpdateBoostState")
+		if not boostEvent then
+			boostEvent = Instance.new("RemoteEvent")
+			boostEvent.Name = "UpdateBoostState"
+			boostEvent.Parent = ReplicatedStorage
+		end
+		
+		-- Listen for boost state changes
+		local boostConnection
+		boostConnection = boostEvent.OnServerEvent:Connect(function(eventPlayer, isBoosting)
+			if eventPlayer == player and activeSnakes[player] then
+				activeSnakes[player]:setBoosting(isBoosting)
+			end
+		end)
+		
+		-- Store connection for cleanup
+		if not snake._connections then
+			snake._connections = {}
+		end
+		snake._connections.boost = boostConnection
+	end
 	
 	-- Ensure leaderstats exist
 	local leaderstats = player:FindFirstChild("leaderstats")
