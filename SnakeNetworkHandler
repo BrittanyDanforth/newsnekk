@@ -42,34 +42,48 @@ function SnakeNetworkHandler.init()
 	-- Player snake data
 	local playerSnakeData = {}
 
-	-- Compression settings
-	local POSITION_PRECISION = 0.1 -- Round positions to nearest 0.1
-	local UPDATE_RATE = 15 -- Updates per second to clients
+	-- ULTRA Compression settings for 5k+ length
+	local POSITION_PRECISION = 0.5 -- Round positions to nearest 0.5 (less precision)
+	local UPDATE_RATE = 10 -- REDUCED to 10 updates per second
+	local MAX_PATH_POINTS = 20 -- Maximum path points to send
+	local LENGTH_UPDATE_THRESHOLD = 10 -- Only update length if changed by 10+
 
-	-- Handle position updates from clients
+	-- Handle position updates from clients (ULTRA OPTIMIZED)
 	positionUpdate.OnServerEvent:Connect(function(player, data)
-		if not data or not data.path then return end
+		if not data then return end
 		
-		-- Validate data
-		if #data.path > 100 then -- Max 100 path points
-			player:Kick("Invalid snake data")
-			return
-		end
-		
-		-- Store player data
+		-- Store player data with minimal overhead
 		if not playerSnakeData[player] then
 			playerSnakeData[player] = {
-				path = {},
+				position = Vector3.new(0,0,0),
+				lookVector = Vector3.new(0,0,-1),
 				length = 50,
-				speed = 16,
-				lastUpdate = tick()
+				boosting = false,
+				lastUpdate = tick(),
+				lastLength = 50
 			}
 		end
 		
 		local snakeData = playerSnakeData[player]
-		snakeData.path = data.path
-		snakeData.length = math.clamp(data.length or 50, 10, 5000)
-		snakeData.speed = math.clamp(data.speed or 16, 10, 50)
+		
+		-- Ultra-compressed data format
+		if data.p then -- position
+			snakeData.position = data.p
+		end
+		if data.l then -- lookVector
+			snakeData.lookVector = data.l
+		end
+		if data.s then -- length (only update if changed significantly)
+			local newLength = math.clamp(data.s, 10, 50000)
+			if math.abs(newLength - snakeData.lastLength) >= LENGTH_UPDATE_THRESHOLD then
+				snakeData.length = newLength
+				snakeData.lastLength = newLength
+			end
+		end
+		if data.b ~= nil then -- boosting
+			snakeData.boosting = data.b == 1
+		end
+		
 		snakeData.lastUpdate = tick()
 	end)
 
@@ -106,29 +120,68 @@ function SnakeNetworkHandler.init()
 		end
 	end)
 
-	-- Broadcast updates to all players
+	-- Broadcast updates to all players (ULTRA OPTIMIZED)
 	local lastBroadcast = tick()
+	local frameCount = 0
+	
 	RunService.Heartbeat:Connect(function()
 		local now = tick()
 		if now - lastBroadcast < 1/UPDATE_RATE then return end
 		lastBroadcast = now
 		
-		-- Prepare update data
+		frameCount = frameCount + 1
+		
+		-- Prepare update data (compressed format)
 		local updateData = {}
+		local playerCount = 0
 		
 		for player, snakeData in pairs(playerSnakeData) do
 			if player.Parent and now - snakeData.lastUpdate < 5 then -- Only include recent updates
-				updateData[player.Name] = {
-					p = snakeData.path,
-					l = snakeData.length,
-					s = snakeData.speed
+				playerCount = playerCount + 1
+				
+				-- Round position for compression
+				local compressedPos = Vector3.new(
+					math.floor(snakeData.position.X / POSITION_PRECISION + 0.5) * POSITION_PRECISION,
+					math.floor(snakeData.position.Y / POSITION_PRECISION + 0.5) * POSITION_PRECISION,
+					math.floor(snakeData.position.Z / POSITION_PRECISION + 0.5) * POSITION_PRECISION
+				)
+				
+				-- Ultra compressed data
+				updateData[player.UserId] = {
+					p = compressedPos,
+					l = snakeData.lookVector,
+					s = snakeData.length,
+					b = snakeData.boosting and 1 or 0
 				}
+				
+				-- Limit players sent per update for huge servers
+				if playerCount >= 50 then
+					break
+				end
 			end
 		end
 		
-		-- Send to all players
-		for _, player in pairs(Players:GetPlayers()) do
-			positionUpdate:FireClient(player, updateData)
+		-- Only send if there's data
+		if next(updateData) then
+			-- Send to all players with distance-based filtering
+			for _, player in pairs(Players:GetPlayers()) do
+				if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+					local playerPos = player.Character.HumanoidRootPart.Position
+					local filteredData = {}
+					
+					-- Only send nearby players (within 500 studs)
+					for userId, data in pairs(updateData) do
+						local distance = (data.p - playerPos).Magnitude
+						if distance < 500 then
+							filteredData[userId] = data
+						end
+					end
+					
+					if next(filteredData) then
+						positionUpdate:FireClient(player, filteredData)
+					end
+				end
+			end
 		end
 	end)
 

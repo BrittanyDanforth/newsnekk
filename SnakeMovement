@@ -7,7 +7,7 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
--- 🔧 NETWORK-OPTIMIZED CONFIG SYSTEM
+-- 🔧 ULTRA-OPTIMIZED CONFIG FOR 5K+ LENGTH
 local Config = {}
 local success, externalConfig = pcall(function()
 	return require(game.ReplicatedStorage:WaitForChild("SnakeConfig"))
@@ -30,11 +30,11 @@ else
 		HeadColor = Color3.fromRGB(0, 255, 0),
 		SegmentSize = Vector3.new(1.5, 1.5, 1.5),
 		SegmentColor = Color3.fromRGB(0, 200, 0),
-		MaxSegments = 80, -- Reduced for better performance
-		SegmentGap = 3.0, -- Slightly increased for less dense updates
-		PathSmoothness = 0.85, -- Slightly reduced for better performance
-		UpdateRate = 30, -- Reduced from 60 to 30 FPS
-		LODDistance = 120 -- Increased for better culling
+		MaxSegments = 50, -- REDUCED for ultra performance
+		SegmentGap = 3.5, -- INCREASED for less memory usage
+		PathSmoothness = 0.75, -- REDUCED for better performance
+		UpdateRate = 20, -- REDUCED to 20 FPS for less lag
+		LODDistance = 150 -- INCREASED for better culling
 	}
 end
 
@@ -62,53 +62,74 @@ local mouse = player:GetMouse()
 -- Mobile detection and controls are handled through MobileHUD script
 -- Check _G.IsMobile flag and _G.PlayerSnakes for mobile input data
 
--- 🎯 NETWORK-OPTIMIZED ZERO-GAP PATH SYSTEM
+-- 🎯 ULTRA-OPTIMIZED PATH SYSTEM FOR 5K+ LENGTH
 local PathSystem = {}
 PathSystem.__index = PathSystem
 
 function PathSystem.new()
 	return setmetatable({
-		-- Core path data with network optimization
+		-- Core path data with aggressive optimization
 		pathPoints = {},
 		totalDistance = 0,
 		segmentSpacing = Config.SegmentGap,
 
-		-- Network-optimized smoothing
+		-- Minimal smoothing for performance
 		smoothingBuffer = {},
-		smoothingRadius = 2.5, -- Reduced from 3
+		smoothingRadius = 2.0, -- Further reduced
 
-		-- Enhanced performance optimization
+		-- Aggressive performance optimization
 		lastRecordedPos = nil,
-		minRecordDistance = 0.5, -- Increased from 0.35 for less network traffic
+		minRecordDistance = 1.0, -- DOUBLED for 50% less data points
 		networkUpdateCounter = 0,
 
-		-- Reduced memory usage
+		-- Minimal memory usage
 		pointCount = 0,
-		maxPoints = 250, -- Reduced from 350 for better network performance
+		maxPoints = 150, -- REDUCED to 150 for ultra performance
 
-		-- Smaller interpolation cache
+		-- Tiny interpolation cache
 		interpolationCache = {},
-		cacheSize = 150, -- Reduced from 200
+		cacheSize = 100, -- REDUCED from 150
 		cacheDirty = false,
 
-		-- Network throttling
+		-- Heavy network throttling
 		lastNetworkUpdate = 0,
-		networkUpdateInterval = 1/30, -- 30 FPS max for network updates
+		networkUpdateInterval = 1/20, -- 20 FPS max
+		
+		-- Adaptive settings based on length
+		lengthOptimizations = {
+			[5000] = { maxPoints = 100, minDistance = 1.5 },
+			[10000] = { maxPoints = 80, minDistance = 2.0 },
+			[20000] = { maxPoints = 60, minDistance = 2.5 }
+		}
 	}, PathSystem)
 end
 
--- 📍 NETWORK-OPTIMIZED PATH RECORDING
-function PathSystem:recordPoint(position, speed, time)
+-- 📍 ULTRA-OPTIMIZED PATH RECORDING WITH LENGTH ADAPTATION
+function PathSystem:recordPoint(position, speed, time, snakeLength)
+	-- Adapt settings based on snake length
+	if snakeLength then
+		for lengthThreshold, settings in pairs(self.lengthOptimizations) do
+			if snakeLength >= lengthThreshold then
+				self.maxPoints = settings.maxPoints
+				self.minRecordDistance = settings.minDistance
+			end
+		end
+	end
+	
 	-- Dynamic recording rate based on speed (more frequent when boosting)
-	local dynamicInterval = speed > 50 and self.networkUpdateInterval * 0.5 or self.networkUpdateInterval
+	local dynamicInterval = speed > 50 and self.networkUpdateInterval * 0.7 or self.networkUpdateInterval
 
 	-- Network throttling
 	if time - self.lastNetworkUpdate < dynamicInterval then
 		return
 	end
 
-	-- Only record if we've moved enough (less distance required when boosting)
-	local dynamicMinDistance = speed > 50 and self.minRecordDistance * 0.5 or self.minRecordDistance
+	-- Only record if we've moved enough (adaptive based on length)
+	local dynamicMinDistance = self.minRecordDistance
+	if speed > 50 then
+		dynamicMinDistance = dynamicMinDistance * 0.7 -- Less reduction when boosting
+	end
+	
 	if self.lastRecordedPos and (position - self.lastRecordedPos).Magnitude < dynamicMinDistance then
 		return
 	end
@@ -833,9 +854,20 @@ local function initializeForCharacter(character)
 		-- Set CFrame with validated direction
 		rootPart.CFrame = CFrame.lookAt(newPosition, newPosition + State.currentDirection)
 
-		-- Record path point (throttled)
+		-- Record path point (throttled) with length optimization
 		if updateCounter % networkUpdateInterval == 0 then
-			pathSystem:recordPoint(rootPart.Position, State.smoothSpeed, tick())
+			-- Get current snake length for adaptive optimization
+			local currentLength = 10
+			if character then
+				local lengthValue = character:FindFirstChild("Length")
+				if lengthValue and lengthValue.Value then
+					currentLength = lengthValue.Value
+				elseif _G.PlayerSnakes and _G.PlayerSnakes[player] then
+					currentLength = _G.PlayerSnakes[player].length or currentLength
+				end
+			end
+			
+			pathSystem:recordPoint(rootPart.Position, State.smoothSpeed, tick(), currentLength)
 		end
 
 		-- Update globals and stats
