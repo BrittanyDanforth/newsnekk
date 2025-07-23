@@ -301,14 +301,16 @@ local function initializeForCharacter(character)
 	local pathSystem = PathSystem.new()
 
 	-- 🎮 NETWORK-OPTIMIZED MOVEMENT STATE
+	-- FIX: Use negative Z direction as default (forward in Roblox)
+	local initialDirection = Vector3.new(0, 0, -1) -- Forward direction
 	local State = {
 		currentSpeed = Config.BaseSpeed,
 		targetSpeed = Config.BaseSpeed,
 		speedMode = "normal",
 		boosting = false,
 		smoothSpeed = Config.BaseSpeed,
-		currentDirection = rootPart.CFrame.LookVector,
-		targetDirection = rootPart.CFrame.LookVector,
+		currentDirection = initialDirection,
+		targetDirection = initialDirection,
 		debugMode = false,
 		lastDebugUpdate = 0,
 		speedMultiplier = player:GetAttribute("SpeedMultiplier") or 1, -- Gamepass multiplier
@@ -687,7 +689,12 @@ local function initializeForCharacter(character)
 				delta = Vector3.new(delta.X, 0, delta.Z)
 
 				if delta.Magnitude > 1.0 then -- Reduced for more responsive control
+					-- FIX: Ensure direction is normalized and valid
 					local newTargetDir = delta.Unit
+					if newTargetDir.Magnitude < 0.9 or newTargetDir.Magnitude > 1.1 then
+						-- Fallback if direction is invalid
+						newTargetDir = State.currentDirection
+					end
 
 					-- ANTI-ZIGZAG: Same turn limiting as mobile
 					local dotProduct = State.currentDirection:Dot(newTargetDir)
@@ -720,7 +727,16 @@ local function initializeForCharacter(character)
 
 		-- CRITICAL FIX: Normalize the direction vector after lerping
 		if newDirection.Magnitude > 0.001 then
-			State.currentDirection = newDirection.Unit
+			local normalizedDir = newDirection.Unit
+			
+			-- Safety check: Prevent sudden 180 degree flips
+			local dotProduct = State.currentDirection:Dot(normalizedDir)
+			if dotProduct < -0.9 then -- If almost opposite direction
+				-- Keep current direction to prevent flipping
+				normalizedDir = State.currentDirection
+			end
+			
+			State.currentDirection = normalizedDir
 		end
 
 		-- BUTTERY smooth speed changes
@@ -735,6 +751,12 @@ local function initializeForCharacter(character)
 		local newPosition = rootPart.Position + State.currentDirection * moveDistance
 
 		-- Update position and rotation
+		-- Debug check for backwards movement
+		if State.debugMode and updateCounter % 30 == 0 then
+			print("Direction:", State.currentDirection, "Speed:", State.smoothSpeed)
+			print("RootPart LookVector:", rootPart.CFrame.LookVector)
+		end
+		
 		rootPart.CFrame = CFrame.lookAt(newPosition, newPosition + State.currentDirection)
 
 		-- Record path point (throttled)
