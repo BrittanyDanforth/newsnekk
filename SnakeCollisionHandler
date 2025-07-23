@@ -2211,8 +2211,10 @@ RunService.Stepped:Connect(function()
 						-- Get snake lengths
 						local charA = playerA.Character
 						local charB = playerB.Character
-						local lengthA = charA and charA:FindFirstChild("Length") and charA.Length.Value or 100
-						local lengthB = charB and charB:FindFirstChild("Length") and charB.Length.Value or 100
+						local lengthValueA = charA and charA:FindFirstChild("Length")
+						local lengthValueB = charB and charB:FindFirstChild("Length")
+						local lengthA = lengthValueA and lengthValueA.Value or 100
+						local lengthB = lengthValueB and lengthValueB.Value or 100
 						
 						local winner = determineHeadToHeadWinner(headA, headB, velA, velB, lengthA, lengthB)
 						if winner == "A" then
@@ -2245,8 +2247,10 @@ RunService.Stepped:Connect(function()
 						-- Get snake lengths
 						local charA = playerA.Character
 						local charB = playerB.Character
-						local lengthA = charA and charA:FindFirstChild("Length") and charA.Length.Value or 100
-						local lengthB = charB and charB:FindFirstChild("Length") and charB.Length.Value or 100
+						local lengthValueA = charA and charA:FindFirstChild("Length")
+						local lengthValueB = charB and charB:FindFirstChild("Length")
+						local lengthA = lengthValueA and lengthValueA.Value or 100
+						local lengthB = lengthValueB and lengthValueB.Value or 100
 						
 						local loser = determineHeadToHeadWinner(headA, headB, velA, velB, lengthA, lengthB)
 						if loser == "A" then
