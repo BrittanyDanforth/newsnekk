@@ -302,7 +302,7 @@ function Snake:createInitialSegments()
 	
 	-- Calculate proper spacing to eliminate gaps
 	local segmentDiameter = currentSize.X
-	local spacing = segmentDiameter * 0.85  -- Original spacing
+	local spacing = segmentDiameter * 0.85  -- Normal spacing for growth visibility
 	
 	-- Create all visible segments with no gaps
 	local currentPos = startPos
@@ -457,11 +457,15 @@ function Snake:update(dt)
 	-- DYNAMIC SPACING based on snake size
 	local spacing
 	if self.length < 100 then
-		-- Small snakes need MUCH tighter spacing
-		spacing = segmentDiameter * 0.65  -- Even tighter!
+		-- Small snakes - balanced for growth visibility
+		if self.isBoosting then
+			spacing = segmentDiameter * 0.75  -- Tighter when boosting
+		else
+			spacing = segmentDiameter * 0.85  -- Normal when not boosting
+		end
 	elseif self.length < 500 then
 		-- Medium snakes
-		spacing = segmentDiameter * 0.75
+		spacing = segmentDiameter * 0.80
 	else
 		-- Large snakes can use normal spacing
 		spacing = segmentDiameter * 0.85
