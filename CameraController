@@ -35,15 +35,19 @@ end
 
 local isMobile = isMobileDevice()
 
--- Camera settings - like slither.io
+-- Camera settings - ENHANCED FOR LONG SNAKES
 local BASE_HEIGHT = isMobile and 45 or 40  -- Base height - more zoomed for mobile
-local MAX_HEIGHT = isMobile and 100 or 120  -- Maximum zoom out - less zoom out on mobile
-local FOV = 70  -- Back to 70 for better view
+local MAX_HEIGHT = isMobile and 800 or 1000  -- GREATLY increased max zoom out for huge snakes
+local MEGA_HEIGHT = 2000  -- For extremely long snakes (50k+)
+local FOV = 70  -- Base FOV
+local MAX_FOV = 100  -- Maximum FOV for very long snakes
 local SMOOTH_FACTOR = 0.15  -- Camera smoothing
 
 -- Current camera values for smooth interpolation
 local currentHeight = BASE_HEIGHT
 local targetHeight = BASE_HEIGHT
+local currentFOV = FOV
+local targetFOV = FOV
 
 -- 🔒 LOCK CAMERA COMPLETELY
 camera.CameraType = Enum.CameraType.Scriptable
@@ -66,7 +70,39 @@ local function getSnakeLength()
 	return 0
 end
 
--- Main camera update loop - SLITHER.IO STYLE
+-- Enhanced camera height calculation for very long snakes
+local function calculateCameraHeight(snakeLength)
+	if snakeLength < 500 then
+		-- Normal scaling for small snakes
+		return BASE_HEIGHT + (snakeLength / 10)
+	elseif snakeLength < 5000 then
+		-- Medium scaling for medium snakes
+		return BASE_HEIGHT + 50 + (snakeLength / 20)
+	elseif snakeLength < 20000 then
+		-- Slower scaling for large snakes
+		return BASE_HEIGHT + 300 + (snakeLength / 50)
+	elseif snakeLength < 50000 then
+		-- Even slower scaling for huge snakes
+		return BASE_HEIGHT + 700 + (snakeLength / 100)
+	else
+		-- For mega snakes (50k+), use logarithmic scaling
+		local extraHeight = math.log(snakeLength / 50000) * 200
+		return math.min(1200 + extraHeight, MEGA_HEIGHT)
+	end
+end
+
+-- Calculate FOV based on snake length
+local function calculateFOV(snakeLength)
+	if snakeLength < 10000 then
+		return FOV
+	else
+		-- Gradually increase FOV for better view at extreme lengths
+		local extraFOV = math.min((snakeLength - 10000) / 1000, 30)
+		return math.min(FOV + extraFOV, MAX_FOV)
+	end
+end
+
+-- Main camera update loop - ENHANCED FOR LONG SNAKES
 RunService.RenderStepped:Connect(function(dt)
 	local character = player.Character
 	if not character then return end
@@ -77,24 +113,33 @@ RunService.RenderStepped:Connect(function(dt)
 	-- Get snake position
 	local snakePos = rootPart.Position
 
-	-- Dynamic zoom based on snake length (like slither.io)
+	-- Dynamic zoom based on snake length (enhanced for very long snakes)
 	local snakeLength = getSnakeLength()
-	targetHeight = math.min(BASE_HEIGHT + (snakeLength / 10), MAX_HEIGHT)
+	targetHeight = calculateCameraHeight(snakeLength)
+	targetFOV = calculateFOV(snakeLength)
 
 	-- Smooth camera height transition
 	currentHeight = currentHeight + (targetHeight - currentHeight) * SMOOTH_FACTOR
+	currentFOV = currentFOV + (targetFOV - currentFOV) * SMOOTH_FACTOR
 
 	-- Camera position with smooth follow
 	local cameraPos = snakePos + Vector3.new(0, currentHeight, 0)
 
-	-- Look straight down at snake with slight forward bias
-	local lookAtPos = snakePos + Vector3.new(0, 0, 0.1)
+	-- For very long snakes, add a slight backward tilt for better view
+	if snakeLength > 20000 then
+		local tiltFactor = math.min((snakeLength - 20000) / 30000, 1) * 0.2
+		cameraPos = cameraPos + Vector3.new(0, 0, currentHeight * tiltFactor)
+	end
+
+	-- Look at snake with dynamic offset based on length
+	local forwardBias = snakeLength > 10000 and (snakeLength / 10000) or 0.1
+	local lookAtPos = snakePos + Vector3.new(0, 0, forwardBias)
 
 	-- Set camera - FIXED ORIENTATION
 	camera.CFrame = CFrame.lookAt(cameraPos, lookAtPos, Vector3.new(0, 0, -1))
 
-	-- Fixed FOV
-	camera.FieldOfView = FOV
+	-- Dynamic FOV
+	camera.FieldOfView = currentFOV
 
 	-- Ensure camera stays scriptable
 	camera.CameraType = Enum.CameraType.Scriptable
