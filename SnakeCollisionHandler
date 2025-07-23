@@ -1047,7 +1047,8 @@ task.spawn(function()
 
 				-- Skip if player disconnected
 				if not player.Parent then
-					return
+					isProcessingDeaths = false
+					continue
 				end
 
 				local character = player.Character
