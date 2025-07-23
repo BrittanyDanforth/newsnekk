@@ -80,7 +80,7 @@ local function createNetworkEvents()
 		folder.Parent = ReplicatedStorage
 	end
 	
-	local events = {"PositionUpdate", "LengthUpdate", "SkinUpdate"}
+	local events = {"PositionUpdate", "LengthUpdate", "SkinUpdate", "UpdateBoostState"}
 	for _, eventName in ipairs(events) do
 		local event = folder:FindFirstChild(eventName)
 		if not event then
@@ -131,6 +131,7 @@ function Snake.new(character, config)
 	self.length = config.InitialLength or 55
 	self.segments = {}  -- Array of segment parts for collision detection
 	self.visibleSegments = {}
+	self.isBoosting = false  -- Track boost state
 	
 	print("Creating snake with initial length:", self.length)
 	
@@ -145,8 +146,8 @@ function Snake.new(character, config)
 		position = self.rootPart.Position,
 		lookVector = self.rootPart.CFrame.LookVector
 	}
-	-- Need enough history for the full length
-	local historyNeeded = mathMin(self.length * 2, maxHistorySize)  -- 2x for smooth following
+	-- Need enough history for the full length - MORE when boosting!
+	local historyNeeded = mathMin(self.length * 3, maxHistorySize)  -- 3x for smooth following when boosting
 	for i = 1, historyNeeded do
 		self.positionHistory[i] = initialPoint
 		self.historyCount = i
@@ -171,6 +172,10 @@ function Snake.new(character, config)
 	self:setupNetworking()
 	
 	return self
+end
+
+function Snake:setBoosting(boosting)
+	self.isBoosting = boosting
 end
 
 function Snake:addToHistory(data)
@@ -262,28 +267,28 @@ end
 
 function Snake:calculateGrowthFactor()
 	local growthFactor = 1
-	if self.length > 200 then
-		if self.length <= 2000 then
-			-- 200-2000: grow from 1x to 2x
-			growthFactor = 1 + ((self.length - 200) / 1800) * 1.0
-		elseif self.length <= 5000 then
-			-- 2000-5000: grow from 2x to 3x
-			growthFactor = 2 + ((self.length - 2000) / 3000) * 1.0
+	if self.length > 1000 then  -- Changed from 200 to 1000
+		if self.length <= 5000 then
+			-- 1000-5000: grow from 1x to 2x
+			growthFactor = 1 + ((self.length - 1000) / 4000) * 1.0
 		elseif self.length <= 10000 then
-			-- 5000-10000: grow from 3x to 4x
-			growthFactor = 3 + ((self.length - 5000) / 5000) * 1.0
+			-- 5000-10000: grow from 2x to 3x
+			growthFactor = 2 + ((self.length - 5000) / 5000) * 1.0
+		elseif self.length <= 15000 then
+			-- 10000-15000: grow from 3x to 4x
+			growthFactor = 3 + ((self.length - 10000) / 5000) * 1.0
 		elseif self.length <= 20000 then
-			-- 10000-20000: grow from 4x to 5x
-			growthFactor = 4 + ((self.length - 10000) / 10000) * 1.0
-		elseif self.length <= 35000 then
-			-- 20000-35000: grow from 5x to 6x
-			growthFactor = 5 + ((self.length - 20000) / 15000) * 1.0
+			-- 15000-20000: grow from 4x to 5x
+			growthFactor = 4 + ((self.length - 15000) / 5000) * 1.0
+		elseif self.length <= 25000 then
+			-- 20000-25000: grow from 5x to 6x (MASSIVE - ENTIRE MAP!)
+			growthFactor = 5 + ((self.length - 20000) / 5000) * 1.0
 		else
-			-- 35000-50000: grow from 6x to 7x (MASSIVE!)
-			growthFactor = 6 + ((self.length - 35000) / 15000) * 1.0
+			-- Cap at 6x size
+			growthFactor = 6.0
 		end
 	end
-	return mathMin(growthFactor, 7.0)  -- Cap at 7x size
+	return mathMin(growthFactor, 6.0)  -- Cap at 6x size
 end
 
 function Snake:createInitialSegments()
@@ -296,9 +301,9 @@ function Snake:createInitialSegments()
 	local currentSize = baseSize * growthFactor
 	
 	-- Calculate proper spacing to eliminate gaps
-	-- Segments should overlap slightly (0.9 = 10% overlap)
+	-- Segments should overlap slightly (0.85 = 15% overlap for no gaps)
 	local segmentDiameter = currentSize.X
-	local spacing = segmentDiameter * 0.9
+	local spacing = segmentDiameter * 0.85
 	
 	-- Create all visible segments with no gaps
 	local currentPos = startPos
@@ -358,11 +363,18 @@ function Snake:setupNetworking()
 				self.lastNetworkUpdate = now
 			end
 		end)
+		
+		-- Listen for boost state changes from client
+		if remoteEvents.updatebooststate then
+			remoteEvents.updatebooststate.OnClientEvent:Connect(function(isBoosting)
+				self:setBoosting(isBoosting)
+			end)
+		end
 	end
 end
 
 function Snake:update(dt)
-	-- Update position history
+	-- Update position history - MORE FREQUENTLY when boosting
 	local currentPos = self.rootPart.Position
 	local currentLook = self.rootPart.CFrame.LookVector
 	
@@ -371,6 +383,28 @@ function Snake:update(dt)
 		position = currentPos,
 		lookVector = currentLook
 	})
+	
+	-- When boosting, add extra history points for smoother following
+	if self.isBoosting then
+		-- Add intermediate points to prevent gaps
+		local lastHistory = self:getFromHistory(1)
+		if lastHistory then
+			local distance = (currentPos - lastHistory.position).Magnitude
+			if distance > 2 then  -- If moved more than 2 studs
+				-- Add intermediate points
+				local steps = mathFloor(distance / 2)
+				for i = 1, mathMin(steps, 3) do  -- Max 3 intermediate points
+					local alpha = i / (steps + 1)
+					local interpPos = lastHistory.position:Lerp(currentPos, alpha)
+					local interpLook = lastHistory.lookVector:Lerp(currentLook, alpha)
+					self:addToHistory({
+						position = interpPos,
+						lookVector = interpLook
+					})
+				end
+			end
+		end
+	end
 	
 	-- Update head position and size based on growth
 	if self.head then
@@ -414,10 +448,12 @@ function Snake:update(dt)
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	local segmentDiameter = currentSize.X
-	local spacing = segmentDiameter * 0.9  -- 10% overlap to eliminate gaps
 	
-	-- Calculate history steps per unit distance
-	local historyStepsPerUnit = 2  -- How many history steps per stud
+	-- TIGHTER spacing when boosting to prevent gaps
+	local spacing = self.isBoosting and (segmentDiameter * 0.75) or (segmentDiameter * 0.85)
+	
+	-- Calculate history steps per unit distance - LESS when boosting for tighter following
+	local historyStepsPerUnit = self.isBoosting and 3 or 2  -- More steps when boosting
 	
 	for i, segment in pairs(self.segments) do
 		-- Each segment follows at a fixed distance
@@ -428,7 +464,28 @@ function Snake:update(dt)
 		local historyData = self:getFromHistory(historySteps)
 		
 		if historyData then
-			segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+			-- Smooth interpolation for segments when boosting
+			if self.isBoosting and i > 1 then
+				local prevSegment = self.segments[i-1]
+				if prevSegment and prevSegment.Parent then
+					-- Ensure segments stay close together
+					local prevPos = prevSegment.Position
+					local targetPos = historyData.position
+					local distance = (targetPos - prevPos).Magnitude
+					
+					-- If too far, interpolate to stay closer
+					if distance > spacing * 1.5 then
+						targetPos = prevPos + (targetPos - prevPos).Unit * (spacing * 1.2)
+						segment.CFrame = CFramenew(targetPos, targetPos + historyData.lookVector)
+					else
+						segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+					end
+				else
+					segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+				end
+			else
+				segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+			end
 			
 			-- Update segment size
 			segment.Size = currentSize
@@ -493,11 +550,21 @@ function Snake:updateLength(newLength)
 		for _, segment in ipairs(segmentsToAdd) do
 			segment.Parent = self.model
 		end
+		
+		-- Ensure we have enough history for the new length when boosting
+		local historyNeeded = mathMin(self.length * 3, self.maxHistorySize)
+		if self.historyCount < historyNeeded then
+			-- Add more history points
+			local lastHistory = self.positionHistory[self.historyHead]
+			for i = self.historyCount + 1, historyNeeded do
+				self:addToHistory(lastHistory)
+			end
+		end
 	end
 	
 	-- Network update
-	if self.player == Players.LocalPlayer and remoteEvents.lengthUpdate then
-		remoteEvents.lengthUpdate:FireServer(self.length)
+	if self.player == Players.LocalPlayer and remoteEvents.lengthupdate then
+		remoteEvents.lengthupdate:FireServer(self.length)
 	end
 end
 
@@ -524,8 +591,8 @@ end
 
 function Snake:sendNetworkUpdate()
 	-- Send position updates to server
-	if remoteEvents.positionUpdate then
-		remoteEvents.positionUpdate:FireServer({
+	if remoteEvents.positionupdate then
+		remoteEvents.positionupdate:FireServer({
 			position = self.rootPart.Position,
 			lookVector = self.rootPart.CFrame.LookVector
 		})
@@ -579,7 +646,7 @@ function OptimizedSnakeSystem.init()
 	initializeSegmentPool()
 	createNetworkEvents()
 	
-	print("✅ Optimized Snake System V7.0 initialized - Using position history like original!")
+	print("✅ Optimized Snake System V7.0 initialized - Fixed boosting gaps!")
 end
 
 function OptimizedSnakeSystem.createSnake(character, config)

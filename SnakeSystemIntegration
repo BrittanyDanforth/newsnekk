@@ -10,78 +10,48 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 -- Load the optimized system FIRST to create networking folder
--- Try V7 first (self-healing), then V6, V5, V4, V3, V2, V1
+-- Try V4 first, then V3, then V2, then V1
 local OptimizedSnakeSystem
 
--- Try V7 (Self-healing gaps)
-local v7Success, v7Result = pcall(function()
-	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV7", 2))
+-- Try V4 (Performance focused)
+local v4Success, v4Result = pcall(function()
+	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV4", 2))
 end)
 
-if v7Success and v7Result then
-	OptimizedSnakeSystem = v7Result
-	print("✅ Loaded OptimizedSnakeSystemV7 - SELF-HEALING GAPS!")
+if v4Success and v4Result then
+	OptimizedSnakeSystem = v4Result
+	print("✅ Loaded OptimizedSnakeSystemV4 - PERFORMANCE!")
 else
-	-- Try V6 (Ultra performance mode)
-	local v6Success, v6Result = pcall(function()
-		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV6", 2))
+	-- Try V3
+	local v3Success, v3Result = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV3", 2))
 	end)
 
-	if v6Success and v6Result then
-		OptimizedSnakeSystem = v6Result
-		print("✅ Loaded OptimizedSnakeSystemV6 - ULTRA PERFORMANCE MODE!")
+	if v3Success and v3Result then
+		OptimizedSnakeSystem = v3Result
+		print("✅ Loaded OptimizedSnakeSystemV3 - SMOOTH!")
 	else
-	-- Try V5 (Fixed body spawning + performance)
-	local v5Success, v5Result = pcall(function()
-		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV5", 2))
-	end)
-
-	if v5Success and v5Result then
-		OptimizedSnakeSystem = v5Result
-		print("✅ Loaded OptimizedSnakeSystemV5 - FIXED BODY SPAWNING!")
-	else
-		-- Try V4 (Performance focused)
-		local v4Success, v4Result = pcall(function()
-			return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV4", 2))
+		-- Try V2
+		local v2Success, v2Result = pcall(function()
+			return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV2", 2))
 		end)
 
-		if v4Success and v4Result then
-			OptimizedSnakeSystem = v4Result
-			print("✅ Loaded OptimizedSnakeSystemV4 - PERFORMANCE!")
+		if v2Success and v2Result then
+			OptimizedSnakeSystem = v2Result
+			print("✅ Loaded OptimizedSnakeSystemV2")
 		else
-			-- Try V3
-			local v3Success, v3Result = pcall(function()
-				return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV3", 2))
+			-- Fallback to V1
+			local v1Success, v1Result = pcall(function()
+				return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
 			end)
-			
-			if v3Success and v3Result then
-				OptimizedSnakeSystem = v3Result
-				print("✅ Loaded OptimizedSnakeSystemV3 - SMOOTH!")
+
+			if v1Success and v1Result then
+				OptimizedSnakeSystem = v1Result
+				print("✅ Loaded OptimizedSnakeSystem V1")
 			else
-				-- Try V2
-				local v2Success, v2Result = pcall(function()
-					return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV2", 2))
-				end)
-				
-				if v2Success and v2Result then
-					OptimizedSnakeSystem = v2Result
-					print("✅ Loaded OptimizedSnakeSystemV2")
-				else
-					-- Fallback to V1
-					local v1Success, v1Result = pcall(function()
-						return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
-					end)
-					
-					if v1Success and v1Result then
-						OptimizedSnakeSystem = v1Result
-						print("✅ Loaded OptimizedSnakeSystem V1")
-					else
-						error("❌ Failed to load any OptimizedSnakeSystem module!")
-					end
-				end
+				error("❌ Failed to load any OptimizedSnakeSystem module!")
 			end
 		end
-	end
 	end
 end
 
@@ -115,7 +85,7 @@ respawnSnake.Name = "RespawnSnake"
 
 -- Default configuration
 local DEFAULT_CONFIG = {
-	InitialLength = 55,  -- Normal starting length
+	InitialLength = 500,  -- Normal starting length
 	MaxSegments = 50000,  -- MASSIVE SNAKES! Was 10000
 	SegmentSpacing = 3.2,  -- Original spacing
 	SegmentSize = Vector3.new(4, 4, 4),  -- Original size
@@ -137,7 +107,7 @@ local DEFAULT_CONFIG = {
 -- Get skin configuration
 local function getSkinConfig(player)
 	local skinName = player:GetAttribute("SelectedSkin") or "Default"
-	
+
 	-- Try to get skin data from your existing system
 	local skinData = nil
 	pcall(function()
@@ -146,7 +116,7 @@ local function getSkinConfig(player)
 			skinData = snakeSkins[skinName]
 		end
 	end)
-	
+
 	if skinData then
 		-- Merge with default config
 		local config = {}
@@ -155,7 +125,7 @@ local function getSkinConfig(player)
 		end
 		return config
 	end
-	
+
 	return DEFAULT_CONFIG
 end
 
@@ -171,57 +141,57 @@ local function onCharacterAdded(character)
 			return
 		end
 	end
-	
+
 	-- Clean up old snake
 	if activeSnakes[player] then
 		activeSnakes[player]:destroy()
 		activeSnakes[player] = nil
 	end
-	
+
 	-- Wait for character to load
 	local humanoid = character:WaitForChild("Humanoid")
 	local rootPart = character:WaitForChild("HumanoidRootPart")
-	
+
 	wait(0.5) -- Small delay for stability
-	
+
 	-- Get configuration
 	local config = getSkinConfig(player)
-	
+
 	print("Creating snake with config - InitialLength:", config.InitialLength, "MaxSegments:", config.MaxSegments)
-	
+
 	-- Create optimized snake
 	print("🐍 Creating snake for", player.Name, "with config:", config.InitialLength, "length")
 	local success, snake = pcall(function()
 		return OptimizedSnakeSystem.createSnake(character, config)
 	end)
-	
+
 	if not success then
 		warn("❌ Error creating snake:", snake)
 		return
 	end
-	
+
 	if not snake then
 		warn("❌ Failed to create snake for", player.Name)
 		return
 	end
-	
+
 	print("✅ Snake created successfully for", player.Name)
 	activeSnakes[player] = snake
-	
+
 	-- Add to global table for collision handler
 	if not _G.PlayerSnakes then
 		_G.PlayerSnakes = {}
 	end
 	_G.PlayerSnakes[player] = snake
 	
-	-- Setup boost tracking for V6
+	-- Setup boost tracking
 	if snake.setBoosting then
 		-- Create RemoteEvent for boost state
-		local boostEvent = ReplicatedStorage:FindFirstChild("UpdateBoostState")
+		local boostEvent = remoteEvents:FindFirstChild("UpdateBoostState")
 		if not boostEvent then
 			boostEvent = Instance.new("RemoteEvent")
 			boostEvent.Name = "UpdateBoostState"
-			boostEvent.Parent = ReplicatedStorage
+			boostEvent.Parent = remoteEvents
 		end
 		
 		-- Listen for boost state changes
@@ -238,7 +208,7 @@ local function onCharacterAdded(character)
 		end
 		snake._connections.boost = boostConnection
 	end
-	
+
 	-- Ensure leaderstats exist
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if not leaderstats then
@@ -246,7 +216,7 @@ local function onCharacterAdded(character)
 		leaderstats.Name = "leaderstats"
 		leaderstats.Parent = player
 	end
-	
+
 	local lengthValue = leaderstats:FindFirstChild("Length")
 	if not lengthValue then
 		lengthValue = Instance.new("IntValue")
@@ -257,12 +227,12 @@ local function onCharacterAdded(character)
 		-- Set to initial length from config
 		lengthValue.Value = config.InitialLength or 55
 	end
-	
+
 	-- Handle length updates
 	if lengthValue then
 		-- Initial length
 		snake:updateLength(lengthValue.Value)
-		
+
 		-- Listen for changes
 		lengthValue.Changed:Connect(function(newLength)
 			if snake and activeSnakes[player] == snake then
@@ -270,7 +240,7 @@ local function onCharacterAdded(character)
 			end
 		end)
 	end
-	
+
 	-- Update loop
 	local updateConnection
 	updateConnection = RunService.Heartbeat:Connect(function(dt)
@@ -278,12 +248,12 @@ local function onCharacterAdded(character)
 			updateConnection:Disconnect()
 			return
 		end
-		
+
 		if snake and activeSnakes[player] == snake then
 			snake:update(dt)
 		end
 	end)
-	
+
 	-- Handle skin changes
 	local skinConnection
 	skinConnection = player:GetAttributeChangedSignal("SelectedSkin"):Connect(function()
@@ -298,11 +268,11 @@ local function onCharacterAdded(character)
 			snake.config = newConfig
 		end
 	end)
-	
+
 	-- Store connections on snake object for cleanup
 	snake.updateConnection = updateConnection
 	snake.skinConnection = skinConnection
-	
+
 	-- Handle death
 	local deathConnection
 	deathConnection = humanoid.Died:Connect(function()
@@ -318,12 +288,17 @@ local function onCharacterAdded(character)
 				deathConnection:Disconnect()
 			end
 			
+			-- Cleanup boost connection
+			if snake._connections and snake._connections.boost then
+				snake._connections.boost:Disconnect()
+			end
+
 			-- Get snake's current position and length for death orbs
 			local deathPos = rootPart.Position
 			local snakeLength = lengthValue and lengthValue.Value or 55
-			
+
 			print("Snake died - spawning", math.floor(snakeLength / 10), "death orbs at", deathPos)
-			
+
 			-- Spawn death orbs
 			local orbSpawner = game.ServerScriptService:FindFirstChild("OrbSpawner")
 			if orbSpawner then
@@ -338,11 +313,11 @@ local function onCharacterAdded(character)
 			else
 				warn("OrbSpawner not found in ServerScriptService")
 			end
-			
+
 			-- Clean up snake
 			activeSnakes[player]:destroy()
 			activeSnakes[player] = nil
-			
+
 			-- Remove from global table
 			if _G.PlayerSnakes then
 				_G.PlayerSnakes[player] = nil
@@ -359,16 +334,16 @@ Players.PlayerAdded:Connect(function(player)
 		leaderstats = Instance.new("Folder")
 		leaderstats.Name = "leaderstats"
 		leaderstats.Parent = player
-		
+
 		local length = Instance.new("IntValue")
 		length.Name = "Length"
 		length.Value = 55
 		length.Parent = leaderstats
 	end
-	
+
 	-- Connect character spawning
 	player.CharacterAdded:Connect(onCharacterAdded)
-	
+
 	-- Handle existing character
 	if player.Character then
 		onCharacterAdded(player.Character)
