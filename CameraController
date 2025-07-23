@@ -37,10 +37,10 @@ local isMobile = isMobileDevice()
 
 -- Camera settings - ENHANCED FOR LONG SNAKES
 local BASE_HEIGHT = isMobile and 45 or 40  -- Base height - more zoomed for mobile
-local MAX_HEIGHT = isMobile and 800 or 1000  -- GREATLY increased max zoom out for huge snakes
-local MEGA_HEIGHT = 2000  -- For extremely long snakes (50k+)
+local MAX_HEIGHT = isMobile and 300 or 400  -- Reduced from 800/1000 - more reasonable zoom
+local MEGA_HEIGHT = 600  -- Reduced from 2000 - max height cap for mega snakes
 local FOV = 70  -- Base FOV
-local MAX_FOV = 100  -- Maximum FOV for very long snakes
+local MAX_FOV = 85  -- Reduced from 100 - less fisheye effect
 local SMOOTH_FACTOR = 0.15  -- Camera smoothing
 
 -- Current camera values for smooth interpolation
@@ -74,20 +74,20 @@ end
 local function calculateCameraHeight(snakeLength)
 	if snakeLength < 500 then
 		-- Normal scaling for small snakes
-		return BASE_HEIGHT + (snakeLength / 10)
+		return BASE_HEIGHT + (snakeLength / 15)  -- Slower scaling
 	elseif snakeLength < 5000 then
 		-- Medium scaling for medium snakes
-		return BASE_HEIGHT + 50 + (snakeLength / 20)
+		return BASE_HEIGHT + 33 + (snakeLength / 40)  -- Much slower
 	elseif snakeLength < 20000 then
 		-- Slower scaling for large snakes
-		return BASE_HEIGHT + 300 + (snakeLength / 50)
+		return BASE_HEIGHT + 150 + (snakeLength / 100)  -- Reduced
 	elseif snakeLength < 50000 then
 		-- Even slower scaling for huge snakes
-		return BASE_HEIGHT + 700 + (snakeLength / 100)
+		return BASE_HEIGHT + 350 + (snakeLength / 200)  -- Much reduced
 	else
 		-- For mega snakes (50k+), use logarithmic scaling
-		local extraHeight = math.log(snakeLength / 50000) * 200
-		return math.min(1200 + extraHeight, MEGA_HEIGHT)
+		local extraHeight = math.log(snakeLength / 50000) * 50  -- Reduced from 200
+		return math.min(600 + extraHeight, MEGA_HEIGHT)
 	end
 end
 
@@ -97,7 +97,7 @@ local function calculateFOV(snakeLength)
 		return FOV
 	else
 		-- Gradually increase FOV for better view at extreme lengths
-		local extraFOV = math.min((snakeLength - 10000) / 1000, 30)
+		local extraFOV = math.min((snakeLength - 10000) / 2000, 15)  -- Reduced scaling
 		return math.min(FOV + extraFOV, MAX_FOV)
 	end
 end
