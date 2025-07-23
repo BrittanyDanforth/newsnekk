@@ -300,10 +300,10 @@ function Snake:createInitialSegments()
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	
-	-- Calculate proper spacing to eliminate gaps
-	-- Segments should overlap slightly (0.85 = 15% overlap for no gaps)
+	-- Calculate TIGHT spacing - NO GAPS EVER
+	-- Segments overlap significantly
 	local segmentDiameter = currentSize.X
-	local spacing = segmentDiameter * 0.85
+	local spacing = segmentDiameter * 0.6  -- 40% overlap
 	
 	-- Create all visible segments with no gaps
 	local currentPos = startPos
@@ -443,58 +443,64 @@ function Snake:update(dt)
 		end
 	end
 	
-	-- Update segments to follow history with no gaps
+	-- Update segments to follow history with NO GAPS EVER
 	local growthFactor = self:calculateGrowthFactor()
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	local segmentDiameter = currentSize.X
 	
-	-- TIGHTER spacing when boosting to prevent gaps
-	local spacing = self.isBoosting and (segmentDiameter * 0.75) or (segmentDiameter * 0.85)
+	-- SUPER TIGHT spacing - segments overlap significantly
+	local spacing = segmentDiameter * 0.6  -- 40% overlap to guarantee no gaps
 	
-	-- Calculate history steps per unit distance - LESS when boosting for tighter following
-	local historyStepsPerUnit = self.isBoosting and 3 or 2  -- More steps when boosting
+	-- When boosting, use even tighter following
+	if self.isBoosting then
+		spacing = segmentDiameter * 0.5  -- 50% overlap when boosting
+	end
 	
 	for i, segment in pairs(self.segments) do
-		-- Each segment follows at a fixed distance
-		local distanceBehind = i * spacing
-		local historySteps = mathFloor(distanceBehind * historyStepsPerUnit / 3.2)  -- Normalize by original spacing
-		historySteps = mathMin(historySteps, self.historyCount - 1)
-		
-		local historyData = self:getFromHistory(historySteps)
-		
-		if historyData then
-			-- Smooth interpolation for segments when boosting
-			if self.isBoosting and i > 1 then
-				local prevSegment = self.segments[i-1]
-				if prevSegment and prevSegment.Parent then
-					-- Ensure segments stay close together
-					local prevPos = prevSegment.Position
-					local targetPos = historyData.position
-					local distance = (targetPos - prevPos).Magnitude
-					
-					-- If too far, interpolate to stay closer
-					if distance > spacing * 1.5 then
-						targetPos = prevPos + (targetPos - prevPos).Unit * (spacing * 1.2)
-						segment.CFrame = CFramenew(targetPos, targetPos + historyData.lookVector)
-					else
-						segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
-					end
-				else
-					segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+		if i == 1 then
+			-- First segment follows head very closely
+			local headOffset = self.head.CFrame.LookVector * (segmentDiameter * 0.8)
+			segment.CFrame = CFramenew(self.head.Position - headOffset, self.head.Position)
+		else
+			-- Each segment follows the previous one DIRECTLY
+			local prevSegment = self.segments[i-1]
+			if prevSegment and prevSegment.Parent then
+				-- Position segment directly behind the previous one
+				local prevPos = prevSegment.Position
+				local prevLook = prevSegment.CFrame.LookVector
+				
+				-- Place this segment touching the previous one
+				local newPos = prevPos - (prevLook * spacing)
+				segment.CFrame = CFramenew(newPos, prevPos)
+				
+				-- ANTI-GAP CHECK: If still too far, pull it closer
+				local actualDistance = (segment.Position - prevPos).Magnitude
+				if actualDistance > segmentDiameter * 0.9 then
+					-- Force it closer
+					newPos = prevPos - (prevPos - segment.Position).Unit * (segmentDiameter * 0.7)
+					segment.CFrame = CFramenew(newPos, prevPos)
 				end
 			else
-				segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+				-- Fallback to history if previous segment missing
+				local distanceBehind = i * spacing
+				local historySteps = mathFloor(distanceBehind * 2 / 3.2)
+				historySteps = mathMin(historySteps, self.historyCount - 1)
+				
+				local historyData = self:getFromHistory(historySteps)
+				if historyData then
+					segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+				end
 			end
-			
-			-- Update segment size
-			segment.Size = currentSize
-			
-			-- Update glow
-			local glow = segment:FindFirstChild("glow")
-			if glow then
-				glow.Range = 5 * growthFactor
-			end
+		end
+		
+		-- Update segment size
+		segment.Size = currentSize
+		
+		-- Update glow
+		local glow = segment:FindFirstChild("glow")
+		if glow then
+			glow.Range = 5 * growthFactor
 		end
 	end
 end
