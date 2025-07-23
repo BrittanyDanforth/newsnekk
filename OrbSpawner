@@ -656,6 +656,17 @@ attachOrbTouched = function(orb)
 
 		local player = getPlayerFromTouchedPart(hit)
 		if player then
+			-- Prevent eating your own wall collision orbs
+			local spawnedByUserId = orb:GetAttribute("SpawnedByUserId")
+			local spawnTime = orb:GetAttribute("SpawnTime")
+			
+			if spawnedByUserId and spawnedByUserId == player.UserId then
+				-- Can only eat your own orbs after 5 seconds
+				if spawnTime and (tick() - spawnTime) < 5 then
+					return -- Don't collect
+				end
+			end
+			
 			atomicCollectOrb(orb, "player", player)
 			return
 		end
@@ -735,6 +746,17 @@ task.spawn(function()
 								local finalRange = baseRange * totalMagnetPower
 								
 								if dist < finalRange then
+									-- Prevent eating your own wall collision orbs
+									local spawnedByUserId = orb:GetAttribute("SpawnedByUserId")
+									local spawnTime = orb:GetAttribute("SpawnTime")
+									
+									if spawnedByUserId and spawnedByUserId == p.UserId then
+										-- Can only eat your own orbs after 5 seconds
+										if spawnTime and (tick() - spawnTime) < 5 then
+											continue -- Skip this orb
+										end
+									end
+									
 									-- Collect the orb
 									atomicCollectOrb(orb, "player", p)
 								elseif totalMagnetPower > 1 and dist < searchRange then

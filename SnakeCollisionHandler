@@ -231,8 +231,13 @@ local function handleWallCollision(entity, isPlayer)
 				math.clamp(orbPos.Z, -mapBoundary, mapBoundary)
 			)
 
-			-- Spawn orb with scaled value
-			OrbUtils.spawnOrbAt(orbPos, orbValue)
+			-- Spawn orb with scaled value and mark it as from this player
+			local orb = OrbUtils.spawnOrbAt(orbPos, orbValue)
+			if orb then
+				-- Mark this orb as spawned by this player to prevent self-eating
+				orb:SetAttribute("SpawnedByUserId", userId)
+				orb:SetAttribute("SpawnTime", tick())
+			end
 		end
 
 		-- Remove segments (lose length) for players - scales with size
