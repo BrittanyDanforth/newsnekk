@@ -3,7 +3,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
 local RunService        = game:GetService("RunService")
-
 local AISnake = require(ReplicatedStorage:WaitForChild("AISnake"))
 
 -- Function to clean up any orphaned snake parts
@@ -19,7 +18,6 @@ local function cleanupOrphanedParts()
 					break
 				end
 			end
-			
 			if isOrphaned then
 				print("Cleaning up orphaned AI snake model")
 				model:Destroy()
@@ -47,7 +45,7 @@ local function getRandomSpawnPosition()
 	-- Add some random offset
 	x = x + math.random(-20, 20)
 	z = z + math.random(-20, 20)
-	
+
 	-- ENSURE spawn is within safe bounds (map is 800x800, bounds are at ±370)
 	local safeLimit = 300  -- Well within the 370 boundary limit
 	x = math.clamp(x, -safeLimit, safeLimit)
@@ -56,14 +54,72 @@ local function getRandomSpawnPosition()
 	return Vector3.new(x, SPAWN_HEIGHT, z)
 end
 
+-- Function to properly initialize snake position without flickering
+local function initializeSnakePosition(snake, pos)
+	if not snake then return end
+	
+	-- Wait a frame to ensure all parts are created
+	task.wait()
+	
+	-- Force all snake parts to the spawn position
+	if snake.RootPart then
+		snake.RootPart.CFrame = CFrame.new(pos)
+		snake.RootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		snake.RootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+	end
+	
+	-- Force all segments to spawn position
+	if snake.Segments then
+		for _, segment in ipairs(snake.Segments) do
+			if segment and segment.Parent then
+				segment.CFrame = CFrame.new(pos)
+				segment.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+				-- Make segments invisible for first frame to prevent visual glitch
+				segment.Transparency = 1
+				task.defer(function()
+					task.wait(0.1)
+					segment.Transparency = 0
+				end)
+			end
+		end
+	end
+	
+	-- Force head parts to position
+	if snake.HeadParts then
+		if snake.HeadParts.head then
+			snake.HeadParts.head.CFrame = CFrame.new(pos)
+			snake.HeadParts.head.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		end
+		-- Position eyes and other head parts
+		for name, part in pairs(snake.HeadParts) do
+			if part and part:IsA("BasePart") and part.Parent then
+				part.CFrame = CFrame.new(pos)
+				part.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+			end
+		end
+	end
+	
+	-- Reset snake direction to prevent weird initial movement
+	if snake.Direction then
+		snake.Direction = Vector3.new(0, 0, 1)
+		snake.TargetYaw = 0
+		snake.CurrentYaw = 0
+	end
+end
+
 -- Clean up any orphaned parts before starting
 cleanupOrphanedParts()
 
--- Initial spawn
+-- Initial spawn with proper initialization
 for i = 1, NUM_SNAKES do
 	local pos = getRandomSpawnPosition()
-	aiSnakes[i] = AISnake.new(pos)
-	task.wait(0.1) -- Small delay between spawns
+	local snake = AISnake.new(pos)
+	aiSnakes[i] = snake
+	
+	-- Properly initialize position to prevent dragging
+	initializeSnakePosition(snake, pos)
+	
+	task.wait(0.2) -- Slightly longer delay between spawns for stability
 end
 
 -- Periodic cleanup of orphaned parts
@@ -78,9 +134,10 @@ end)
 local respawnCheckCounter = 0
 RunService.Stepped:Connect(function()
 	respawnCheckCounter = respawnCheckCounter + 1
+
 	-- Only check every 30 frames to reduce lag
 	if respawnCheckCounter % 30 ~= 0 then return end
-	
+
 	for i = 1, NUM_SNAKES do
 		local snake = aiSnakes[i]
 		if not snake or not snake.RootPart or not snake.RootPart.Parent then
@@ -105,9 +162,12 @@ RunService.Stepped:Connect(function()
 			local newSnake = AISnake.new(pos)
 			if newSnake then
 				aiSnakes[i] = newSnake
+				
+				-- Properly initialize position to prevent dragging
+				initializeSnakePosition(newSnake, pos)
 			end
 			
-			task.wait(0.1) -- Small delay to prevent spawn spam
+			task.wait(0.2) -- Slightly longer delay to prevent spawn spam
 		end
 	end
 end)
