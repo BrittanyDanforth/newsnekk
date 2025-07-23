@@ -437,6 +437,12 @@ local function initializeForCharacter(character)
 			State.debugMode = not State.debugMode 
 			print("🔍 Debug Mode:", State.debugMode and "ON" or "OFF")
 		end,
+		[Enum.KeyCode.R] = function()
+			-- Emergency direction reset
+			State.currentDirection = Vector3.new(0, 0, -1)
+			State.targetDirection = Vector3.new(0, 0, -1)
+			print("🔄 Direction reset to forward!")
+		end,
 		[Enum.KeyCode.F8] = function()
 			-- Network-optimized test (fewer segments)
 			print("🧪 Testing segment positioning...")
@@ -737,6 +743,22 @@ local function initializeForCharacter(character)
 			end
 			
 			State.currentDirection = normalizedDir
+		else
+			-- Direction is invalid, reset to safe default
+			State.currentDirection = Vector3.new(0, 0, -1)
+			State.targetDirection = Vector3.new(0, 0, -1)
+			if State.debugMode then
+				warn("⚠️ Direction was invalid, resetting to default forward")
+			end
+		end
+		
+		-- Additional safety: Check if current direction is valid
+		if State.currentDirection.Magnitude < 0.9 or State.currentDirection.Magnitude > 1.1 then
+			State.currentDirection = Vector3.new(0, 0, -1)
+			State.targetDirection = Vector3.new(0, 0, -1)
+			if State.debugMode then
+				warn("⚠️ Direction magnitude invalid:", State.currentDirection.Magnitude, "- resetting")
+			end
 		end
 
 		-- BUTTERY smooth speed changes
@@ -750,6 +772,40 @@ local function initializeForCharacter(character)
 		local moveDistance = actualSpeed * dt
 		local newPosition = rootPart.Position + State.currentDirection * moveDistance
 
+		-- WALL COLLISION CHECK to prevent head corruption
+		local raycast = workspace:Raycast(rootPart.Position, State.currentDirection * (moveDistance + 5), RaycastParams.new())
+		if raycast and raycast.Instance then
+			-- Check if we hit a wall
+			local hitPart = raycast.Instance
+			if hitPart.Name:match("Wall") or hitPart.Name:match("Boundary") or (hitPart.CanCollide and hitPart.Parent ~= character) then
+				-- We're about to hit a wall - stop movement and preserve direction
+				newPosition = rootPart.Position -- Don't move
+				
+				-- Try to slide along the wall instead of stopping completely
+				local wallNormal = raycast.Normal
+				local slideDirection = State.currentDirection - (State.currentDirection:Dot(wallNormal) * wallNormal)
+				
+				if slideDirection.Magnitude > 0.1 then
+					slideDirection = slideDirection.Unit
+					-- Try to move along the wall
+					local slidePosition = rootPart.Position + slideDirection * moveDistance * 0.5
+					
+					-- Check if slide position is valid
+					local slideRaycast = workspace:Raycast(rootPart.Position, slideDirection * (moveDistance + 2), RaycastParams.new())
+					if not slideRaycast or not slideRaycast.Instance then
+						newPosition = slidePosition
+						-- Gradually adjust direction to slide direction
+						State.targetDirection = slideDirection
+					end
+				end
+				
+				-- Debug
+				if State.debugMode then
+					print("⚠️ Wall detected! Sliding along wall")
+				end
+			end
+		end
+
 		-- Update position and rotation
 		-- Debug check for backwards movement
 		if State.debugMode and updateCounter % 30 == 0 then
@@ -757,7 +813,14 @@ local function initializeForCharacter(character)
 			print("RootPart LookVector:", rootPart.CFrame.LookVector)
 		end
 		
-		rootPart.CFrame = CFrame.lookAt(newPosition, newPosition + State.currentDirection)
+		-- CRITICAL FIX: Ensure CFrame doesn't get corrupted by wall collisions
+		local lookAtTarget = newPosition + State.currentDirection
+		-- Validate look target isn't too close (prevents CFrame errors)
+		if (lookAtTarget - newPosition).Magnitude < 0.01 then
+			lookAtTarget = newPosition + Vector3.new(0, 0, -1) -- Default forward
+		end
+		
+		rootPart.CFrame = CFrame.lookAt(newPosition, lookAtTarget)
 
 		-- Record path point (throttled)
 		if updateCounter % networkUpdateInterval == 0 then
