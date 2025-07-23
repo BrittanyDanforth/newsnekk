@@ -35,11 +35,15 @@ end
 
 local isMobile = isMobileDevice()
 
--- Camera settings - like slither.io
+-- Camera settings - UPDATED FOR MASSIVE SNAKES
 local BASE_HEIGHT = isMobile and 45 or 40  -- Base height - more zoomed for mobile
-local MAX_HEIGHT = isMobile and 100 or 120  -- Maximum zoom out - less zoom out on mobile
+local MAX_HEIGHT = isMobile and 800 or 1000  -- INCREASED: Maximum zoom out for 50k+ snakes
 local FOV = 70  -- Back to 70 for better view
 local SMOOTH_FACTOR = 0.15  -- Camera smoothing
+
+-- Scaling parameters for better zoom progression
+local SCALE_FACTOR = 0.015  -- How much height increases per length unit
+local SCALE_POWER = 0.85  -- Power curve for smoother scaling (less than 1 for diminishing returns)
 
 -- Current camera values for smooth interpolation
 local currentHeight = BASE_HEIGHT
@@ -77,9 +81,19 @@ RunService.RenderStepped:Connect(function(dt)
 	-- Get snake position
 	local snakePos = rootPart.Position
 
-	-- Dynamic zoom based on snake length (like slither.io)
+	-- IMPROVED Dynamic zoom based on snake length
 	local snakeLength = getSnakeLength()
-	targetHeight = math.min(BASE_HEIGHT + (snakeLength / 10), MAX_HEIGHT)
+	
+	-- Better scaling formula that works well for both small and massive snakes
+	-- Uses power curve for smoother progression
+	local scaledLength = math.pow(snakeLength, SCALE_POWER)
+	targetHeight = math.min(BASE_HEIGHT + (scaledLength * SCALE_FACTOR), MAX_HEIGHT)
+	
+	-- Additional scaling for extremely long snakes (>10k)
+	if snakeLength > 10000 then
+		local extraScale = (snakeLength - 10000) * 0.008
+		targetHeight = math.min(targetHeight + extraScale, MAX_HEIGHT)
+	end
 
 	-- Smooth camera height transition
 	currentHeight = currentHeight + (targetHeight - currentHeight) * SMOOTH_FACTOR
