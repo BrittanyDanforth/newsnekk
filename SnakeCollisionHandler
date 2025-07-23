@@ -54,7 +54,7 @@ local spawnProtectedAI = {} -- Track AI spawn protection
 
 -- === WALL COLLISION SYSTEM ===
 local WALL_ORB_DROP_AMOUNT = 3 -- Number of orbs to drop when hitting wall
-local WALL_ORB_DROP_COOLDOWN = 1.0 -- Cooldown between wall orb drops
+local WALL_ORB_DROP_COOLDOWN = 2.0 -- Increased cooldown to prevent exploit
 local WALL_DAMAGE_MULTIPLIER = 0.95 -- Lose 5% of length per wall hit
 local WALL_PUSH_TIME = 3.0 -- Time before pushing player away from wall
 local WALL_PUSH_FORCE = 50 -- Force to push player away (gentle)
@@ -242,19 +242,19 @@ local function handleWallCollision(entity, isPlayer)
 
 		-- Remove segments (lose length) for players - scales with size
 		if isPlayer and snakeData.shrink and currentLength > 10 then
-			-- Scale segments lost based on size (bigger snakes lose more)
-			local baseLoss = WALL_ORB_DROP_AMOUNT
+			-- INCREASED PENALTIES - Always lose more than orbs dropped
+			local baseLoss = WALL_ORB_DROP_AMOUNT * 3  -- 3x the orbs dropped
 			if currentLength > 100 then
-				baseLoss = 5
+				baseLoss = 15  -- Was 5
 			end
 			if currentLength > 300 then
-				baseLoss = 8
+				baseLoss = 25  -- Was 8
 			end
 			if currentLength > 500 then
-				baseLoss = 12
+				baseLoss = 40  -- Was 12
 			end
 			if currentLength > 1000 then
-				baseLoss = 20
+				baseLoss = 60  -- Was 20
 			end
 
 			-- Only shrink if we have enough segments
