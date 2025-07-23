@@ -24,7 +24,15 @@ local function setGraphicsMode(mode)
 	end
 end
 -- Enhanced respawn system with UI persistence
+local currentMenuGui = nil -- Track current menu
+
 local function requestRespawn()
+	-- Hide the menu immediately when respawning
+	if currentMenuGui then
+		currentMenuGui:Destroy()
+		currentMenuGui = nil
+	end
+	
 	-- Ensure RemoteEvent exists
 	local respawnEvent = ReplicatedStorage:FindFirstChild("RespawnSnake")
 	if not respawnEvent then
@@ -627,7 +635,13 @@ local function createMenu(onPlay)
 		openSharePanel()
 	end)
 	-- Parent the menu to the player's PlayerGui
+	-- Destroy any existing menu first
+	if currentMenuGui then
+		currentMenuGui:Destroy()
+	end
+	
 	screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	currentMenuGui = screenGui -- Track this menu
 	-- Block controls and CoreGui until play is pressed
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
 end
@@ -637,6 +651,14 @@ createMenu(function()
 end)
 -- Enhanced death handling with better menu timing
 local function onCharacterAdded(character)
+	-- Hide menu when character spawns (in case it's still showing)
+	if currentMenuGui then
+		currentMenuGui:Destroy()
+		currentMenuGui = nil
+		-- Re-enable CoreGui
+		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
+	end
+	
 	local humanoid = character:FindFirstChild("Humanoid")
 	if humanoid then
 		humanoid.Died:Connect(function()
