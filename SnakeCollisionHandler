@@ -943,8 +943,8 @@ local function queuePlayerDeath(player)
 		print(string.format("[QUEUE] Adding death to queue for player: %s", player.Name))
 	end
 
-	-- Process death immediately instead of queueing
-	processDeathImmediate({
+	-- Add to death queue with double-death prevention
+	table.insert(deathQueue, {
 		type = "player",
 		target = player,
 		timestamp = tick()
@@ -1024,19 +1024,23 @@ local function queueAIDeath(head)
 		print(string.format("[QUEUE] Adding death to queue for AI: %s", tostring(head)))
 	end
 
-	-- Process death immediately instead of queueing
-	processDeathImmediate({
+	-- Add to death queue with double-death prevention
+	table.insert(deathQueue, {
 		type = "ai",
 		target = head,
 		timestamp = tick()
 	})
 end
 
--- Death processing coroutine with PROPER orb spawning
--- IMMEDIATE DEATH PROCESSING - No delays!
-local function processDeathImmediate(death)
-	task.spawn(function()
-		-- Process immediately without queue delays
+-- FAST DEATH PROCESSING with double-death prevention
+local processDeathQueue
+task.spawn(function()
+	while true do
+		task.wait(0.033) -- Process 30 times per second for instant orbs
+		
+		if #deathQueue > 0 and not isProcessingDeaths then
+			isProcessingDeaths = true
+			local death = table.remove(deathQueue, 1)
 
 			if death.type == "player" then
 				local player = death.target
@@ -1434,15 +1438,9 @@ local function processDeathImmediate(death)
 					end
 				end
 			end
-
-	end)
-end
-
--- Clean up old death queue processing since we process immediately now
-task.spawn(function()
-	while true do
-		task.wait(1) -- Just clean up old entries periodically
-		deathQueue = {} -- Clear any old queued deaths
+			
+			isProcessingDeaths = false
+		end
 	end
 end)
 
@@ -1572,14 +1570,27 @@ local function findCollisionInSegments(headPos, segments, collisionDist, useGrid
 end
 
 -- === IMPROVED HEAD-TO-HEAD COLLISION LOGIC ===
-local function determineHeadToHeadWinner(headA, headB, velA, velB)
+local function determineHeadToHeadWinner(headA, headB, velA, velB, lengthA, lengthB)
+	-- Get actual velocities if not provided
+	if not velA or velA.Magnitude < 0.1 then
+		velA = headA.AssemblyLinearVelocity
+	end
+	if not velB or velB.Magnitude < 0.1 then
+		velB = headB.AssemblyLinearVelocity
+	end
+	
 	-- Calculate collision angle
-	local dirAB = (headB.Position - headA.Position).Unit
+	local dirAB = (headB.Position - headA.Position)
+	if dirAB.Magnitude < 0.1 then
+		-- Too close, use random winner
+		return math.random() > 0.5 and "A" or "B"
+	end
+	dirAB = dirAB.Unit
 	local dirBA = -dirAB
 
 	-- Calculate how directly each snake is moving toward the collision point
-	local dotA = velA.Unit:Dot(dirAB)
-	local dotB = velB.Unit:Dot(dirBA)
+	local dotA = velA.Magnitude > 0.1 and velA.Unit:Dot(dirAB) or 0
+	local dotB = velB.Magnitude > 0.1 and velB.Unit:Dot(dirBA) or 0
 
 	-- Calculate speeds
 	local speedA = velA.Magnitude
@@ -1587,28 +1598,36 @@ local function determineHeadToHeadWinner(headA, headB, velA, velB)
 
 	-- Check if both are moving toward each other (true head-on)
 	if dotA > HEAD_TO_HEAD_ANGLE_THRESHOLD and dotB > HEAD_TO_HEAD_ANGLE_THRESHOLD then
-		-- True head-on collision
-		-- Winner is determined by aggression score (speed * directness)
-		local aggressionA = speedA * dotA
-		local aggressionB = speedB * dotB
-
-		-- Add small randomness to break ties
-		aggressionA = aggressionA + math.random() * 0.1
-		aggressionB = aggressionB + math.random() * 0.1
-
-		if DEBUG_COLLISIONS then
-			print(string.format("[HEAD-TO-HEAD] Aggression - A: %.2f, B: %.2f", aggressionA, aggressionB))
-		end
-
-		return aggressionA > aggressionB and "B" or "A"
-	else
-		-- One hit the other from the side
-		if dotA > dotB then
-			-- A hit B from the side more directly
-			return "B"
+		-- TRUE HEAD-ON COLLISION
+		-- In a true head-on, bigger snake wins (like real slither.io)
+		lengthA = lengthA or 100
+		lengthB = lengthB or 100
+		
+		if math.abs(lengthA - lengthB) > 20 then
+			-- Significant size difference - bigger wins
+			return lengthA > lengthB and "B" or "A"
 		else
-			-- B hit A from the side more directly
-			return "A"
+			-- Similar size - faster/more aggressive wins
+			local aggressionA = speedA * dotA
+			local aggressionB = speedB * dotB
+			
+			-- Add small randomness only for very close matches
+			if math.abs(aggressionA - aggressionB) < 0.5 then
+				aggressionA = aggressionA + math.random() * 0.2
+				aggressionB = aggressionB + math.random() * 0.2
+			end
+			
+			return aggressionA > aggressionB and "B" or "A"
+		end
+	else
+		-- SIDE COLLISION - whoever hit more from the side wins
+		-- Higher dot product = more direct hit
+		if math.abs(dotA - dotB) < 0.1 then
+			-- Very similar angles - use speed as tiebreaker
+			return speedA > speedB and "B" or "A"
+		else
+			-- Clear side hit
+			return dotA > dotB and "B" or "A"
 		end
 	end
 end
@@ -2187,18 +2206,24 @@ RunService.Stepped:Connect(function()
 
 				-- Process deaths
 				if playerADies and playerBDies then
-					-- Both hit bodies - determine winner based on who hit first/harder
-					local winner = determineHeadToHeadWinner(headA, headB, velA, velB)
-					if winner == "A" then
-						if DEBUG_COLLISIONS then
-							print(string.format("[DEATH] %s dies (mutual collision, lost)", playerB.Name))
+					-- Both hit bodies - only process if not recently collided
+					if not isRecentCollision(playerA, playerB) then
+						-- Get snake lengths
+						local lengthA = charA:FindFirstChild("Length") and charA.Length.Value or 100
+						local lengthB = charB:FindFirstChild("Length") and charB.Length.Value or 100
+						
+						local winner = determineHeadToHeadWinner(headA, headB, velA, velB, lengthA, lengthB)
+						if winner == "A" then
+							if DEBUG_COLLISIONS then
+								print(string.format("[DEATH] %s dies (mutual collision, lost)", playerB.Name))
+							end
+							queuePlayerDeath(playerB)
+						else
+							if DEBUG_COLLISIONS then
+								print(string.format("[DEATH] %s dies (mutual collision, lost)", playerA.Name))
+							end
+							queuePlayerDeath(playerA)
 						end
-						queuePlayerDeath(playerB)
-					else
-						if DEBUG_COLLISIONS then
-							print(string.format("[DEATH] %s dies (mutual collision, lost)", playerA.Name))
-						end
-						queuePlayerDeath(playerA)
 					end
 				elseif playerADies then
 					-- Only A hit B's body
@@ -2213,18 +2238,24 @@ RunService.Stepped:Connect(function()
 					end
 					queuePlayerDeath(playerB)
 				else
-					-- Pure head-to-head collision
-					local loser = determineHeadToHeadWinner(headA, headB, velA, velB)
-					if loser == "A" then
-						if DEBUG_COLLISIONS then
-							print(string.format("[DEATH] %s dies (head-to-head collision)", playerA.Name))
+					-- Pure head-to-head collision - ONLY ONE DIES!
+					if not isRecentCollision(playerA, playerB) then
+						-- Get snake lengths
+						local lengthA = charA:FindFirstChild("Length") and charA.Length.Value or 100
+						local lengthB = charB:FindFirstChild("Length") and charB.Length.Value or 100
+						
+						local loser = determineHeadToHeadWinner(headA, headB, velA, velB, lengthA, lengthB)
+						if loser == "A" then
+							if DEBUG_COLLISIONS then
+								print(string.format("[DEATH] %s dies (head-to-head collision, length %d vs %d)", playerA.Name, lengthA, lengthB))
+							end
+							queuePlayerDeath(playerA)
+						else
+							if DEBUG_COLLISIONS then
+								print(string.format("[DEATH] %s dies (head-to-head collision, length %d vs %d)", playerB.Name, lengthB, lengthA))
+							end
+							queuePlayerDeath(playerB)
 						end
-						queuePlayerDeath(playerA)
-					else
-						if DEBUG_COLLISIONS then
-							print(string.format("[DEATH] %s dies (head-to-head collision)", playerB.Name))
-						end
-						queuePlayerDeath(playerB)
 					end
 				end
 				break
