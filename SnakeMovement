@@ -315,6 +315,8 @@ local function initializeForCharacter(character)
 		lastDebugUpdate = 0,
 		speedMultiplier = player:GetAttribute("SpeedMultiplier") or 1, -- Gamepass multiplier
 		tempSpeedMultiplier = 1, -- Temporary boost multiplier
+		wallStuckTime = 0, -- Track time stuck at wall
+		lastPosition = rootPart.Position, -- Track if we're not moving
 		stats = {
 			fps = 0,
 			distance = 0,
@@ -704,6 +706,11 @@ local function initializeForCharacter(character)
 
 		-- BUTTERY smooth direction changes (same for mobile and PC)
 		local turnRate = Config.TurnSpeed * dt * 0.9 -- Slightly slower for more realistic movement
+		
+		-- Reduce turn rate when near walls to prevent shaking
+		if State.wallStuckTime > 0 then
+			turnRate = turnRate * 0.3  -- Much slower turning when stuck
+		end
 
 		-- PROPER DIRECTION INTERPOLATION - Never let it become invalid
 		if State.targetDirection.Magnitude > 0.001 and State.currentDirection.Magnitude > 0.001 then
@@ -727,51 +734,83 @@ local function initializeForCharacter(character)
 		local moveDistance = actualSpeed * dt
 		local newPosition = rootPart.Position + State.currentDirection * moveDistance
 
-		-- WALL COLLISION CHECK to prevent head corruption
+		-- WALL COLLISION CHECK - PREVENT PUSHING INTO WALLS
 		local raycastParams = RaycastParams.new()
 		raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
 		raycastParams.FilterDescendantsInstances = {character}
 		
-		local raycast = workspace:Raycast(rootPart.Position, State.currentDirection * (moveDistance + 5), raycastParams)
+		-- Check multiple rays for better collision detection
+		local checkDistance = moveDistance + 8  -- Increased buffer
+		local raycast = workspace:Raycast(rootPart.Position, State.currentDirection * checkDistance, raycastParams)
+		
 		if raycast and raycast.Instance then
-			-- Check if we hit a wall
 			local hitPart = raycast.Instance
 			if hitPart.Name:match("Wall") or hitPart.Name:match("Boundary") or (hitPart.CanCollide and hitPart.Parent ~= character) then
-				-- We're about to hit a wall - stop movement and preserve direction
-				newPosition = rootPart.Position -- Don't move
+				-- Calculate safe distance from wall
+				local distanceToWall = raycast.Distance
+				local safeDistance = 5  -- Keep 5 studs away from wall
 				
-				-- Try to slide along the wall instead of stopping completely
-				local wallNormal = raycast.Normal
-				local slideDirection = State.currentDirection - (State.currentDirection:Dot(wallNormal) * wallNormal)
-				
-				if slideDirection.Magnitude > 0.1 then
-					slideDirection = slideDirection.Unit
-					-- Try to move along the wall
-					local slidePosition = rootPart.Position + slideDirection * moveDistance * 0.5
+				if distanceToWall < safeDistance then
+					-- TOO CLOSE TO WALL - STOP AND TURN AWAY
+					newPosition = rootPart.Position  -- Don't move forward
 					
-					-- Check if slide position is valid
-					local slideRaycast = workspace:Raycast(rootPart.Position, slideDirection * (moveDistance + 2), raycastParams)
-					if not slideRaycast or not slideRaycast.Instance then
-						newPosition = slidePosition
-						-- Gradually adjust direction to slide direction
-						State.targetDirection = slideDirection
+					-- Force turn away from wall
+					local wallNormal = raycast.Normal
+					local awayFromWall = wallNormal * 10  -- Push away strongly
+					
+					-- Calculate a direction that moves away from the wall
+					local escapeDirection = (State.currentDirection + awayFromWall).Unit
+					State.targetDirection = escapeDirection
+					
+					-- If still pushing into wall, do a harder turn
+					if State.currentDirection:Dot(wallNormal) < -0.5 then
+						-- We're facing directly into the wall - do a 90 degree turn
+						local rightVector = State.currentDirection:Cross(Vector3.new(0, 1, 0))
+						State.targetDirection = rightVector.Unit
+						State.currentDirection = State.targetDirection  -- Instant turn when stuck
 					end
-				end
-				
-				-- Debug
-				if State.debugMode then
-					print("⚠️ Wall detected! Sliding along wall")
+					
+					-- Clear any physics interference
+					rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+					rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+				elseif distanceToWall < safeDistance * 2 then
+					-- GETTING CLOSE TO WALL - Start sliding
+					local wallNormal = raycast.Normal
+					local slideDirection = State.currentDirection - (State.currentDirection:Dot(wallNormal) * wallNormal)
+					
+					if slideDirection.Magnitude > 0.1 then
+						slideDirection = slideDirection.Unit
+						State.targetDirection = slideDirection
+						newPosition = rootPart.Position + slideDirection * moveDistance * 0.7
+					end
 				end
 			end
 		end
 
-		-- Update position and rotation
-		-- Debug check for backwards movement
-		if State.debugMode and updateCounter % 30 == 0 then
-			print("Direction:", State.currentDirection, "Speed:", State.smoothSpeed)
-			print("RootPart LookVector:", rootPart.CFrame.LookVector)
+		-- STUCK DETECTION AND RECOVERY
+		local movementDelta = (newPosition - State.lastPosition).Magnitude
+		if movementDelta < 0.1 and State.smoothSpeed > 5 then
+			-- We're trying to move but stuck
+			State.wallStuckTime = State.wallStuckTime + dt
+			
+			if State.wallStuckTime > 0.5 then
+				-- Been stuck for half a second - force escape
+				local escapeAngle = math.random() * math.pi * 2
+				State.currentDirection = Vector3.new(math.sin(escapeAngle), 0, math.cos(escapeAngle)).Unit
+				State.targetDirection = State.currentDirection
+				newPosition = rootPart.Position + State.currentDirection * 5
+				State.wallStuckTime = 0
+				
+				if State.debugMode then
+					warn("🔄 Stuck detected! Auto-escaping...")
+				end
+			end
+		else
+			State.wallStuckTime = 0
 		end
+		State.lastPosition = newPosition
 		
+		-- Update position and rotation
 		-- CRITICAL FIX: Set position and rotation properly
 		-- Clear any physics velocity that might interfere
 		rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
