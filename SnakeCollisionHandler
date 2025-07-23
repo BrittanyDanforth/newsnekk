@@ -29,17 +29,41 @@ local YIELD_INTERVAL = 100
 
 -- === IMPROVED COLLISION SETTINGS ===
 local COLLISION_FRAME_SKIP = 4 -- Balanced for responsiveness and performance
-local BODY_COLLISION_DISTANCE = 2.2 -- Tightened from 2.5 for accuracy
-local HEAD_COLLISION_DISTANCE = 2.8 -- Tightened from 3.0 for accuracy
+local BODY_COLLISION_DISTANCE = 2.8 -- Increased for better detection
+local HEAD_COLLISION_DISTANCE = 3.5 -- Increased for better head collision detection
 local MIN_COLLISION_DISTANCE = 1.8 -- Minimum distance for any collision
-local COLLISION_BUFFER = 0.2 -- Reduced from 0.3 for precision
-local NETWORK_COMPENSATION = 0.15 -- Reduced from 0.2
+local COLLISION_BUFFER = 0.3 -- Buffer for network lag
+local NETWORK_COMPENSATION = 0.25 -- Increased for better network handling
 local SPAWN_PROTECTION_TIME = 3 -- Reduced from 5 seconds
 local MIN_AI_SPAWN_DISTANCE = 50 -- Minimum distance between AI spawn points
 
+-- === SIZE-BASED COLLISION MODIFIERS ===
+-- Small snakes get bigger hitboxes, huge snakes get normal hitboxes
+local function getCollisionMultiplier(attackerLength, targetLength)
+	local multiplier = 1.0
+	
+	-- Tiny attackers get bonus collision range
+	if attackerLength < 50 then
+		multiplier = 1.4 -- 40% bigger hitbox for tiny snakes
+		if targetLength > 1000 then
+			multiplier = 1.6 -- 60% bonus against huge snakes
+		end
+	elseif attackerLength < 200 then
+		multiplier = 1.2 -- 20% bigger hitbox for small snakes
+		if targetLength > 2000 then
+			multiplier = 1.3 -- 30% bonus against very large snakes
+		end
+	elseif attackerLength < 500 then
+		multiplier = 1.1 -- 10% bigger hitbox for medium snakes
+	end
+	
+	return multiplier
+end
+
 -- === IMMEDIATE ORB SPAWNING ===
 local ORB_SPAWN_HEIGHT = 5 -- Standard orb height
-local GUARANTEED_ORB_COUNT = 3 -- Minimum orbs to spawn
+local GUARANTEED_ORB_COUNT = 5 -- Minimum orbs to spawn
+local ORB_SPAWN_DELAY = 0.02 -- Delay between orb spawns for visual effect
 
 -- === HEAD-TO-HEAD SETTINGS ===
 local HEAD_TO_HEAD_ANGLE_THRESHOLD = 0.5 -- Dot product threshold for frontal collision
@@ -1075,8 +1099,7 @@ task.spawn(function()
 							local totalLength = #segments
 
 							-- Calculate orb distribution
-							local orbsPerSegment = 1 / 2.5 -- One orb every 2.5 segments
-							local totalOrbs = math.clamp(math.floor(totalLength * orbsPerSegment), 3, 30)
+							local totalOrbs = math.clamp(math.floor(totalLength * 0.4), 5, 40) -- More orbs, better distribution
 
 							-- Dynamic value calculation based on snake length
 							local baseValue = 1
@@ -1100,30 +1123,35 @@ task.spawn(function()
 
 							local valuePerOrb = baseValue
 
-							-- Spawn orbs along the snake path with error handling
+							-- SPAWN ORBS FOLLOWING SNAKE BODY SHAPE
 							local spawnedOrbs = 0
-							for i = 1, totalLength do
-								if math.random() < orbsPerSegment then
+							local segmentStep = math.max(1, math.floor(totalLength / totalOrbs))
+							
+							-- Spawn orbs evenly distributed along the snake body
+							task.spawn(function()
+								for i = 1, totalLength, segmentStep do
 									local seg = segments[i]
 									if seg and seg.Parent and seg.Position then
 										local pos = seg.Position
 
-										-- Small random offset to prevent perfect stacking
+										-- Smaller random offset to maintain body shape
 										local offset = Vector3.new(
-											(math.random() - 0.5) * 2,
+											(math.random() - 0.5) * 1.5,
 											0,
-											(math.random() - 0.5) * 2
+											(math.random() - 0.5) * 1.5
 										)
 
-										-- Spawn at proper height so AI can collect
+										-- Spawn at proper height
 										local spawnPos = Vector3.new(
 											pos.X + offset.X,
-											ORB_SPAWN_HEIGHT,  -- Use standard orb height!
+											ORB_SPAWN_HEIGHT,
 											pos.Z + offset.Z
 										)
 
+										-- Add slight delay for visual effect (orbs appear along body)
+										task.wait(ORB_SPAWN_DELAY)
+
 										local success = pcall(function()
-											-- Just spawn regular orbs that AI can eat
 											spawnOrbDirect(spawnPos, valuePerOrb)
 											spawnedOrbs = spawnedOrbs + 1
 										end)
@@ -1131,31 +1159,38 @@ task.spawn(function()
 										if not success then
 											warn("Failed to spawn orb for player death")
 										end
-									end
-								end
-							end
-
-							-- Ensure at least some orbs spawn
-							if spawnedOrbs < GUARANTEED_ORB_COUNT then
-								-- Spawn remaining orbs at death location
-								local deathPos = humanoid.RootPart and humanoid.RootPart.Position or (segments[1] and segments[1].Position)
-								if deathPos then
-									for i = spawnedOrbs + 1, GUARANTEED_ORB_COUNT do
-										local angle = (i / GUARANTEED_ORB_COUNT) * math.pi * 2
-										local radius = 5 + (i * 2)
-										local spawnPos = Vector3.new(
-											deathPos.X + math.cos(angle) * radius,
-											ORB_SPAWN_HEIGHT,
-											deathPos.Z + math.sin(angle) * radius
-										)
-
-										local success = spawnOrbDirect(spawnPos, valuePerOrb)
-										if success then
-											spawnedOrbs = spawnedOrbs + 1
+										
+										if spawnedOrbs >= totalOrbs then
+											break
 										end
 									end
 								end
-							end
+								
+								-- Ensure minimum orbs spawn if needed
+								if spawnedOrbs < GUARANTEED_ORB_COUNT then
+									local deathPos = humanoid.RootPart and humanoid.RootPart.Position or (segments[1] and segments[1].Position)
+									if deathPos then
+										for i = spawnedOrbs + 1, GUARANTEED_ORB_COUNT do
+											-- Spawn in a tight cluster at death position
+											local offset = Vector3.new(
+												(math.random() - 0.5) * 3,
+												0,
+												(math.random() - 0.5) * 3
+											)
+											local spawnPos = Vector3.new(
+												deathPos.X + offset.X,
+												ORB_SPAWN_HEIGHT,
+												deathPos.Z + offset.Z
+											)
+
+											local success = spawnOrbDirect(spawnPos, valuePerOrb)
+											if success then
+												spawnedOrbs = spawnedOrbs + 1
+											end
+										end
+									end
+								end
+							end)
 
 							-- Log orb spawning for debugging
 							if DEBUG_COLLISIONS then
@@ -1531,8 +1566,10 @@ local function debugCollision(headPos, segmentPos, collisionType, playerName)
 		playerName or "Unknown", collisionType, dist, heightDiff))
 end
 
-local function findCollisionInChunks(headPos, chunks, collisionDist, snakeLength)
-	local effectiveDist = collisionDist + NETWORK_COMPENSATION
+local function findCollisionInChunks(headPos, chunks, collisionDist, attackerLength, targetLength)
+	-- Apply size-based collision modifier
+	local multiplier = getCollisionMultiplier(attackerLength or 10, targetLength or 10)
+	local effectiveDist = (collisionDist * multiplier) + NETWORK_COMPENSATION
 
 	for _, chunk in ipairs(chunks) do
 		-- Optimized broad phase with pre-calculated values
@@ -1540,7 +1577,7 @@ local function findCollisionInChunks(headPos, chunks, collisionDist, snakeLength
 			-- Narrow phase
 			for _, seg in ipairs(chunk.segments) do
 				local segPos = seg.Position or seg.position
-				if segPos and isValidCollision(headPos, segPos, effectiveDist, snakeLength) then
+				if segPos and isValidCollision(headPos, segPos, effectiveDist, attackerLength) then
 					return true
 				end
 			end
@@ -1549,8 +1586,10 @@ local function findCollisionInChunks(headPos, chunks, collisionDist, snakeLength
 	return false
 end
 
-local function findCollisionInSegments(headPos, segments, collisionDist, useGrid, snakeLength)
-	local effectiveDist = collisionDist + NETWORK_COMPENSATION
+local function findCollisionInSegments(headPos, segments, collisionDist, useGrid, attackerLength, targetLength)
+	-- Apply size-based collision modifier
+	local multiplier = getCollisionMultiplier(attackerLength or 10, targetLength or 10)
+	local effectiveDist = (collisionDist * multiplier) + NETWORK_COMPENSATION
 
 	if useGrid and CollisionCache.spatialGrid.objectCount == 0 then
 		-- Build spatial grid if empty
@@ -1566,7 +1605,7 @@ local function findCollisionInSegments(headPos, segments, collisionDist, useGrid
 		local nearby = CollisionCache.spatialGrid:query(headPos, effectiveDist * 1.5)
 		for _, seg in ipairs(nearby) do
 			local segPos = seg.Position or seg.position
-			if segPos and isValidCollision(headPos, segPos, effectiveDist, snakeLength) then
+			if segPos and isValidCollision(headPos, segPos, effectiveDist, attackerLength) then
 				return true
 			end
 		end
@@ -1574,7 +1613,7 @@ local function findCollisionInSegments(headPos, segments, collisionDist, useGrid
 		-- Direct iteration for smaller segment counts
 		for _, seg in ipairs(segments) do
 			local segPos = seg.Position or seg.position
-			if segPos and isValidCollision(headPos, segPos, effectiveDist, snakeLength) then
+			if segPos and isValidCollision(headPos, segPos, effectiveDist, attackerLength) then
 				return true
 			end
 		end
@@ -1933,16 +1972,17 @@ RunService.Stepped:Connect(function()
 							local collision = false
 
 							-- Use appropriate collision method with proper distance
-							if segmentData.chunks then
-								collision = findCollisionInChunks(headPos, segmentData.chunks, BODY_COLLISION_DISTANCE, playerSnakeLength)
-							else
-								collision = findCollisionInSegments(
-									headPos, 
-									segmentData.segments, 
-									BODY_COLLISION_DISTANCE,
-									segmentData.length > 200,
-									playerSnakeLength
-								)
+													if segmentData.chunks then
+							collision = findCollisionInChunks(headPos, segmentData.chunks, BODY_COLLISION_DISTANCE, playerSnakeLength, segmentData.length)
+						else
+							collision = findCollisionInSegments(
+								headPos,
+								segmentData.segments,
+								BODY_COLLISION_DISTANCE,
+								segmentData.length > 200,
+								playerSnakeLength,
+								segmentData.length
+							)
 							end
 
 							if collision then
@@ -1997,14 +2037,15 @@ RunService.Stepped:Connect(function()
 
 						-- Use appropriate collision method
 						if segmentData.chunks then
-							collision = findCollisionInChunks(headPosA, segmentData.chunks, BODY_COLLISION_DISTANCE, playerALength)
+							collision = findCollisionInChunks(headPosA, segmentData.chunks, BODY_COLLISION_DISTANCE, playerALength, segmentData.length)
 						else
 							collision = findCollisionInSegments(
 								headPosA,
 								segmentData.segments,
 								BODY_COLLISION_DISTANCE,
 								segmentData.length > 200,
-								playerALength
+								playerALength,
+								segmentData.length
 							)
 						end
 
@@ -2104,14 +2145,15 @@ RunService.Stepped:Connect(function()
 						local collision = false
 
 						if segmentData.chunks then
-							collision = findCollisionInChunks(aiPos, segmentData.chunks, BODY_COLLISION_DISTANCE, aiSnakeLength)
+							collision = findCollisionInChunks(aiPos, segmentData.chunks, BODY_COLLISION_DISTANCE, aiSnakeLength, segmentData.length)
 						else
 							collision = findCollisionInSegments(
 								aiPos,
 								segmentData.segments,
 								BODY_COLLISION_DISTANCE,
 								segmentData.length > 200,
-								aiSnakeLength
+								aiSnakeLength,
+								segmentData.length
 							)
 						end
 
@@ -2489,14 +2531,15 @@ RunService.Stepped:Connect(function()
 						local collision = false
 
 						if segmentData.chunks then
-							collision = findCollisionInChunks(aiHead.Position, segmentData.chunks, BODY_COLLISION_DISTANCE, aiSnakeLength)
+							collision = findCollisionInChunks(aiHead.Position, segmentData.chunks, BODY_COLLISION_DISTANCE, aiSnakeLength, segmentData.length)
 						else
 							collision = findCollisionInSegments(
 								aiHead.Position,
 								segmentData.segments,
 								BODY_COLLISION_DISTANCE,
 								segmentData.length > 200,
-								aiSnakeLength
+								aiSnakeLength,
+								segmentData.length
 							)
 						end
 
