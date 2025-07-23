@@ -447,10 +447,31 @@ function Snake:update(dt)
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	local segmentDiameter = currentSize.X
-	local spacing = segmentDiameter * 0.85  -- Back to original spacing
 	
-	-- More history samples when boosting to fill gaps
-	local historyMultiplier = self.isBoosting and 3 or 1
+	-- DYNAMIC SPACING based on snake size
+	local spacing
+	if self.length < 100 then
+		-- Small snakes need tighter spacing
+		spacing = segmentDiameter * 0.75
+	elseif self.length < 500 then
+		-- Medium snakes
+		spacing = segmentDiameter * 0.80
+	else
+		-- Large snakes can use normal spacing
+		spacing = segmentDiameter * 0.85
+	end
+	
+	-- More history samples when boosting - MORE for small snakes
+	local historyMultiplier = 1
+	if self.isBoosting then
+		if self.length < 100 then
+			historyMultiplier = 5  -- Small snakes need MORE samples
+		elseif self.length < 500 then
+			historyMultiplier = 4
+		else
+			historyMultiplier = 3  -- Large snakes already work great
+		end
+	end
 	
 	for i, segment in pairs(self.segments) do
 		-- Use history for smooth following - ORIGINAL SYSTEM
@@ -469,8 +490,17 @@ function Snake:update(dt)
 				local prevSegment = self.segments[i-1]
 				if prevSegment and prevSegment.Parent then
 					local distance = (segment.Position - prevSegment.Position).Magnitude
+					
+					-- DYNAMIC gap threshold based on size
+					local gapThreshold
+					if self.length < 100 then
+						gapThreshold = segmentDiameter * 1.0  -- Tighter for small snakes
+					else
+						gapThreshold = segmentDiameter * 1.2  -- Normal for large snakes
+					end
+					
 					-- If gap detected, interpolate positions
-					if distance > segmentDiameter * 1.2 then
+					if distance > gapThreshold then
 						-- Add interpolated position
 						local midPos = prevSegment.Position:Lerp(segment.Position, 0.5)
 						local midLook = prevSegment.CFrame.LookVector:Lerp(segment.CFrame.LookVector, 0.5).Unit
