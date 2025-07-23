@@ -37,10 +37,10 @@ local isMobile = isMobileDevice()
 
 -- Camera settings - ENHANCED FOR LONG SNAKES
 local BASE_HEIGHT = isMobile and 45 or 40  -- Base height - more zoomed for mobile
-local MAX_HEIGHT = isMobile and 300 or 400  -- Reduced from 800/1000 - more reasonable zoom
-local MEGA_HEIGHT = 600  -- Reduced from 2000 - max height cap for mega snakes
+local MAX_HEIGHT = isMobile and 120 or 150  -- MUCH more reasonable max zoom
+local MEGA_HEIGHT = 200  -- Absolute max for 50k+ snakes - no more clouds!
 local FOV = 70  -- Base FOV
-local MAX_FOV = 85  -- Reduced from 100 - less fisheye effect
+local MAX_FOV = 80  -- Just a slight FOV increase
 local SMOOTH_FACTOR = 0.15  -- Camera smoothing
 
 -- Current camera values for smooth interpolation
@@ -72,32 +72,32 @@ end
 
 -- Enhanced camera height calculation for very long snakes
 local function calculateCameraHeight(snakeLength)
-	if snakeLength < 500 then
-		-- Normal scaling for small snakes
-		return BASE_HEIGHT + (snakeLength / 15)  -- Slower scaling
-	elseif snakeLength < 5000 then
-		-- Medium scaling for medium snakes
-		return BASE_HEIGHT + 33 + (snakeLength / 40)  -- Much slower
-	elseif snakeLength < 20000 then
-		-- Slower scaling for large snakes
-		return BASE_HEIGHT + 150 + (snakeLength / 100)  -- Reduced
+	if snakeLength < 1000 then
+		-- Very slow scaling for normal snakes
+		return BASE_HEIGHT + (snakeLength / 50)  -- Much slower
+	elseif snakeLength < 10000 then
+		-- Logarithmic scaling for big snakes
+		return BASE_HEIGHT + 20 + math.log(snakeLength / 1000) * 15
+	elseif snakeLength < 30000 then
+		-- Even slower for huge snakes
+		return BASE_HEIGHT + 55 + math.log(snakeLength / 10000) * 20
 	elseif snakeLength < 50000 then
-		-- Even slower scaling for huge snakes
-		return BASE_HEIGHT + 350 + (snakeLength / 200)  -- Much reduced
+		-- Minimal increase for massive snakes
+		return BASE_HEIGHT + 80 + math.log(snakeLength / 30000) * 15
 	else
-		-- For mega snakes (50k+), use logarithmic scaling
-		local extraHeight = math.log(snakeLength / 50000) * 50  -- Reduced from 200
-		return math.min(600 + extraHeight, MEGA_HEIGHT)
+		-- For 50k+ snakes, barely increase
+		local extraHeight = math.log(snakeLength / 50000) * 10
+		return math.min(BASE_HEIGHT + 100 + extraHeight, MEGA_HEIGHT)
 	end
 end
 
 -- Calculate FOV based on snake length
 local function calculateFOV(snakeLength)
-	if snakeLength < 10000 then
+	if snakeLength < 20000 then
 		return FOV
 	else
-		-- Gradually increase FOV for better view at extreme lengths
-		local extraFOV = math.min((snakeLength - 10000) / 2000, 15)  -- Reduced scaling
+		-- Very slight FOV increase only for massive snakes
+		local extraFOV = math.min((snakeLength - 20000) / 5000, 10)
 		return math.min(FOV + extraFOV, MAX_FOV)
 	end
 end
