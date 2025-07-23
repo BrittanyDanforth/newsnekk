@@ -389,6 +389,16 @@ function Snake:setupNetworking()
 end
 
 function Snake:update(dt)
+	-- Safety check: Stop updates if snake is being destroyed
+	if not self.model or not self.model.Parent or not self.rootPart or not self.rootPart.Parent then
+		-- Disconnect update loop if model is destroyed
+		if self.updateConnection then
+			self.updateConnection:Disconnect()
+			self.updateConnection = nil
+		end
+		return
+	end
+	
 	-- Update position history EVERY FRAME
 	local currentPos = self.rootPart.Position
 	local currentLook = self.rootPart.CFrame.LookVector
@@ -466,6 +476,11 @@ function Snake:update(dt)
 	-- Update segments
 	if self.updateCounter % skipFrames == 0 or timeSinceSpawn < 1 then
 		for i, segment in pairs(self.segments) do
+			-- Safety check: Skip if segment is destroyed or model is gone
+			if not segment or not segment.Parent or not self.model or not self.model.Parent then
+				continue
+			end
+			
 			-- Each segment follows at a fixed distance
 			local distanceBehind = i * spacing
 			local historySteps = mathFloor(distanceBehind * historyStepsPerUnit / 3.2)  -- Normalize by original spacing
@@ -474,13 +489,18 @@ function Snake:update(dt)
 			local historyData = self:getFromHistory(historySteps)
 
 			if historyData then
-				segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
-
-				-- Update segment size
-				segment.Size = currentSize
-
-				-- ALWAYS parent the segment to model - never hide it!
-				segment.Parent = self.model
+				-- Wrap in pcall to prevent errors with locked/destroyed parts
+				local success = pcall(function()
+					segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
+					segment.Size = currentSize
+					segment.Parent = self.model
+				end)
+				
+				if not success then
+					-- Segment is likely destroyed, remove from table
+					self.segments[i] = nil
+					continue
+				end
 				
 				-- LOD for glow only (not visibility)
 				if timeSinceSpawn > 3 then
@@ -615,18 +635,27 @@ function Snake:GetLength()
 end
 
 function Snake:destroy()
-	-- Return all segments to pool and remove tags
-	for _, segment in pairs(self.segments) do
-		CollectionService:RemoveTag(segment, "SnakeSegment")
-		returnSegmentToPool(segment)
-	end
-
-	if self.networkConnection then
-		self.networkConnection:Disconnect()
-	end
-
+	-- CRITICAL: Disconnect updates FIRST to prevent accessing destroyed parts
 	if self.updateConnection then
 		self.updateConnection:Disconnect()
+		self.updateConnection = nil
+	end
+	
+	if self.networkConnection then
+		self.networkConnection:Disconnect()
+		self.networkConnection = nil
+	end
+	
+	-- Clear segments table to prevent further access
+	local segmentsCopy = self.segments
+	self.segments = {}
+	
+	-- Return all segments to pool and remove tags
+	for _, segment in pairs(segmentsCopy) do
+		if segment and segment.Parent then
+			CollectionService:RemoveTag(segment, "SnakeSegment")
+			returnSegmentToPool(segment)
+		end
 	end
 
 	if self.model then
