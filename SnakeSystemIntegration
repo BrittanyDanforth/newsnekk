@@ -10,46 +10,56 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 -- Load the optimized system FIRST to create networking folder
--- Try V4 first, then V3, then V2, then V1
+-- Try V5 first (fixes body spawning), then V4, V3, V2, V1
 local OptimizedSnakeSystem
 
--- Try V4 (Performance focused)
-local v4Success, v4Result = pcall(function()
-	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV4", 2))
+-- Try V5 (Fixed body spawning + performance)
+local v5Success, v5Result = pcall(function()
+	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV5", 2))
 end)
 
-if v4Success and v4Result then
-	OptimizedSnakeSystem = v4Result
-	print("✅ Loaded OptimizedSnakeSystemV4 - PERFORMANCE!")
+if v5Success and v5Result then
+	OptimizedSnakeSystem = v5Result
+	print("✅ Loaded OptimizedSnakeSystemV5 - FIXED BODY SPAWNING!")
 else
-	-- Try V3
-	local v3Success, v3Result = pcall(function()
-		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV3", 2))
+	-- Try V4 (Performance focused)
+	local v4Success, v4Result = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV4", 2))
 	end)
-	
-	if v3Success and v3Result then
-		OptimizedSnakeSystem = v3Result
-		print("✅ Loaded OptimizedSnakeSystemV3 - SMOOTH!")
+
+	if v4Success and v4Result then
+		OptimizedSnakeSystem = v4Result
+		print("✅ Loaded OptimizedSnakeSystemV4 - PERFORMANCE!")
 	else
-		-- Try V2
-		local v2Success, v2Result = pcall(function()
-			return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV2", 2))
+		-- Try V3
+		local v3Success, v3Result = pcall(function()
+			return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV3", 2))
 		end)
 		
-		if v2Success and v2Result then
-			OptimizedSnakeSystem = v2Result
-			print("✅ Loaded OptimizedSnakeSystemV2")
+		if v3Success and v3Result then
+			OptimizedSnakeSystem = v3Result
+			print("✅ Loaded OptimizedSnakeSystemV3 - SMOOTH!")
 		else
-			-- Fallback to V1
-			local v1Success, v1Result = pcall(function()
-				return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
+			-- Try V2
+			local v2Success, v2Result = pcall(function()
+				return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV2", 2))
 			end)
 			
-			if v1Success and v1Result then
-				OptimizedSnakeSystem = v1Result
-				print("✅ Loaded OptimizedSnakeSystem V1")
+			if v2Success and v2Result then
+				OptimizedSnakeSystem = v2Result
+				print("✅ Loaded OptimizedSnakeSystemV2")
 			else
-				error("❌ Failed to load any OptimizedSnakeSystem module!")
+				-- Fallback to V1
+				local v1Success, v1Result = pcall(function()
+					return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
+				end)
+				
+				if v1Success and v1Result then
+					OptimizedSnakeSystem = v1Result
+					print("✅ Loaded OptimizedSnakeSystem V1")
+				else
+					error("❌ Failed to load any OptimizedSnakeSystem module!")
+				end
 			end
 		end
 	end
