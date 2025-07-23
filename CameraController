@@ -44,7 +44,6 @@ local SMOOTH_FACTOR = 0.15  -- Camera smoothing
 -- Current camera values for smooth interpolation
 local currentHeight = BASE_HEIGHT
 local targetHeight = BASE_HEIGHT
-local isDead = false -- Stop camera when dead
 
 -- 🔒 LOCK CAMERA COMPLETELY
 camera.CameraType = Enum.CameraType.Scriptable
@@ -70,17 +69,10 @@ end
 -- Main camera update loop - SLITHER.IO STYLE
 RunService.RenderStepped:Connect(function(dt)
 	local character = player.Character
-	if not character or isDead then return end
+	if not character then return end
 
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
 	if not rootPart then return end
-	
-	-- Check if dead
-	local humanoid = character:FindFirstChild("Humanoid")
-	if humanoid and humanoid.Health <= 0 then
-		isDead = true
-		return
-	end
 
 	-- Get snake position
 	local snakePos = rootPart.Position
@@ -135,7 +127,6 @@ end
 
 -- Apply vignette after character loads
 player.CharacterAdded:Connect(function()
-	isDead = false -- Reset death flag on respawn
 	task.wait(0.5)
 	addVignetteEffect()
 end)
