@@ -259,8 +259,12 @@ local inputBeganConnection
 local inputEndedConnection
 local diedConnection
 
+local isDead = false -- Flag to stop processing when dead
+
 local function cleanupSnake()
 	print(" Cleaning up old snake instance...")
+	isDead = true -- Mark as dead to stop all processing
+	
 	if heartbeatConnection then
 		heartbeatConnection:Disconnect()
 		heartbeatConnection = nil
@@ -291,6 +295,7 @@ end
 -- ✨ INITIALIZATION FUNCTION FOR A NEW SNAKE/CHARACTER
 local function initializeForCharacter(character)
 	cleanupSnake()
+	isDead = false -- Reset death flag for new character
 	print(" Initializing new snake for character: " .. character.Name)
 
 	local humanoid = character:WaitForChild("Humanoid")
@@ -564,8 +569,10 @@ local function initializeForCharacter(character)
 
 	-- Use Heartbeat for movement updates (works on both client and server)
 	heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
-		if not rootPart or not rootPart.Parent then
-			cleanupSnake()
+		if isDead or not rootPart or not rootPart.Parent then
+			if not isDead then
+				cleanupSnake()
+			end
 			return
 		end
 

@@ -636,9 +636,7 @@ local function onCharacterAdded(character)
 	local humanoid = character:FindFirstChild("Humanoid")
 	if humanoid then
 		humanoid.Died:Connect(function()
-			-- Wait a moment before showing the menu
-			task.wait(1.5)
-			-- Show the menu again for respawn
+			-- Show menu immediately on death
 			createMenu(function()
 				requestRespawn()
 			end)
