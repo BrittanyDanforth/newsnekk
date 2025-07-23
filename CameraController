@@ -1,12 +1,21 @@
--- CameraController: SLITHER.IO STYLE CAMERA
+-- CameraController: OPTIMIZED FOR MASSIVE SNAKES (50K+ LENGTH)
 -- LOCALSCRIPT INSIDE STARTERPLAYERSCRIPTS
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local workspace = game:GetService("Workspace")
 
 local camera = workspace.CurrentCamera
 local player = Players.LocalPlayer
+
+-- Performance optimizations
+local mathMin = math.min
+local mathMax = math.max
+local mathLog = math.log
+local mathAbs = math.abs
+local Vector3new = Vector3.new
+local CFramelookAt = CFrame.lookAt
 
 -- Strict mobile detection
 local function isMobileDevice()
@@ -35,19 +44,26 @@ end
 
 local isMobile = isMobileDevice()
 
--- Camera settings - ENHANCED FOR LONG SNAKES
-local BASE_HEIGHT = isMobile and 45 or 40  -- Base height - more zoomed for mobile
-local MAX_HEIGHT = isMobile and 120 or 150  -- MUCH more reasonable max zoom
-local MEGA_HEIGHT = 200  -- Absolute max for 50k+ snakes - no more clouds!
+-- Camera settings - OPTIMIZED FOR MASSIVE SNAKES
+local BASE_HEIGHT = isMobile and 45 or 40  -- Base height
+local MAX_HEIGHT = isMobile and 120 or 150  -- Reasonable max zoom
+local MEGA_HEIGHT = 200  -- Absolute max for 50k+ snakes
 local FOV = 70  -- Base FOV
 local MAX_FOV = 80  -- Just a slight FOV increase
 local SMOOTH_FACTOR = 0.15  -- Camera smoothing
+local POSITION_SMOOTH = 0.25  -- Position smoothing for massive snakes
 
 -- Current camera values for smooth interpolation
 local currentHeight = BASE_HEIGHT
 local targetHeight = BASE_HEIGHT
 local currentFOV = FOV
 local targetFOV = FOV
+local currentCameraPos = Vector3new(0, BASE_HEIGHT, 0)
+
+-- Performance tracking
+local frameCount = 0
+local lastPerformanceAdjust = 0
+local performanceMode = false
 
 -- 🔒 LOCK CAMERA COMPLETELY
 camera.CameraType = Enum.CameraType.Scriptable
@@ -58,36 +74,47 @@ UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 player.CameraMinZoomDistance = 128
 player.CameraMaxZoomDistance = 128
 
--- Function to get snake length for dynamic zoom
+-- Cache for performance
+local cachedLength = 0
+local lastLengthCheck = 0
+
+-- Function to get snake length with caching for performance
 local function getSnakeLength()
+	local now = tick()
+	if now - lastLengthCheck < 0.1 then  -- Cache for 100ms
+		return cachedLength
+	end
+	
+	lastLengthCheck = now
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if leaderstats then
 		local length = leaderstats:FindFirstChild("Length")
 		if length then
-			return length.Value
+			cachedLength = length.Value
+			return cachedLength
 		end
 	end
 	return 0
 end
 
--- Enhanced camera height calculation for very long snakes
+-- Optimized camera height calculation for very long snakes
 local function calculateCameraHeight(snakeLength)
 	if snakeLength < 1000 then
 		-- Very slow scaling for normal snakes
-		return BASE_HEIGHT + (snakeLength / 50)  -- Much slower
+		return BASE_HEIGHT + (snakeLength / 50)
 	elseif snakeLength < 10000 then
 		-- Logarithmic scaling for big snakes
-		return BASE_HEIGHT + 20 + math.log(snakeLength / 1000) * 15
+		return BASE_HEIGHT + 20 + mathLog(snakeLength / 1000) * 15
 	elseif snakeLength < 30000 then
 		-- Even slower for huge snakes
-		return BASE_HEIGHT + 55 + math.log(snakeLength / 10000) * 20
+		return BASE_HEIGHT + 55 + mathLog(snakeLength / 10000) * 20
 	elseif snakeLength < 50000 then
 		-- Minimal increase for massive snakes
-		return BASE_HEIGHT + 80 + math.log(snakeLength / 30000) * 15
+		return BASE_HEIGHT + 80 + mathLog(snakeLength / 30000) * 15
 	else
 		-- For 50k+ snakes, barely increase
-		local extraHeight = math.log(snakeLength / 50000) * 10
-		return math.min(BASE_HEIGHT + 100 + extraHeight, MEGA_HEIGHT)
+		local extraHeight = mathLog(snakeLength / 50000) * 10
+		return mathMin(BASE_HEIGHT + 100 + extraHeight, MEGA_HEIGHT)
 	end
 end
 
@@ -97,23 +124,46 @@ local function calculateFOV(snakeLength)
 		return FOV
 	else
 		-- Very slight FOV increase only for massive snakes
-		local extraFOV = math.min((snakeLength - 20000) / 5000, 10)
-		return math.min(FOV + extraFOV, MAX_FOV)
+		local extraFOV = mathMin((snakeLength - 20000) / 5000, 10)
+		return mathMin(FOV + extraFOV, MAX_FOV)
 	end
 end
 
--- Main camera update loop - ENHANCED FOR LONG SNAKES
+-- Get snake head position with fallback
+local function getSnakeHeadPosition(character)
+	-- Try to find the actual snake head first (used by OptimizedSnakeSystem)
+	local snakeFolder = workspace:FindFirstChild("Snakes")
+	if snakeFolder then
+		local playerSnake = snakeFolder:FindFirstChild(player.Name)
+		if playerSnake then
+			local head = playerSnake:FindFirstChild("Head")
+			if head then
+				return head.Position
+			end
+		end
+	end
+	
+	-- Fallback to HumanoidRootPart
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		return rootPart.Position
+	end
+	
+	return nil
+end
+
+-- Main camera update loop - OPTIMIZED FOR MASSIVE SNAKES
 RunService.RenderStepped:Connect(function(dt)
+	frameCount = frameCount + 1
+	
 	local character = player.Character
 	if not character then return end
 
-	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	if not rootPart then return end
+	-- Get snake position with optimized head tracking
+	local snakePos = getSnakeHeadPosition(character)
+	if not snakePos then return end
 
-	-- Get snake position
-	local snakePos = rootPart.Position
-
-	-- Dynamic zoom based on snake length (enhanced for very long snakes)
+	-- Dynamic zoom based on snake length
 	local snakeLength = getSnakeLength()
 	targetHeight = calculateCameraHeight(snakeLength)
 	targetFOV = calculateFOV(snakeLength)
@@ -122,24 +172,38 @@ RunService.RenderStepped:Connect(function(dt)
 	currentHeight = currentHeight + (targetHeight - currentHeight) * SMOOTH_FACTOR
 	currentFOV = currentFOV + (targetFOV - currentFOV) * SMOOTH_FACTOR
 
-	-- Camera position with smooth follow
-	local cameraPos = snakePos + Vector3.new(0, currentHeight, 0)
-
+	-- Calculate target camera position
+	local targetCameraPos = snakePos + Vector3new(0, currentHeight, 0)
+	
 	-- For very long snakes, add a slight backward tilt for better view
 	if snakeLength > 20000 then
-		local tiltFactor = math.min((snakeLength - 20000) / 30000, 1) * 0.2
-		cameraPos = cameraPos + Vector3.new(0, 0, currentHeight * tiltFactor)
+		local tiltFactor = mathMin((snakeLength - 20000) / 30000, 1) * 0.2
+		targetCameraPos = targetCameraPos + Vector3new(0, 0, currentHeight * tiltFactor)
+	end
+	
+	-- Smooth camera position for massive snakes to reduce jitter
+	if snakeLength > 10000 then
+		local smoothFactor = mathMin(POSITION_SMOOTH * (1 + snakeLength / 50000), 0.5)
+		currentCameraPos = currentCameraPos:Lerp(targetCameraPos, smoothFactor)
+	else
+		currentCameraPos = targetCameraPos
 	end
 
 	-- Look at snake with dynamic offset based on length
-	local forwardBias = snakeLength > 10000 and (snakeLength / 10000) or 0.1
-	local lookAtPos = snakePos + Vector3.new(0, 0, forwardBias)
+	local forwardBias = snakeLength > 10000 and mathMin(snakeLength / 10000, 5) or 0.1
+	local lookAtPos = snakePos + Vector3new(0, 0, forwardBias)
 
-	-- Set camera - FIXED ORIENTATION
-	camera.CFrame = CFrame.lookAt(cameraPos, lookAtPos, Vector3.new(0, 0, -1))
+	-- Set camera with optimized CFrame construction
+	camera.CFrame = CFramelookAt(currentCameraPos, lookAtPos, Vector3new(0, 0, -1))
 
 	-- Dynamic FOV
 	camera.FieldOfView = currentFOV
+
+	-- Performance mode for extremely long snakes
+	if snakeLength > 30000 and frameCount % 2 == 0 then
+		-- Skip every other frame for camera updates on massive snakes
+		return
+	end
 
 	-- Ensure camera stays scriptable
 	camera.CameraType = Enum.CameraType.Scriptable
