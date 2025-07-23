@@ -82,6 +82,7 @@ else
 			end
 		end
 	end
+	end
 end
 
 -- Initialize the system (creates networking folder)
