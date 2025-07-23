@@ -237,9 +237,9 @@ local function handleWallCollision(entity, isPlayer)
 
 			-- Spawn orb with scaled value and mark it as from this player
 			local orb = OrbUtils.spawnOrbAt(orbPos, orbValue)
-			if orb then
+			if orb and isPlayer then
 				-- Mark this orb as spawned by this player to prevent self-eating
-				orb:SetAttribute("SpawnedByUserId", userId)
+				orb:SetAttribute("SpawnedByUserId", entity.UserId)
 				orb:SetAttribute("SpawnTime", tick())
 			end
 		end
@@ -2209,8 +2209,10 @@ RunService.Stepped:Connect(function()
 					-- Both hit bodies - only process if not recently collided
 					if not isRecentCollision(playerA, playerB) then
 						-- Get snake lengths
-						local lengthA = charA:FindFirstChild("Length") and charA.Length.Value or 100
-						local lengthB = charB:FindFirstChild("Length") and charB.Length.Value or 100
+						local charA = playerA.Character
+						local charB = playerB.Character
+						local lengthA = charA and charA:FindFirstChild("Length") and charA.Length.Value or 100
+						local lengthB = charB and charB:FindFirstChild("Length") and charB.Length.Value or 100
 						
 						local winner = determineHeadToHeadWinner(headA, headB, velA, velB, lengthA, lengthB)
 						if winner == "A" then
@@ -2241,8 +2243,10 @@ RunService.Stepped:Connect(function()
 					-- Pure head-to-head collision - ONLY ONE DIES!
 					if not isRecentCollision(playerA, playerB) then
 						-- Get snake lengths
-						local lengthA = charA:FindFirstChild("Length") and charA.Length.Value or 100
-						local lengthB = charB:FindFirstChild("Length") and charB.Length.Value or 100
+						local charA = playerA.Character
+						local charB = playerB.Character
+						local lengthA = charA and charA:FindFirstChild("Length") and charA.Length.Value or 100
+						local lengthB = charB and charB:FindFirstChild("Length") and charB.Length.Value or 100
 						
 						local loser = determineHeadToHeadWinner(headA, headB, velA, velB, lengthA, lengthB)
 						if loser == "A" then
