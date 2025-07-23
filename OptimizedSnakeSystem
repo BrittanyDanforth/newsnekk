@@ -300,9 +300,9 @@ function Snake:createInitialSegments()
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	
-	-- Calculate nice equal spacing
+	-- Calculate proper spacing to eliminate gaps
 	local segmentDiameter = currentSize.X
-	local spacing = segmentDiameter * 0.9  -- Slight overlap for no gaps
+	local spacing = segmentDiameter * 0.85  -- Original spacing
 	
 	-- Create all visible segments with no gaps
 	local currentPos = startPos
@@ -383,19 +383,19 @@ function Snake:update(dt)
 		lookVector = currentLook
 	})
 	
-	-- When boosting, add extra history points for smoother following
+	-- When boosting, add MANY more intermediate history points
 	if self.isBoosting then
 		-- Add intermediate points to prevent gaps
 		local lastHistory = self:getFromHistory(1)
 		if lastHistory then
 			local distance = (currentPos - lastHistory.position).Magnitude
-			if distance > 2 then  -- If moved more than 2 studs
-				-- Add intermediate points
-				local steps = mathFloor(distance / 2)
-				for i = 1, mathMin(steps, 3) do  -- Max 3 intermediate points
+			if distance > 1 then  -- Lower threshold
+				-- Add more intermediate points when boosting
+				local steps = mathFloor(distance / 0.5)  -- One point every 0.5 studs
+				for i = 1, mathMin(steps, 10) do  -- Up to 10 intermediate points
 					local alpha = i / (steps + 1)
 					local interpPos = lastHistory.position:Lerp(currentPos, alpha)
-					local interpLook = lastHistory.lookVector:Lerp(currentLook, alpha)
+					local interpLook = lastHistory.lookVector:Lerp(currentLook, alpha).Unit
 					self:addToHistory({
 						position = interpPos,
 						lookVector = interpLook
@@ -442,45 +442,31 @@ function Snake:update(dt)
 		end
 	end
 	
-	-- Update segments with EQUAL SPACING and NO GAPS
+	-- Update segments to follow history - ORIGINAL LOOK
 	local growthFactor = self:calculateGrowthFactor()
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
 	local segmentDiameter = currentSize.X
+	local spacing = segmentDiameter * 0.85  -- Original spacing for natural look
 	
-	-- Nice equal spacing - slight overlap to prevent any gaps
-	local spacing = segmentDiameter * 0.9  -- 10% overlap for safety, but looks natural
+	-- Calculate history steps per unit distance
+	local historyStepsPerUnit = 2  -- Original value
 	
-	-- Store a chain of positions for smooth following
-	local positions = {}
-	positions[1] = self.head.Position
+	-- BOOSTING FIX: When boosting, add more history points per segment
+	if self.isBoosting then
+		historyStepsPerUnit = 4  -- Double the history resolution when boosting
+	end
 	
-	-- Build position chain from head backwards
-	local currentPos = self.head.Position
-	local currentDir = self.head.CFrame.LookVector
-	
-	for i = 1, #self.segments do
-		-- Each position is exactly 'spacing' distance behind the previous
-		currentPos = currentPos - currentDir * spacing
-		positions[i + 1] = currentPos
-		
-		-- Get direction from history for smooth curves
-		local historySteps = mathFloor(i * spacing / 3.2)
+	for i, segment in pairs(self.segments) do
+		-- Each segment follows at a fixed distance - ORIGINAL SYSTEM
+		local distanceBehind = i * spacing
+		local historySteps = mathFloor(distanceBehind * historyStepsPerUnit / 3.2)
 		historySteps = mathMin(historySteps, self.historyCount - 1)
+		
 		local historyData = self:getFromHistory(historySteps)
 		
 		if historyData then
-			currentDir = historyData.lookVector
-		end
-	end
-	
-	-- Now update all segments to their positions
-	for i, segment in pairs(self.segments) do
-		local pos = positions[i + 1]
-		if pos then
-			-- Look at the position ahead of this segment
-			local lookTarget = positions[i] or (pos + currentDir)
-			segment.CFrame = CFramenew(pos, lookTarget)
+			segment.CFrame = CFramenew(historyData.position, historyData.position + historyData.lookVector)
 			
 			-- Update segment size
 			segment.Size = currentSize
