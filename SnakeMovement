@@ -437,12 +437,6 @@ local function initializeForCharacter(character)
 			State.debugMode = not State.debugMode 
 			print("🔍 Debug Mode:", State.debugMode and "ON" or "OFF")
 		end,
-		[Enum.KeyCode.R] = function()
-			-- Emergency direction reset
-			State.currentDirection = Vector3.new(0, 0, -1)
-			State.targetDirection = Vector3.new(0, 0, -1)
-			print("🔄 Direction reset to forward!")
-		end,
 		[Enum.KeyCode.F8] = function()
 			-- Network-optimized test (fewer segments)
 			print("🧪 Testing segment positioning...")
@@ -702,24 +696,7 @@ local function initializeForCharacter(character)
 						newTargetDir = State.currentDirection
 					end
 
-					-- ANTI-ZIGZAG: Same turn limiting as mobile
-					local dotProduct = State.currentDirection:Dot(newTargetDir)
-
-					-- If trying to turn more than 120 degrees instantly, limit it
-					if dotProduct < -0.5 then -- cos(120°) = -0.5
-						-- Calculate the maximum allowed turn angle
-						local rightVector = State.currentDirection:Cross(Vector3.new(0, 1, 0))
-						local crossProduct = rightVector:Dot(newTargetDir)
-
-						-- Limit to 120 degree turn
-						local maxTurnAngle = math.rad(120)
-						local turnDirection = crossProduct > 0 and 1 or -1
-
-						-- Create limited direction vector
-						local limitedAngle = math.atan2(State.currentDirection.Z, State.currentDirection.X) + (maxTurnAngle * turnDirection)
-						newTargetDir = Vector3.new(math.cos(limitedAngle), 0, math.sin(limitedAngle)).Unit
-					end
-
+					-- PROPER DIRECTION VALIDATION
 					State.targetDirection = newTargetDir
 				end
 			end
@@ -728,36 +705,14 @@ local function initializeForCharacter(character)
 		-- BUTTERY smooth direction changes (same for mobile and PC)
 		local turnRate = Config.TurnSpeed * dt * 0.9 -- Slightly slower for more realistic movement
 
-		-- Normalize the direction vector after lerping to prevent slowdown
-		local newDirection = State.currentDirection:Lerp(State.targetDirection, turnRate)
-
-		-- CRITICAL FIX: Normalize the direction vector after lerping
-		if newDirection.Magnitude > 0.001 then
-			local normalizedDir = newDirection.Unit
+		-- PROPER DIRECTION INTERPOLATION - Never let it become invalid
+		if State.targetDirection.Magnitude > 0.001 and State.currentDirection.Magnitude > 0.001 then
+			-- Only interpolate if both directions are valid
+			local newDirection = State.currentDirection:Lerp(State.targetDirection, turnRate)
 			
-			-- Safety check: Prevent sudden 180 degree flips
-			local dotProduct = State.currentDirection:Dot(normalizedDir)
-			if dotProduct < -0.9 then -- If almost opposite direction
-				-- Keep current direction to prevent flipping
-				normalizedDir = State.currentDirection
-			end
-			
-			State.currentDirection = normalizedDir
-		else
-			-- Direction is invalid, reset to safe default
-			State.currentDirection = Vector3.new(0, 0, -1)
-			State.targetDirection = Vector3.new(0, 0, -1)
-			if State.debugMode then
-				warn("⚠️ Direction was invalid, resetting to default forward")
-			end
-		end
-		
-		-- Additional safety: Check if current direction is valid
-		if State.currentDirection.Magnitude < 0.9 or State.currentDirection.Magnitude > 1.1 then
-			State.currentDirection = Vector3.new(0, 0, -1)
-			State.targetDirection = Vector3.new(0, 0, -1)
-			if State.debugMode then
-				warn("⚠️ Direction magnitude invalid:", State.currentDirection.Magnitude, "- resetting")
+			-- Always normalize after lerp
+			if newDirection.Magnitude > 0.001 then
+				State.currentDirection = newDirection.Unit
 			end
 		end
 
@@ -773,7 +728,11 @@ local function initializeForCharacter(character)
 		local newPosition = rootPart.Position + State.currentDirection * moveDistance
 
 		-- WALL COLLISION CHECK to prevent head corruption
-		local raycast = workspace:Raycast(rootPart.Position, State.currentDirection * (moveDistance + 5), RaycastParams.new())
+		local raycastParams = RaycastParams.new()
+		raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+		raycastParams.FilterDescendantsInstances = {character}
+		
+		local raycast = workspace:Raycast(rootPart.Position, State.currentDirection * (moveDistance + 5), raycastParams)
 		if raycast and raycast.Instance then
 			-- Check if we hit a wall
 			local hitPart = raycast.Instance
@@ -791,7 +750,7 @@ local function initializeForCharacter(character)
 					local slidePosition = rootPart.Position + slideDirection * moveDistance * 0.5
 					
 					-- Check if slide position is valid
-					local slideRaycast = workspace:Raycast(rootPart.Position, slideDirection * (moveDistance + 2), RaycastParams.new())
+					local slideRaycast = workspace:Raycast(rootPart.Position, slideDirection * (moveDistance + 2), raycastParams)
 					if not slideRaycast or not slideRaycast.Instance then
 						newPosition = slidePosition
 						-- Gradually adjust direction to slide direction
@@ -813,14 +772,13 @@ local function initializeForCharacter(character)
 			print("RootPart LookVector:", rootPart.CFrame.LookVector)
 		end
 		
-		-- CRITICAL FIX: Ensure CFrame doesn't get corrupted by wall collisions
-		local lookAtTarget = newPosition + State.currentDirection
-		-- Validate look target isn't too close (prevents CFrame errors)
-		if (lookAtTarget - newPosition).Magnitude < 0.01 then
-			lookAtTarget = newPosition + Vector3.new(0, 0, -1) -- Default forward
-		end
+		-- CRITICAL FIX: Set position and rotation properly
+		-- Clear any physics velocity that might interfere
+		rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
 		
-		rootPart.CFrame = CFrame.lookAt(newPosition, lookAtTarget)
+		-- Set CFrame with validated direction
+		rootPart.CFrame = CFrame.lookAt(newPosition, newPosition + State.currentDirection)
 
 		-- Record path point (throttled)
 		if updateCounter % networkUpdateInterval == 0 then
