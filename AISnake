@@ -1521,13 +1521,34 @@ function AISnake.new(startPosition)
 
 	-- Create all segments at spawn position initially (prevents dragging on respawn)
 	for i = 1, self.CurrentLength do
-		-- Start all segments at the same position
-		local pos = self.Position
+		-- Start all segments BEHIND the head position
+		local offset = self.Direction * (-i * self.SegmentSpacing)
+		local pos = self.Position + offset
 		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
 		local color = self.Config.BodyColors[colorIndex]
 		local segment = createSegment(i, pos, color, self.Config, self.Model, i)
 		self.Segments[i] = segment
+		
+		-- Make segments invisible initially to prevent visual glitch
+		segment.Transparency = 1
 	end
+	
+	-- Populate position history with proper spread positions
+	for i = 1, self.MaxHistorySize do
+		local historyOffset = self.Direction * (-i * 0.5) -- Smaller spacing for history
+		local historyPos = self.Position + historyOffset
+		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
+	end
+	
+	-- Make segments visible after a frame
+	task.defer(function()
+		task.wait(0.1)
+		for _, segment in ipairs(self.Segments) do
+			if segment and segment.Parent then
+				segment.Transparency = 0
+			end
+		end
+	end)
 
 	table.insert(AISnake._activeSnakes, self)
 	self._active = true
