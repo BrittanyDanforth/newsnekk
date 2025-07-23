@@ -911,6 +911,11 @@ local function queuePlayerDeath(player)
 
 	-- IMMEDIATELY mark as dead to prevent mutual deaths (with timestamp)
 	deadPlayers[player] = tick()
+	
+	-- IMMEDIATELY kill the player so camera/movement stops
+	if humanoid and humanoid.Health > 0 then
+		humanoid.Health = 0
+	end
 
 	-- IMMEDIATELY disable collision on all segments to prevent timing issues
 	task.spawn(function()
@@ -1150,9 +1155,7 @@ task.spawn(function()
 							end
 						end
 
-						-- Player already marked as dead in queuePlayerDeath
-
-						humanoid.Health = 0
+						-- Player already marked as dead and killed in queuePlayerDeath
 
 						-- Handle character cleanup
 						task.spawn(function()
