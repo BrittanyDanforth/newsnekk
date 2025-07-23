@@ -389,10 +389,16 @@ function Snake:update(dt)
 		local lastHistory = self:getFromHistory(1)
 		if lastHistory then
 			local distance = (currentPos - lastHistory.position).Magnitude
-			if distance > 1 then  -- Lower threshold
-				-- Add more intermediate points when boosting
-				local steps = mathFloor(distance / 0.5)  -- One point every 0.5 studs
-				for i = 1, mathMin(steps, 10) do  -- Up to 10 intermediate points
+			-- Small snakes need more aggressive gap filling
+			local threshold = self.length < 100 and 0.5 or 1.0
+			
+			if distance > threshold then
+				-- More points for small snakes
+				local pointSpacing = self.length < 100 and 0.3 or 0.5
+				local maxPoints = self.length < 100 and 20 or 10
+				
+				local steps = mathFloor(distance / pointSpacing)
+				for i = 1, mathMin(steps, maxPoints) do
 					local alpha = i / (steps + 1)
 					local interpPos = lastHistory.position:Lerp(currentPos, alpha)
 					local interpLook = lastHistory.lookVector:Lerp(currentLook, alpha).Unit
@@ -451,23 +457,23 @@ function Snake:update(dt)
 	-- DYNAMIC SPACING based on snake size
 	local spacing
 	if self.length < 100 then
-		-- Small snakes need tighter spacing
-		spacing = segmentDiameter * 0.75
+		-- Small snakes need MUCH tighter spacing
+		spacing = segmentDiameter * 0.65  -- Even tighter!
 	elseif self.length < 500 then
 		-- Medium snakes
-		spacing = segmentDiameter * 0.80
+		spacing = segmentDiameter * 0.75
 	else
 		-- Large snakes can use normal spacing
 		spacing = segmentDiameter * 0.85
 	end
 	
-	-- More history samples when boosting - MORE for small snakes
+	-- More history samples when boosting - EXTRA for small snakes with speed boost
 	local historyMultiplier = 1
 	if self.isBoosting then
 		if self.length < 100 then
-			historyMultiplier = 5  -- Small snakes need MORE samples
+			historyMultiplier = 8  -- WAY more samples for speed boost
 		elseif self.length < 500 then
-			historyMultiplier = 4
+			historyMultiplier = 5
 		else
 			historyMultiplier = 3  -- Large snakes already work great
 		end
