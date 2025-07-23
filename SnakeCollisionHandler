@@ -9,6 +9,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Debris = game:GetService("Debris")
 
+-- Get or create death notification event
+local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents") or Instance.new("Folder", ReplicatedStorage)
+remoteEvents.Name = "RemoteEvents"
+local deathNotifyEvent = remoteEvents:FindFirstChild("PlayerDeath") or Instance.new("RemoteEvent", remoteEvents)
+deathNotifyEvent.Name = "PlayerDeath"
+
 local AISnakeModule = require(ReplicatedStorage:WaitForChild("AISnake"))
 local SnakeConfig = require(ReplicatedStorage:WaitForChild("SnakeConfig"))
 local OrbUtils = require(ReplicatedStorage:WaitForChild("OrbUtils"))
@@ -915,6 +921,8 @@ local function queuePlayerDeath(player)
 	-- IMMEDIATELY kill the player so camera/movement stops
 	if humanoid and humanoid.Health > 0 then
 		humanoid.Health = 0
+		-- Notify client directly about death
+		deathNotifyEvent:FireClient(player, "died")
 	end
 
 	-- IMMEDIATELY disable collision on all segments to prevent timing issues
@@ -1159,7 +1167,8 @@ task.spawn(function()
 
 						-- Handle character cleanup
 						task.spawn(function()
-							-- No delays - orbs spawn immediately!
+							-- Small delay to ensure client detects death before cleanup
+							task.wait(0.1)
 
 							if character and character.Parent then
 								-- Option 1: Move character far away (safer than destroying)

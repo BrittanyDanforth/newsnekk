@@ -8,6 +8,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
+
+-- Listen for death notification as backup
+local remoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents", 5)
+local deathNotifyEvent = remoteEvents and remoteEvents:FindFirstChild("PlayerDeath")
 local LocalPlayer = Players.LocalPlayer
 -- Hide the default Roblox leaderboard
 StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
@@ -649,6 +653,19 @@ if LocalPlayer.Character then
 	onCharacterAdded(LocalPlayer.Character)
 end
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+-- Backup death detection via RemoteEvent
+if deathNotifyEvent then
+	deathNotifyEvent.OnClientEvent:Connect(function(message)
+		if message == "died" then
+			-- Show menu immediately
+			createMenu(function()
+				requestRespawn()
+			end)
+		end
+	end)
+end
+
 -- Enhanced performance monitoring
 task.spawn(function()
 	while true do
