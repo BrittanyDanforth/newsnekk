@@ -324,8 +324,8 @@ function Snake:createHead()
 	head.Transparency = 0 -- Fully opaque for proper visibility
 	head.Parent = self.model
 	
-	-- FORCE the head to be HUGE no matter what
-	head.Size = Vector3.new(20, 20, 20)
+	-- Force head to be properly sized
+	head.Size = Vector3.new(10, 10, 10)
 	print("HEAD SIZE SET TO:", head.Size)
 
 	-- Tag for collision
@@ -583,15 +583,15 @@ end
 
 function Snake:updateHead()
 	local growthFactor = self:calculateGrowthFactor()
-	-- MINIMUM size of 20, can only get bigger with growth
-	local baseSize = math.max(20, (self.config.HeadSize or Vector3.new(20, 20, 20)).X)
+	-- MINIMUM size of 10, can only get bigger with growth
+	local baseSize = math.max(10, (self.config.HeadSize or Vector3.new(10, 10, 10)).X)
 	local headSize = Vector3.new(baseSize, baseSize, baseSize) * growthFactor
 	
-	-- Never let it get smaller than 20x20x20
+	-- Never let it get smaller than 10x10x10
 	headSize = Vector3.new(
-		math.max(20, headSize.X),
-		math.max(20, headSize.Y),
-		math.max(20, headSize.Z)
+		math.max(10, headSize.X),
+		math.max(10, headSize.Y),
+		math.max(10, headSize.Z)
 	)
 	
 	self.head.Size = headSize
@@ -610,9 +610,9 @@ function Snake:updateHead()
 		self.leftEye.Size = Vector3.new(2.0, 3.0, 0.5) * eyeScale
 		self.rightEye.Size = Vector3.new(2.0, 3.0, 0.5) * eyeScale
 		
-		local eyeSeparation = 5.0 * growthFactor  -- Even wider for MASSIVE head
-		local eyeHeight = 2.0 * growthFactor
-		local eyeForward = -9.0 * growthFactor  -- Way forward for MASSIVE head
+		local eyeSeparation = 2.5 * growthFactor  -- Proper spacing for 10x10 head
+		local eyeHeight = 1.0 * growthFactor
+		local eyeForward = -4.5 * growthFactor  -- Correct position for 10x10 head
 		
 		-- Position eyes on the front face
 		self.leftEye.CFrame = headCF * CFramenew(-eyeSeparation, eyeHeight, eyeForward)
