@@ -323,6 +323,10 @@ function Snake:createHead()
 	head.Anchored = true
 	head.Transparency = 0 -- Fully opaque for proper visibility
 	head.Parent = self.model
+	
+	-- FORCE the head to be HUGE no matter what
+	head.Size = Vector3.new(20, 20, 20)
+	print("HEAD SIZE SET TO:", head.Size)
 
 	-- Tag for collision
 	CollectionService:AddTag(head, "SnakeHead")
@@ -579,8 +583,19 @@ end
 
 function Snake:updateHead()
 	local growthFactor = self:calculateGrowthFactor()
-	local headSize = (self.config.HeadSize or Vector3.new(20, 20, 20)) * growthFactor
+	-- MINIMUM size of 20, can only get bigger with growth
+	local baseSize = math.max(20, (self.config.HeadSize or Vector3.new(20, 20, 20)).X)
+	local headSize = Vector3.new(baseSize, baseSize, baseSize) * growthFactor
+	
+	-- Never let it get smaller than 20x20x20
+	headSize = Vector3.new(
+		math.max(20, headSize.X),
+		math.max(20, headSize.Y),
+		math.max(20, headSize.Z)
+	)
+	
 	self.head.Size = headSize
+	print("UPDATE HEAD SIZE TO:", headSize)
 	
 	local currentPos = self.rootPart.Position
 	local currentLook = self.rootPart.CFrame.LookVector
