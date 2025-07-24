@@ -31,6 +31,7 @@ local mathMin = math.min
 local mathMax = math.max
 local mathFloor = math.floor
 local mathRandom = math.random
+local mathClamp = math.clamp or function(v, min, max) return mathMin(mathMax(v, min), max) end
 local tick = tick
 
 -- Snake Class
@@ -86,6 +87,9 @@ function Snake.new(character, config)
 	self.model = Instance.new("Model")
 	self.model.Name = self.player.Name .. "_Snake"
 	self.model.Parent = workspace
+	
+	-- Initialize path points BEFORE creating visuals
+	self:initializePath()
 	
 	-- Initialize based on environment
 	if IS_CLIENT then
@@ -180,9 +184,10 @@ function Snake:createPureBeamSystem()
 		attachment.Name = "BeamPoint" .. i
 		attachment.Parent = self.anchorPart  -- Parent to anchor part, not folder
 		
-		-- Initial position (straight line behind player)
-		local offset = i * BEAM_SEGMENT_LENGTH
-		attachment.WorldPosition = self.rootPart.Position - self.rootPart.CFrame.LookVector * offset
+		-- Use the initialized path points for positioning
+		local distance = i * BEAM_SEGMENT_LENGTH
+		local position = self:getPositionAlongPath(distance)
+		attachment.WorldPosition = position
 		
 		table.insert(self.attachments, attachment)
 	end
@@ -252,6 +257,28 @@ function Snake:createPureBeamSystem()
 		print("   - Parent:", firstBeam.Parent and firstBeam.Parent.Name or "nil")
 		print("   - Attachment0 pos:", firstBeam.Attachment0.WorldPosition)
 		print("   - Attachment1 pos:", firstBeam.Attachment1.WorldPosition)
+		print("   - LightEmission:", firstBeam.LightEmission)
+		print("   - Color:", tostring(firstBeam.Color))
+		
+		-- Create debug parts at attachment positions to verify they're correct
+		if true then  -- Set to false to disable debug
+			for i = 1, math.min(5, #self.attachments) do
+				local debugPart = Instance.new("Part")
+				debugPart.Name = "DebugAttachment" .. i
+				debugPart.Size = Vector3new(2, 2, 2)
+				debugPart.Shape = Enum.PartType.Ball
+				debugPart.Material = Enum.Material.Neon
+				debugPart.Color = Color3.new(1, 0, 0)  -- Red
+				debugPart.Anchored = true
+				debugPart.CanCollide = false
+				debugPart.Position = self.attachments[i].WorldPosition
+				debugPart.Parent = workspace
+				
+				-- Remove after 5 seconds
+				game:GetService("Debris"):AddItem(debugPart, 5)
+			end
+			print("🔴 Created debug parts at first 5 attachment positions")
+		end
 	end
 end
 
@@ -318,6 +345,35 @@ function Snake:calculateGrowthFactor()
 	end
 end
 
+function Snake:initializePath()
+	-- Create initial path points so beams have something to render
+	print("🛤️ Initializing path for snake length:", self.length)
+	
+	local startPos = self.rootPart.Position
+	local startDir = self.rootPart.CFrame.LookVector
+	
+	-- Create enough path points for the full snake length
+	local totalLength = self.length * 4  -- Visual length multiplier
+	local pointSpacing = 2  -- Distance between path points
+	local numPoints = mathFloor(totalLength / pointSpacing)
+	
+	-- Create path points in a straight line behind the snake
+	for i = 0, numPoints do
+		local distance = i * pointSpacing
+		local position = startPos - startDir * distance  -- Behind the snake
+		
+		table.insert(self.pathPoints, {
+			position = position,
+			direction = -startDir  -- Pointing backwards initially
+		})
+	end
+	
+	-- Calculate initial total path length
+	self.totalPathLength = totalLength
+	
+	print("✅ Created", #self.pathPoints, "initial path points")
+end
+
 function Snake:updatePath()
 	-- Track the snake's path
 	local currentPos = self.rootPart.Position
@@ -378,8 +434,17 @@ function Snake:updateBeamPositions()
 end
 
 function Snake:getPositionAlongPath(distance)
-	if #self.pathPoints < 2 then
+	-- Handle edge cases
+	if #self.pathPoints == 0 then
+		print("⚠️ No path points! Using root position")
 		return self.rootPart.Position
+	elseif #self.pathPoints == 1 then
+		return self.pathPoints[1].position
+	end
+	
+	-- If distance is 0, return first point
+	if distance <= 0 then
+		return self.pathPoints[1].position
 	end
 	
 	local currentDist = 0
@@ -389,6 +454,7 @@ function Snake:getPositionAlongPath(distance)
 		if currentDist + segmentLength >= distance then
 			-- Interpolate within this segment
 			local t = (distance - currentDist) / segmentLength
+			t = mathClamp(t, 0, 1)  -- Ensure t is between 0 and 1
 			return self.pathPoints[i-1].position:Lerp(self.pathPoints[i].position, t)
 		end
 		
