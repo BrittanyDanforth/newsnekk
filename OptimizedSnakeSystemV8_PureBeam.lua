@@ -312,7 +312,7 @@ function Snake:createHead()
 	-- Create a sleek, modern head design
 	local head = Instance.new("Part")
 	head.Name = "SnakeHead"
-	local headSize = self.config.HeadSize or Vector3.new(5, 5, 5)
+	local headSize = self.config.HeadSize or Vector3.new(7, 7, 7) -- Bigger head!
 	head.Size = headSize
 	head.Shape = Enum.PartType.Block -- Block shape for consistency
 	head.Material = self.config.HeadMaterial or Enum.Material.ForceField
@@ -351,7 +351,7 @@ function Snake:createHead()
 	local function createEye(name, xOffset)
 		local eye = Instance.new("Part")
 		eye.Name = name
-		eye.Size = Vector3.new(0.8, 1.2, 0.2) -- Rectangular eyes
+		eye.Size = Vector3.new(1.2, 1.6, 0.3) -- Bigger rectangular eyes
 		eye.Shape = Enum.PartType.Block
 		eye.Material = Enum.Material.Neon
 		eye.Color = Color3.fromRGB(255, 255, 255)
@@ -590,7 +590,7 @@ end
 
 function Snake:updateHead()
 	local growthFactor = self:calculateGrowthFactor()
-	local headSize = (self.config.HeadSize or Vector3.new(5, 5, 5)) * growthFactor
+	local headSize = (self.config.HeadSize or Vector3.new(7, 7, 7)) * growthFactor
 	self.head.Size = headSize
 	
 	local currentPos = self.rootPart.Position
@@ -607,12 +607,12 @@ function Snake:updateHead()
 	-- Update eyes with sleek positioning
 	if self.leftEye and self.rightEye then
 		local eyeScale = growthFactor
-		self.leftEye.Size = Vector3.new(0.8, 1.2, 0.2) * eyeScale
-		self.rightEye.Size = Vector3.new(0.8, 1.2, 0.2) * eyeScale
+		self.leftEye.Size = Vector3.new(1.2, 1.6, 0.3) * eyeScale
+		self.rightEye.Size = Vector3.new(1.2, 1.6, 0.3) * eyeScale
 		
-		local eyeSeparation = 1.2 * growthFactor
-		local eyeHeight = 0.5 * growthFactor
-		local eyeForward = -2.3 * growthFactor
+		local eyeSeparation = 1.8 * growthFactor  -- Wider spacing for bigger head
+		local eyeHeight = 0.7 * growthFactor
+		local eyeForward = -3.2 * growthFactor  -- Further forward for bigger head
 		
 		-- Position eyes on the front face
 		self.leftEye.CFrame = headCF * CFramenew(-eyeSeparation, eyeHeight, eyeForward)
