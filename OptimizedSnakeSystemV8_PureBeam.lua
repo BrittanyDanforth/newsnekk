@@ -312,7 +312,7 @@ function Snake:createHead()
 	-- Create a sleek, modern head design
 	local head = Instance.new("Part")
 	head.Name = "SnakeHead"
-	local headSize = self.config.HeadSize or Vector3.new(12, 12, 12) -- MUCH bigger head to match body!
+	local headSize = self.config.HeadSize or Vector3.new(20, 20, 20) -- MASSIVE head!
 	head.Size = headSize
 	head.Shape = Enum.PartType.Block -- Block shape for consistency
 	head.Material = self.config.HeadMaterial or Enum.Material.ForceField
@@ -590,7 +590,7 @@ end
 
 function Snake:updateHead()
 	local growthFactor = self:calculateGrowthFactor()
-	local headSize = (self.config.HeadSize or Vector3.new(12, 12, 12)) * growthFactor
+	local headSize = (self.config.HeadSize or Vector3.new(20, 20, 20)) * growthFactor
 	self.head.Size = headSize
 	
 	local currentPos = self.rootPart.Position
@@ -610,9 +610,9 @@ function Snake:updateHead()
 		self.leftEye.Size = Vector3.new(2.0, 3.0, 0.5) * eyeScale
 		self.rightEye.Size = Vector3.new(2.0, 3.0, 0.5) * eyeScale
 		
-		local eyeSeparation = 3.0 * growthFactor  -- Much wider for huge head
-		local eyeHeight = 1.0 * growthFactor
-		local eyeForward = -5.5 * growthFactor  -- Much further forward for huge head
+		local eyeSeparation = 5.0 * growthFactor  -- Even wider for MASSIVE head
+		local eyeHeight = 2.0 * growthFactor
+		local eyeForward = -9.0 * growthFactor  -- Way forward for MASSIVE head
 		
 		-- Position eyes on the front face
 		self.leftEye.CFrame = headCF * CFramenew(-eyeSeparation, eyeHeight, eyeForward)
