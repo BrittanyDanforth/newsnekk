@@ -13,11 +13,11 @@ local IS_CLIENT = RunService:IsClient()
 local IS_SERVER = RunService:IsServer()
 
 -- Beam configuration
-local BEAM_SEGMENT_LENGTH = 5  -- Distance between beam attachments
-local BEAM_CURVE_SIZE = 2  -- How much beams can curve
-local BEAM_WIDTH_MULTIPLIER = 1.5  -- Make it thicker than parts
-local MAX_BEAM_SEGMENTS = 200  -- Maximum beam segments
-local BEAM_TEXTURE = "rbxasset://textures/ui/Scroll/scroll-middle.png"  -- Smooth texture
+local BEAM_SEGMENT_LENGTH = 3  -- Shorter segments for smoother curves
+local BEAM_CURVE_SIZE = 1  -- Subtle curves
+local BEAM_WIDTH_MULTIPLIER = 2.5  -- Much thicker for visibility
+local MAX_BEAM_SEGMENTS = 300  -- More segments for longer snakes
+local BEAM_TEXTURE = ""  -- No texture for cleaner look
 
 -- Death orb configuration
 local DEATH_ORB_SIZE = 8  -- Size of death orbs
@@ -151,14 +151,20 @@ function Snake:createPureBeamSystem()
 	-- This is the MAGIC - pure beam rendering
 	print("🌟 Creating PURE BEAM snake for", self.player.Name)
 	
-	-- Container for all attachments
-	self.beamContainer = Instance.new("Part")
+	-- Container for all attachments - using Folder instead of Part
+	self.beamContainer = Instance.new("Folder")
 	self.beamContainer.Name = "BeamContainer"
-	self.beamContainer.Size = Vector3new(1, 1, 1)
-	self.beamContainer.Transparency = 1
-	self.beamContainer.CanCollide = false
-	self.beamContainer.Anchored = true
 	self.beamContainer.Parent = self.model
+	
+	-- Create anchor part for attachments
+	self.anchorPart = Instance.new("Part")
+	self.anchorPart.Name = "BeamAnchor"
+	self.anchorPart.Size = Vector3new(1, 1, 1)
+	self.anchorPart.Transparency = 1
+	self.anchorPart.CanCollide = false
+	self.anchorPart.Anchored = true
+	self.anchorPart.CFrame = self.rootPart.CFrame
+	self.anchorPart.Parent = self.model
 	
 	-- Create attachment chain
 	self.attachments = {}
@@ -172,7 +178,7 @@ function Snake:createPureBeamSystem()
 	for i = 0, numSegments do
 		local attachment = Instance.new("Attachment")
 		attachment.Name = "BeamPoint" .. i
-		attachment.Parent = self.beamContainer
+		attachment.Parent = self.anchorPart  -- Parent to anchor part, not folder
 		
 		-- Initial position (straight line behind player)
 		local offset = i * BEAM_SEGMENT_LENGTH
@@ -191,11 +197,11 @@ function Snake:createPureBeamSystem()
 		
 		-- Calculate width based on position (taper to tail)
 		local growthFactor = self:calculateGrowthFactor()
-		local baseWidth = 6 * BEAM_WIDTH_MULTIPLIER * growthFactor
-		local tailFactor = 1 - (i / #self.attachments) * 0.4  -- 40% taper
+		local baseWidth = 8 * BEAM_WIDTH_MULTIPLIER * growthFactor  -- Increased base width
+		local tailFactor = 1 - (i / #self.attachments) * 0.3  -- Less taper
 		
 		beam.Width0 = baseWidth * tailFactor
-		beam.Width1 = baseWidth * tailFactor * 0.95  -- Slight taper between segments
+		beam.Width1 = baseWidth * tailFactor * 0.98  -- Very slight taper between segments
 		
 		-- CURVED beams for smooth look
 		beam.CurveSize0 = BEAM_CURVE_SIZE
@@ -204,40 +210,49 @@ function Snake:createPureBeamSystem()
 		-- High segment count for smooth curves
 		beam.Segments = 20
 		
-		-- Transparency for smooth look
-		beam.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(0.8, 0),
-			NumberSequenceKeypoint.new(1, 0.2)
-		})
+		-- Make beam fully visible
+		beam.Transparency = NumberSequence.new(0)  -- Fully opaque
 		
-		-- Color pattern
+		-- Color pattern - make it bright and visible
 		local colorIndex = ((i - 1) % #self.bodyColors) + 1
 		local color = self.bodyColors[colorIndex]
-		beam.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, color),
-			ColorSequenceKeypoint.new(0.5, color),
-			ColorSequenceKeypoint.new(1, color)
-		})
 		
-		-- Smooth texture
-		beam.Texture = BEAM_TEXTURE
-		beam.TextureSpeed = 0.5
-		beam.TextureLength = 5
-		beam.TextureMode = Enum.TextureMode.Stretch
+		-- Single color for simplicity
+		beam.Color = ColorSequence.new(color)
 		
-		-- Lighting
-		beam.LightEmission = 0.3
-		beam.LightInfluence = 0.5
+		-- Texture (if any)
+		if BEAM_TEXTURE ~= "" then
+			beam.Texture = BEAM_TEXTURE
+			beam.TextureSpeed = 0.5
+			beam.TextureLength = 5
+			beam.TextureMode = Enum.TextureMode.Stretch
+		end
+		
+		-- Lighting - make it glow!
+		beam.LightEmission = 0.5  -- More glow
+		beam.LightInfluence = 0.3
 		
 		-- Always face camera for best look
 		beam.FaceCamera = true
 		
-		beam.Parent = self.beamContainer
+		-- IMPORTANT: Parent to model, not beamContainer
+		beam.Parent = self.model
 		table.insert(self.beams, beam)
 	end
 	
 	print("✅ Created", #self.beams, "beam segments for continuous snake")
+	
+	-- Debug: Check if beams are actually visible
+	if #self.beams > 0 then
+		local firstBeam = self.beams[1]
+		print("🔍 First beam check:")
+		print("   - Width0:", firstBeam.Width0)
+		print("   - Width1:", firstBeam.Width1)
+		print("   - Transparency:", tostring(firstBeam.Transparency))
+		print("   - Parent:", firstBeam.Parent and firstBeam.Parent.Name or "nil")
+		print("   - Attachment0 pos:", firstBeam.Attachment0.WorldPosition)
+		print("   - Attachment1 pos:", firstBeam.Attachment1.WorldPosition)
+	end
 end
 
 function Snake:createClientHead()
@@ -350,10 +365,15 @@ function Snake:updateBeamPositions()
 	-- Update beam properties based on length
 	local growthFactor = self:calculateGrowthFactor()
 	for i, beam in ipairs(self.beams) do
-		local baseWidth = 6 * BEAM_WIDTH_MULTIPLIER * growthFactor
-		local tailFactor = 1 - (i / #self.beams) * 0.4
+		local baseWidth = 8 * BEAM_WIDTH_MULTIPLIER * growthFactor
+		local tailFactor = 1 - (i / #self.beams) * 0.3
 		beam.Width0 = baseWidth * tailFactor
-		beam.Width1 = baseWidth * tailFactor * 0.95
+		beam.Width1 = baseWidth * tailFactor * 0.98
+		
+		-- Ensure beam is visible
+		if beam.Transparency ~= NumberSequence.new(0) then
+			beam.Transparency = NumberSequence.new(0)
+		end
 	end
 end
 
@@ -523,6 +543,11 @@ function Snake:startUpdateLoop()
 		
 		-- Client updates
 		if IS_CLIENT then
+			-- Update anchor part position to follow player
+			if self.anchorPart then
+				self.anchorPart.CFrame = self.rootPart.CFrame
+			end
+			
 			self:updateBeamPositions()
 			self:updateHead()
 			
