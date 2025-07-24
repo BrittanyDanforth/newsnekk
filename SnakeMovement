@@ -49,8 +49,23 @@ local connections = {}
 
 -- Load the beam snake system
 local function loadBeamSnakeSystem()
+	-- TEST: Try test module first
+	local testSuccess, testModule = pcall(function()
+		return require(game.ReplicatedStorage:WaitForChild("TestBeamSnake", 1))
+	end)
+	
+	if testSuccess and testModule then
+		-- Create test beam snake
+		spawn(function()
+			wait(1)
+			if player.Character then
+				testModule.create(player.Character)
+			end
+		end)
+	end
+	
 	local success, module = pcall(function()
-		return require(game.ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV8_ContinuousBeam", 5))
+		return require(game.ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV8_PureBeam", 5))
 	end)
 	
 	if success and module then

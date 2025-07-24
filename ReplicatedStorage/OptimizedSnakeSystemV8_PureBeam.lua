@@ -14,8 +14,8 @@ local IS_SERVER = RunService:IsServer()
 
 -- Beam configuration
 local BEAM_SEGMENT_LENGTH = 3  -- Shorter segments for smoother curves
-local BEAM_CURVE_SIZE = 1  -- Subtle curves
-local BEAM_WIDTH_MULTIPLIER = 2.5  -- Much thicker for visibility
+local BEAM_CURVE_SIZE = 2  -- More pronounced curves
+local BEAM_WIDTH_MULTIPLIER = 5  -- MUCH thicker for visibility
 local MAX_BEAM_SEGMENTS = 300  -- More segments for longer snakes
 local BEAM_TEXTURE = ""  -- No texture for cleaner look
 
@@ -154,6 +154,53 @@ end
 function Snake:createPureBeamSystem()
 	-- This is the MAGIC - pure beam rendering
 	print("🌟 Creating PURE BEAM snake for", self.player.Name)
+	print("   - Model exists:", self.model ~= nil)
+	print("   - Model parent:", self.model.Parent)
+	print("   - Initial length:", self.length)
+	print("   - Path points count:", #self.pathPoints)
+	print("   - RootPart position:", self.rootPart.Position)
+	
+	-- TEST: Create a simple visible beam to verify beams work at all
+	local testPart1 = Instance.new("Part")
+	testPart1.Name = "TestBeamPart1"
+	testPart1.Size = Vector3new(5, 5, 5)
+	testPart1.Material = Enum.Material.Neon
+	testPart1.Color = Color3.new(1, 1, 0)
+	testPart1.Position = self.rootPart.Position + Vector3new(0, 10, 0)
+	testPart1.Anchored = true
+	testPart1.Parent = workspace
+	
+	local testPart2 = Instance.new("Part")
+	testPart2.Name = "TestBeamPart2"
+	testPart2.Size = Vector3new(5, 5, 5)
+	testPart2.Material = Enum.Material.Neon
+	testPart2.Color = Color3.new(1, 1, 0)
+	testPart2.Position = self.rootPart.Position + Vector3new(0, 10, 20)
+	testPart2.Anchored = true
+	testPart2.Parent = workspace
+	
+	local testAtt1 = Instance.new("Attachment")
+	testAtt1.Parent = testPart1
+	local testAtt2 = Instance.new("Attachment")
+	testAtt2.Parent = testPart2
+	
+	local testBeam = Instance.new("Beam")
+	testBeam.Name = "TestBeam"
+	testBeam.Attachment0 = testAtt1
+	testBeam.Attachment1 = testAtt2
+	testBeam.Width0 = 20
+	testBeam.Width1 = 20
+	testBeam.Color = ColorSequence.new(Color3.new(1, 0, 1))  -- Magenta
+	testBeam.LightEmission = 1
+	testBeam.Transparency = NumberSequence.new(0)
+	testBeam.FaceCamera = true
+	testBeam.Enabled = true
+	testBeam.Parent = workspace
+	
+	print("🟣 Created TEST BEAM - you should see a thick magenta beam above you!")
+	game:GetService("Debris"):AddItem(testPart1, 15)
+	game:GetService("Debris"):AddItem(testPart2, 15)
+	game:GetService("Debris"):AddItem(testBeam, 15)
 	
 	-- Container for all attachments - using Folder instead of Part
 	self.beamContainer = Instance.new("Folder")
@@ -170,6 +217,8 @@ function Snake:createPureBeamSystem()
 	self.anchorPart.CFrame = self.rootPart.CFrame
 	self.anchorPart.Parent = self.model
 	
+	print("   - Anchor part created at:", self.anchorPart.Position)
+	
 	-- Create attachment chain
 	self.attachments = {}
 	self.beams = {}
@@ -178,17 +227,31 @@ function Snake:createPureBeamSystem()
 	local totalLength = self.length * 4  -- Scale to visual length
 	local numSegments = mathMin(mathFloor(totalLength / BEAM_SEGMENT_LENGTH), MAX_BEAM_SEGMENTS)
 	
-	-- Create attachments along initial path
+	-- Create individual parts with attachments for beam system
+	self.attachmentParts = {}
 	for i = 0, numSegments do
-		local attachment = Instance.new("Attachment")
-		attachment.Name = "BeamPoint" .. i
-		attachment.Parent = self.anchorPart  -- Parent to anchor part, not folder
+		-- Create a small invisible part for each attachment
+		local part = Instance.new("Part")
+		part.Name = "BeamAnchor" .. i
+		part.Size = Vector3new(0.1, 0.1, 0.1)
+		part.Transparency = 1
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+		part.Anchored = true
+		part.Parent = self.model
 		
-		-- Use the initialized path points for positioning
+		-- Position the part along the path
 		local distance = i * BEAM_SEGMENT_LENGTH
 		local position = self:getPositionAlongPath(distance)
-		attachment.WorldPosition = position
+		part.Position = position
 		
+		-- Create attachment inside the part
+		local attachment = Instance.new("Attachment")
+		attachment.Name = "BeamPoint" .. i
+		attachment.Parent = part
+		
+		table.insert(self.attachmentParts, part)
 		table.insert(self.attachments, attachment)
 	end
 	
@@ -202,43 +265,43 @@ function Snake:createPureBeamSystem()
 		
 		-- Calculate width based on position (taper to tail)
 		local growthFactor = self:calculateGrowthFactor()
-		local baseWidth = 8 * BEAM_WIDTH_MULTIPLIER * growthFactor  -- Increased base width
-		local tailFactor = 1 - (i / #self.attachments) * 0.3  -- Less taper
+		local baseWidth = 12 * BEAM_WIDTH_MULTIPLIER * growthFactor  -- Much thicker!
+		local tailFactor = 1 - (i / #self.attachments) * 0.2  -- Even less taper (0.8 minimum)
 		
 		beam.Width0 = baseWidth * tailFactor
 		beam.Width1 = baseWidth * tailFactor * 0.98  -- Very slight taper between segments
 		
 		-- CURVED beams for smooth look
-		beam.CurveSize0 = BEAM_CURVE_SIZE
-		beam.CurveSize1 = -BEAM_CURVE_SIZE
+		beam.CurveSize0 = BEAM_CURVE_SIZE * 1.5
+		beam.CurveSize1 = -BEAM_CURVE_SIZE * 1.5
 		
 		-- High segment count for smooth curves
-		beam.Segments = 20
+		beam.Segments = 30
 		
 		-- Make beam fully visible
 		beam.Transparency = NumberSequence.new(0)  -- Fully opaque
+		beam.Enabled = true  -- Force enable
 		
 		-- Color pattern - make it bright and visible
 		local colorIndex = ((i - 1) % #self.bodyColors) + 1
-		local color = self.bodyColors[colorIndex]
+		local color = self.bodyColors[colorIndex] or Color3.new(0, 1, 0)  -- Fallback to green
 		
 		-- Single color for simplicity
 		beam.Color = ColorSequence.new(color)
 		
-		-- Texture (if any)
-		if BEAM_TEXTURE ~= "" then
-			beam.Texture = BEAM_TEXTURE
-			beam.TextureSpeed = 0.5
-			beam.TextureLength = 5
-			beam.TextureMode = Enum.TextureMode.Stretch
-		end
+		-- No texture for cleaner look
+		beam.Texture = ""
+		beam.TextureSpeed = 0
+		beam.TextureLength = 1
+		beam.TextureMode = Enum.TextureMode.Stretch
 		
-		-- Lighting - make it glow!
-		beam.LightEmission = 0.5  -- More glow
-		beam.LightInfluence = 0.3
+		-- Lighting - make it glow MORE!
+		beam.LightEmission = 1  -- Maximum glow
+		beam.LightInfluence = 0  -- Not affected by world lighting
 		
 		-- Always face camera for best look
 		beam.FaceCamera = true
+		beam.ZOffset = 2  -- Render on top
 		
 		-- IMPORTANT: Parent to model, not beamContainer
 		beam.Parent = self.model
@@ -262,22 +325,46 @@ function Snake:createPureBeamSystem()
 		
 		-- Create debug parts at attachment positions to verify they're correct
 		if true then  -- Set to false to disable debug
-			for i = 1, math.min(5, #self.attachments) do
+			for i = 1, math.min(10, #self.attachments) do  -- Show more debug parts
 				local debugPart = Instance.new("Part")
 				debugPart.Name = "DebugAttachment" .. i
-				debugPart.Size = Vector3new(2, 2, 2)
+				debugPart.Size = Vector3new(5, 5, 5)  -- Bigger
 				debugPart.Shape = Enum.PartType.Ball
 				debugPart.Material = Enum.Material.Neon
-				debugPart.Color = Color3.new(1, 0, 0)  -- Red
+				debugPart.Color = Color3.new(1, i/10, 0)  -- Gradient from red to orange
 				debugPart.Anchored = true
 				debugPart.CanCollide = false
+				debugPart.CanQuery = false
 				debugPart.Position = self.attachments[i].WorldPosition
 				debugPart.Parent = workspace
 				
-				-- Remove after 5 seconds
-				game:GetService("Debris"):AddItem(debugPart, 5)
+				-- Add PointLight for visibility
+				local light = Instance.new("PointLight")
+				light.Brightness = 2
+				light.Range = 20
+				light.Color = debugPart.Color
+				light.Parent = debugPart
+				
+				-- Remove after 10 seconds
+				game:GetService("Debris"):AddItem(debugPart, 10)
 			end
-			print("🔴 Created debug parts at first 5 attachment positions")
+			print("🔴 Created debug parts at first 10 attachment positions")
+			
+			-- Also create a debug part at the anchor position
+			local anchorDebug = Instance.new("Part")
+			anchorDebug.Name = "DebugAnchor"
+			anchorDebug.Size = Vector3new(10, 10, 10)
+			anchorDebug.Shape = Enum.PartType.Ball
+			anchorDebug.Material = Enum.Material.ForceField
+			anchorDebug.Color = Color3.new(0, 0, 1)  -- Blue
+			anchorDebug.Anchored = true
+			anchorDebug.CanCollide = false
+			anchorDebug.CanQuery = false
+			anchorDebug.Transparency = 0.5
+			anchorDebug.Position = self.anchorPart.Position
+			anchorDebug.Parent = workspace
+			game:GetService("Debris"):AddItem(anchorDebug, 10)
+			print("🔵 Created debug anchor at:", anchorDebug.Position)
 		end
 	end
 end
@@ -413,23 +500,25 @@ function Snake:updateBeamPositions()
 	for i, attachment in ipairs(self.attachments) do
 		local targetDistance = (i - 1) * segmentSpacing
 		local pos = self:getPositionAlongPath(targetDistance)
-		if pos then
-			attachment.WorldPosition = pos
+		if pos and self.attachmentParts and self.attachmentParts[i] then
+			-- Move the part, not just the attachment
+			self.attachmentParts[i].Position = pos
 		end
 	end
 	
 	-- Update beam properties based on length
 	local growthFactor = self:calculateGrowthFactor()
 	for i, beam in ipairs(self.beams) do
-		local baseWidth = 8 * BEAM_WIDTH_MULTIPLIER * growthFactor
-		local tailFactor = 1 - (i / #self.beams) * 0.3
+		local baseWidth = 12 * BEAM_WIDTH_MULTIPLIER * growthFactor  -- Match creation width
+		local tailFactor = 1 - (i / #self.beams) * 0.2  -- Match creation taper
 		beam.Width0 = baseWidth * tailFactor
 		beam.Width1 = baseWidth * tailFactor * 0.98
 		
-		-- Ensure beam is visible
-		if beam.Transparency ~= NumberSequence.new(0) then
-			beam.Transparency = NumberSequence.new(0)
-		end
+		-- Ensure beam is visible and glowing
+		beam.Transparency = NumberSequence.new(0)
+		beam.Enabled = true
+		beam.LightEmission = 1
+		beam.ZOffset = 2
 	end
 end
 
@@ -685,35 +774,7 @@ function OptimizedSnakeSystemV8.init()
 		print("✅ OptimizedSnakeSystemV8 PURE BEAM - Server initialized")
 	else
 		print("✅ OptimizedSnakeSystemV8 PURE BEAM - Client initialized")
-		
-		-- Auto-create beam visuals for all snakes on client
-		local function handleCharacter(character)
-			wait(0.5)
-			
-			local player = Players:GetPlayerFromCharacter(character)
-			if player then
-				local config = {
-					InitialLength = player:GetAttribute("SnakeLength") or 55,
-					HeadColor = player:GetAttribute("HeadColor"),
-					SkinName = player:GetAttribute("EquippedSkin")
-				}
-				
-				Snake.new(character, config)
-			end
-		end
-		
-		-- Handle existing players
-		for _, player in pairs(Players:GetPlayers()) do
-			if player.Character then
-				handleCharacter(player.Character)
-			end
-			player.CharacterAdded:Connect(handleCharacter)
-		end
-		
-		-- Handle new players
-		Players.PlayerAdded:Connect(function(player)
-			player.CharacterAdded:Connect(handleCharacter)
-		end)
+		-- Client initialization is handled by SnakeMovement calling createSnake
 	end
 end
 

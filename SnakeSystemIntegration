@@ -13,14 +13,14 @@ local RunService = game:GetService("RunService")
 -- Try V8 first (Continuous Beam), then V4, V3, V2, V1
 local OptimizedSnakeSystem
 
--- Try V8 (CONTINUOUS BEAM - NO GAPS!)
+-- Try V8 (PURE BEAM - NO GAPS!)
 local v8Success, v8Result = pcall(function()
-	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV8_ContinuousBeam", 2))
+	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV8_PureBeam", 2))
 end)
 
 if v8Success and v8Result then
 	OptimizedSnakeSystem = v8Result
-	print("✅ Loaded OptimizedSnakeSystemV8 - CONTINUOUS BEAM! NO GAPS EVER!")
+	print("✅ Loaded OptimizedSnakeSystemV8 - PURE BEAM! NO GAPS EVER!")
 else
 	-- Try V4 (Performance focused)
 	local v4Success, v4Result = pcall(function()
