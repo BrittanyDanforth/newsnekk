@@ -8,11 +8,11 @@ local CollectionService = game:GetService("CollectionService")
 local TweenService = game:GetService("TweenService")
 
 -- Performance constants
-local ATTACHMENT_POOL_SIZE = 400  -- Reduced for better performance
-local BEAM_POOL_SIZE = 200  -- Reduced pool size
-local NETWORK_UPDATE_RATE = 10  -- HALF the network updates! (was 20)
-local MAX_VISIBLE_ATTACHMENTS = 100  -- Much fewer attachments
-local BOOST_VISIBLE_ATTACHMENTS = 80  -- Even fewer when boosting
+local ATTACHMENT_POOL_SIZE = 1000  -- Increased for long snakes
+local BEAM_POOL_SIZE = 500  -- Increased for long snakes
+local NETWORK_UPDATE_RATE = 10  -- Optimized network rate
+local MAX_VISIBLE_ATTACHMENTS = 100  -- Base attachments (scales with length)
+local BOOST_VISIBLE_ATTACHMENTS = 80  -- Base boost attachments
 local HISTORY_SIZE = 500  -- Smaller history buffer
 local BEAM_TEXTURE = "" -- No texture for clean solid look
 
@@ -392,20 +392,28 @@ end
 
 function Snake:calculateGrowthFactor()
 	local length = self.length
-	if length <= 200 then
+	-- Much slower width growth, prioritize LENGTH
+	if length <= 1000 then
 		return 1.0
-	elseif length <= 5000 then
-		return 1.0 + (length - 200) / 2400
-	elseif length <= 20000 then
-		return 3.0 + (length - 5000) / 7500
+	elseif length <= 10000 then
+		return 1.0 + (length - 1000) / 18000  -- Only 1.5x at 10k
+	elseif length <= 50000 then
+		return 1.5 + (length - 10000) / 80000  -- Only 2x at 50k
 	else
-		return 5.0 + mathMin((length - 20000) / 15000, 2.0)
+		return 2.0 + mathMin((length - 50000) / 100000, 0.5)  -- Max 2.5x ever
 	end
 end
 
 function Snake:initializeBeamBody()
 	local maxVisible = self.isBoosting and BOOST_VISIBLE_ATTACHMENTS or MAX_VISIBLE_ATTACHMENTS
-	self.visibleAttachmentCount = mathMin(self.length, maxVisible) -- Reasonable attachment count
+	
+	-- Scale attachments with length for LONG snakes
+	if self.length > 1000 then
+		local lengthMultiplier = mathMin(self.length / 1000, 5)
+		maxVisible = mathMin(maxVisible * lengthMultiplier, 500)
+	end
+	
+	self.visibleAttachmentCount = mathMin(self.length, maxVisible)
 	
 	local growthFactor = self:calculateGrowthFactor()
 	local beamWidth = 5 * growthFactor -- Base width
@@ -644,9 +652,16 @@ function Snake:updateBeamBody()
 	local beamWidth = 5 * growthFactor
 	local spacing = ATTACHMENT_SPACING * growthFactor
 	
-	-- Update visible attachment count
+	-- Update visible attachment count - scale with length!
 	local targetVisible = self.isBoosting and BOOST_VISIBLE_ATTACHMENTS or MAX_VISIBLE_ATTACHMENTS
-	targetVisible = mathMin(self.length * 2, targetVisible) -- More attachments relative to length
+	
+	-- Scale visible segments with length for LONG snakes
+	if self.length > 1000 then
+		local lengthMultiplier = mathMin(self.length / 1000, 5)  -- Up to 5x more segments
+		targetVisible = mathMin(targetVisible * lengthMultiplier, 500)  -- Cap at 500 for performance
+	end
+	
+	targetVisible = mathMin(self.length, targetVisible)
 	
 	-- Update attachment positions based on history
 	local currentTime = tick()
