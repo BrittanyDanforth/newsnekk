@@ -315,13 +315,15 @@ function Snake:createHead()
 	local headSize = self.config.HeadSize or Vector3.new(20, 20, 20) -- MASSIVE head!
 	head.Size = headSize
 	head.Shape = Enum.PartType.Block -- Block shape for consistency
-	head.Material = self.config.HeadMaterial or Enum.Material.Plastic -- Solid plastic material
+	head.Material = Enum.Material.Plastic -- FORCE plastic material, ignore config
 	head.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	head.CanCollide = false
 	head.CanTouch = true
 	head.CanQuery = true
 	head.Anchored = true
-	head.Transparency = 0 -- Fully opaque for proper visibility
+	head.Transparency = 0 -- Fully opaque
+	head.Reflectance = 0 -- No reflectance
+	head.CastShadow = true -- Cast shadows for solid appearance
 	head.Parent = self.model
 	
 	-- Force head to be properly sized (10% bigger)
@@ -334,12 +336,7 @@ function Snake:createHead()
 
 	-- No inner glow needed - head is already neon material
 
-	-- Head light
-	local glow = Instance.new("PointLight")
-	glow.Brightness = 3
-	glow.Range = 10
-	glow.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
-	glow.Parent = head
+	-- No head light for solid plastic appearance
 
 	-- Modern eye design - flat rectangular eyes
 	local function createEye(name, xOffset)
@@ -619,11 +616,7 @@ function Snake:updateHead()
 		self.rightEye.CFrame = headCF * CFramenew(eyeSeparation, eyeHeight, eyeForward)
 	end
 	
-	-- Update head light
-	local glow = self.head:FindFirstChild("PointLight")
-	if glow then
-		glow.Range = 10 * growthFactor
-	end
+	-- No head light updates needed
 end
 
 function Snake:updateBeamBody()
