@@ -8,12 +8,12 @@ local CollectionService = game:GetService("CollectionService")
 local TweenService = game:GetService("TweenService")
 
 -- Performance constants
-local ATTACHMENT_POOL_SIZE = 1000  -- Increased for long snakes
-local BEAM_POOL_SIZE = 500  -- Increased for long snakes
+local ATTACHMENT_POOL_SIZE = 1500  -- Support huge snakes
+local BEAM_POOL_SIZE = 800  -- Support huge snakes
 local NETWORK_UPDATE_RATE = 10  -- Optimized network rate
 local MAX_VISIBLE_ATTACHMENTS = 100  -- Base attachments (scales with length)
 local BOOST_VISIBLE_ATTACHMENTS = 80  -- Base boost attachments
-local HISTORY_SIZE = 500  -- Smaller history buffer
+local HISTORY_SIZE = 1500  -- Larger history for long snakes
 local BEAM_TEXTURE = "" -- No texture for clean solid look
 
 -- Attachment spacing
@@ -409,11 +409,21 @@ function Snake:initializeBeamBody()
 	
 	-- Scale attachments with length for LONG snakes
 	if self.length > 1000 then
-		local lengthMultiplier = mathMin(self.length / 1000, 5)
-		maxVisible = mathMin(maxVisible * lengthMultiplier, 500)
+		-- Much more aggressive scaling for huge snakes
+		local lengthMultiplier = mathMin(self.length / 500, 10)  -- Up to 10x more
+		maxVisible = mathMin(maxVisible * lengthMultiplier, 800)  -- Higher cap
+	end
+	
+	-- For REALLY long snakes, ensure we show enough
+	if self.length >= 10000 then
+		maxVisible = mathMax(maxVisible, 400)  -- At least 400 segments
+	end
+	if self.length >= 50000 then
+		maxVisible = mathMax(maxVisible, 600)  -- At least 600 segments for 50K
 	end
 	
 	self.visibleAttachmentCount = mathMin(self.length, maxVisible)
+	print("Snake length:", self.length, "Visible attachments:", self.visibleAttachmentCount)
 	
 	local growthFactor = self:calculateGrowthFactor()
 	local beamWidth = 5 * growthFactor -- Base width
@@ -657,8 +667,16 @@ function Snake:updateBeamBody()
 	
 	-- Scale visible segments with length for LONG snakes
 	if self.length > 1000 then
-		local lengthMultiplier = mathMin(self.length / 1000, 5)  -- Up to 5x more segments
-		targetVisible = mathMin(targetVisible * lengthMultiplier, 500)  -- Cap at 500 for performance
+		local lengthMultiplier = mathMin(self.length / 500, 10)
+		targetVisible = mathMin(targetVisible * lengthMultiplier, 800)
+	end
+	
+	-- Ensure minimum visibility for huge snakes
+	if self.length >= 10000 then
+		targetVisible = mathMax(targetVisible, 400)
+	end
+	if self.length >= 50000 then
+		targetVisible = mathMax(targetVisible, 600)
 	end
 	
 	targetVisible = mathMin(self.length, targetVisible)
