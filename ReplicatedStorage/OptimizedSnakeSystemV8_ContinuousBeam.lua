@@ -1,26 +1,26 @@
 -- Optimized Snake System V8 - CONTINUOUS BEAM SYSTEM (Slither.io Style)
--- Integrates with SnakeSystemIntegration and SnakeNetworkHandler
--- NO GAPS POSSIBLE - Uses beam technology
+-- Works like other versions but uses beams for visuals on client
+-- NO GAPS POSSIBLE - Uses beam technology on client, collision parts on server
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 local CollectionService = game:GetService("CollectionService")
 
--- Performance constants
-local ATTACHMENT_POOL_SIZE = 500
-local COLLISION_PART_POOL_SIZE = 100
-local PATH_RESOLUTION = 2
-local NETWORK_UPDATE_RATE = 15  -- Match SnakeNetworkHandler
-local BEAM_SEGMENTS = 10
-local HISTORY_SIZE = 2000
+-- Detect environment
+local IS_CLIENT = RunService:IsClient()
+local IS_SERVER = RunService:IsServer()
 
--- Visual settings
+-- Performance constants
+local SEGMENT_POOL_SIZE = 500  -- For server collision parts
+local NETWORK_UPDATE_RATE = 15
+local HISTORY_SIZE = 2000
+local MAX_VISIBLE_SEGMENTS = 300
+
+-- Beam settings (client only)
 local BEAM_WIDTH_BASE = 4
-local BEAM_TEXTURE = "rbxasset://textures/ui/LuaChat/icons/ic-check.png"
-local BEAM_TEXTURE_SPEED = 2
-local BEAM_TRANSPARENCY = NumberSequence.new(0)
+local BEAM_SEGMENTS = 10
+local ATTACHMENT_SPACING = 3.2
 
 -- Fast references
 local CFramenew = CFrame.new
@@ -30,87 +30,70 @@ local mathMax = math.max
 local mathFloor = math.floor
 local tick = tick
 
--- Object pools
-local AttachmentPool = {}
-local CollisionPartPool = {}
-local ActiveAttachments = {}
-local ActiveCollisionParts = {}
+-- Pools
+local SegmentPool = {}
+local SegmentPoolIndex = 0
+local ActiveSegments = {}
 
--- Module
-local OptimizedSnakeSystemV8 = {}
-
--- Initialize pools
-local function initializePools()
-	-- Create attachment pool
-	for i = 1, ATTACHMENT_POOL_SIZE do
-		local attachment = Instance.new("Attachment")
-		attachment.Name = "PooledAttachment" .. i
-		attachment.Visible = false
-		attachment.Parent = nil
-		AttachmentPool[i] = attachment
-		ActiveAttachments[attachment] = false
-	end
+-- Initialize segment pool (server only)
+local function initializeSegmentPool()
+	if IS_CLIENT then return end
 	
-	-- Create collision part pool
-	for i = 1, COLLISION_PART_POOL_SIZE do
-		local part = Instance.new("Part")
-		part.Name = "CollisionPart" .. i
-		part.Size = Vector3new(6, 6, 6)
-		part.Shape = Enum.PartType.Ball
-		part.Transparency = 1
-		part.CanCollide = false
-		part.CanQuery = false
-		part.CanTouch = true
-		part.Anchored = true
-		part.Parent = nil
+	for i = 1, SEGMENT_POOL_SIZE do
+		local segment = Instance.new("Part")
+		segment.Name = "PooledSegment"
+		segment.Size = Vector3new(4, 4, 4)
+		segment.Shape = Enum.PartType.Ball
+		segment.Material = Enum.Material.Neon
+		segment.TopSurface = Enum.SurfaceType.Smooth
+		segment.BottomSurface = Enum.SurfaceType.Smooth
+		segment.CanCollide = false
+		segment.CanQuery = false
+		segment.CanTouch = false
+		segment.Anchored = true
+		segment.Parent = nil
 		
-		CollisionPartPool[i] = part
-		ActiveCollisionParts[part] = false
+		-- Add glow
+		local glow = Instance.new("PointLight")
+		glow.Name = "glow"
+		glow.Brightness = 0.5
+		glow.Range = 4
+		glow.Parent = segment
+		
+		SegmentPool[i] = segment
+		ActiveSegments[segment] = false
 	end
 	
-	print("✅ Continuous beam pools initialized")
+	print("✅ V8 Server: Segment pool initialized")
 end
 
--- Get from pools
-local function getAttachmentFromPool()
-	for i = 1, ATTACHMENT_POOL_SIZE do
-		local attachment = AttachmentPool[i]
-		if not ActiveAttachments[attachment] then
-			ActiveAttachments[attachment] = true
-			return attachment
+-- Get segment from pool
+local function getSegmentFromPool()
+	for i = 1, SEGMENT_POOL_SIZE do
+		local segment = SegmentPool[i]
+		if not ActiveSegments[segment] then
+			ActiveSegments[segment] = true
+			return segment
 		end
 	end
-	return nil
+	-- Reuse oldest
+	SegmentPoolIndex = (SegmentPoolIndex % SEGMENT_POOL_SIZE) + 1
+	local segment = SegmentPool[SegmentPoolIndex]
+	ActiveSegments[segment] = true
+	return segment
 end
 
-local function getCollisionPartFromPool()
-	for i = 1, COLLISION_PART_POOL_SIZE do
-		local part = CollisionPartPool[i]
-		if not ActiveCollisionParts[part] then
-			ActiveCollisionParts[part] = true
-			return part
-		end
-	end
-	return nil
-end
-
--- Return to pools
-local function returnAttachmentToPool(attachment)
-	if attachment then
-		ActiveAttachments[attachment] = false
-		attachment.Parent = nil
+-- Return segment to pool
+local function returnSegmentToPool(segment)
+	if segment then
+		ActiveSegments[segment] = false
+		segment.Parent = nil
+		segment.CFrame = CFramenew(0, -10000, 0)
 	end
 end
 
-local function returnCollisionPartToPool(part)
-	if part then
-		ActiveCollisionParts[part] = false
-		part.Parent = nil
-		part.CFrame = CFramenew(0, -10000, 0)
-	end
-end
-
--- Create network events (compatible with existing system)
+-- Create network events
+local remoteEvents = {}
 local function createNetworkEvents()
 	local folder = ReplicatedStorage:FindFirstChild("SnakeNetworking")
 	if not folder then
@@ -119,17 +102,16 @@ local function createNetworkEvents()
 		folder.Parent = ReplicatedStorage
 	end
 	
-	-- Use same event names as other versions
 	local events = {"PositionUpdate", "LengthUpdate", "SkinUpdate"}
 	for _, eventName in ipairs(events) do
-		if not folder:FindFirstChild(eventName) then
-			local event = Instance.new("RemoteEvent")
+		local event = folder:FindFirstChild(eventName)
+		if not event then
+			event = Instance.new("RemoteEvent")
 			event.Name = eventName
 			event.Parent = folder
 		end
+		remoteEvents[eventName:lower()] = event
 	end
-	
-	return folder
 end
 
 -- Snake Class
@@ -143,20 +125,7 @@ function Snake.new(character, config)
 	self.rootPart = character:WaitForChild("HumanoidRootPart")
 	self.humanoid = character:WaitForChild("Humanoid")
 	self.player = Players:GetPlayerFromCharacter(character)
-	self.config = config or {}
-	
-	-- Apply defaults
-	self.config.InitialLength = self.config.InitialLength or 10
-	self.config.HeadSize = self.config.HeadSize or Vector3new(4.5, 4.5, 4.5)
-	self.config.SegmentSize = self.config.SegmentSize or Vector3new(4, 4, 4)
-	self.config.HeadColor = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
-	self.config.BodyColors = self.config.BodyColors or {
-		Color3.fromRGB(60, 180, 80),
-		Color3.fromRGB(80, 200, 100),
-		Color3.fromRGB(100, 220, 120),
-		Color3.fromRGB(80, 200, 100),
-		Color3.fromRGB(60, 180, 80),
-	}
+	self.config = config
 	
 	if not self.player then
 		warn("Failed to get player from character")
@@ -177,75 +146,113 @@ function Snake.new(character, config)
 	self.rootPart.CanCollide = true
 	self.rootPart.CanTouch = true
 	
-	-- Core data
-	self.length = self.config.InitialLength
-	self.pathPoints = {}
-	self.attachments = {}
-	self.beams = {}
-	self.collisionParts = {}
-	self.skinName = self.config.SkinName or "Default"
-	
-	-- Movement history (for network sync)
-	self.positionHistory = {}
-	self.historyIndex = 0
-	
-	-- State
+	-- Snake data
+	self.length = config.InitialLength or 55
+	self.segments = {}  -- Server: collision parts, Client: visual parts
+	self.visibleSegmentCount = 0
 	self.isBoosting = false
-	self.lastUpdateTime = tick()
-	self.networkUpdateTime = 0
+	
+	-- Movement history
+	self.positionHistory = {}
+	self.historyHead = 1
+	self.historyCount = 0
+	local maxHistorySize = mathMin(mathFloor(config.MaxSegments * 0.3), 1500)
+	
+	-- Initialize history
+	local initialPoint = {
+		position = self.rootPart.Position,
+		lookVector = self.rootPart.CFrame.LookVector
+	}
+	for i = 1, 100 do
+		self.positionHistory[i] = initialPoint
+		self.historyCount = i
+	end
+	
+	-- Skin data
+	self.skinName = config.SkinName or "Default"
+	self.headColor = config.HeadColor or Color3.fromRGB(76, 217, 100)
+	self.bodyColors = config.BodyColors or {
+		Color3.fromRGB(60, 180, 80),
+		Color3.fromRGB(80, 200, 100),
+		Color3.fromRGB(100, 220, 120),
+		Color3.fromRGB(80, 200, 100),
+		Color3.fromRGB(60, 180, 80),
+	}
 	
 	-- Create model
 	self.model = Instance.new("Model")
 	self.model.Name = self.player.Name .. "_Snake"
 	self.model.Parent = workspace
 	
-	-- Anchor part for attachments
-	self.anchorPart = Instance.new("Part")
-	self.anchorPart.Name = "SnakeAnchor"
-	self.anchorPart.Size = Vector3new(1, 1, 1)
-	self.anchorPart.Transparency = 1
-	self.anchorPart.CanCollide = false
-	self.anchorPart.CanQuery = false
-	self.anchorPart.CanTouch = false
-	self.anchorPart.Anchored = true
-	self.anchorPart.CFrame = self.rootPart.CFrame
-	self.anchorPart.Parent = self.model
-	
-	-- Initialize
-	self:createHead()
-	self:initializePath()
-	self:createBeamChain()
-	self:startUpdateLoops()
-	
-	-- Apply initial skin
-	if self.config.SkinName then
-		self:applySkin(self.config.SkinName)
+	-- Initialize based on environment
+	if IS_CLIENT then
+		self:initializeClient()
+	else
+		self:initializeServer()
 	end
 	
-	-- Tag for other systems
-	self.model:SetAttribute("SnakeOwner", self.player.Name)
-	self.model:SetAttribute("SnakeLength", self.length)
-	CollectionService:AddTag(self.model, "PlayerSnake")
+	-- Start updates
+	self:startUpdateLoop()
 	
 	return self
 end
 
-function Snake:createHead()
-	-- Create head (invisible, just for collision)
+function Snake:initializeServer()
+	-- Server only creates collision parts and head
+	self:createServerHead()
+	self:createInitialSegments()
+	
+	-- Set attributes for client sync
+	self.player:SetAttribute("SnakeLength", self.length)
+	self.player:SetAttribute("HeadColor", self.headColor)
+	self.player:SetAttribute("EquippedSkin", self.skinName)
+end
+
+function Snake:initializeClient()
+	-- Client creates visual beam system
+	if self.player == Players.LocalPlayer then
+		-- For local player, also create collision detection
+		self:createClientHead()
+	end
+	
+	-- Create beam visuals
+	self:createBeamSystem()
+end
+
+function Snake:createServerHead()
+	-- Create invisible head
 	self.head = Instance.new("Part")
 	self.head.Name = "Head"
-	self.head.Size = self.config.HeadSize
+	self.head.Size = self.config.HeadSize or Vector3new(4.5, 4.5, 4.5)
 	self.head.Shape = Enum.PartType.Ball
 	self.head.Material = Enum.Material.Neon
-	self.head.Color = self.config.HeadColor
-	self.head.Transparency = 1  -- Invisible like other systems
+	self.head.Color = self.headColor
+	self.head.Transparency = 1
 	self.head.CanCollide = false
 	self.head.CanQuery = false
 	self.head.CanTouch = false
 	self.head.Anchored = true
 	self.head.Parent = self.model
 	
-	-- Create visible eyes
+	-- Create eyes (visible)
+	self:createEyes()
+end
+
+function Snake:createClientHead()
+	-- Client version - similar but for local collision
+	self.head = Instance.new("Part")
+	self.head.Name = "ClientHead"
+	self.head.Size = self.config.HeadSize or Vector3new(4.5, 4.5, 4.5)
+	self.head.Transparency = 1
+	self.head.CanCollide = false
+	self.head.Anchored = true
+	self.head.Parent = self.model
+	
+	-- Eyes
+	self:createEyes()
+end
+
+function Snake:createEyes()
 	local eyeSize = Vector3new(0.8, 0.8, 0.8)
 	
 	self.leftEye = Instance.new("Part")
@@ -264,7 +271,6 @@ function Snake:createHead()
 	
 	-- Pupils
 	local pupilSize = Vector3new(0.4, 0.4, 0.4)
-	
 	self.leftPupil = Instance.new("Part")
 	self.leftPupil.Name = "LeftPupil"
 	self.leftPupil.Size = pupilSize
@@ -278,133 +284,112 @@ function Snake:createHead()
 	self.rightPupil = self.leftPupil:Clone()
 	self.rightPupil.Name = "RightPupil"
 	self.rightPupil.Parent = self.model
-	
-	-- Head glow
-	local glow = Instance.new("PointLight")
-	glow.Brightness = 1.5
-	glow.Range = 6
-	glow.Color = self.config.HeadColor
-	glow.Parent = self.head
 end
 
-function Snake:initializePath()
-	-- Create initial straight path
-	local startPos = self.rootPart.Position
-	local startDir = -self.rootPart.CFrame.LookVector
+function Snake:createInitialSegments()
+	-- Server creates collision segments
+	local visibleLength = mathMin(self.length, MAX_VISIBLE_SEGMENTS)
 	
-	local totalDistance = self.length * BEAM_WIDTH_BASE
-	local numPoints = mathFloor(totalDistance / PATH_RESOLUTION) + 1
-	
-	for i = 0, numPoints do
-		local distance = i * PATH_RESOLUTION
-		local position = startPos + startDir * distance
-		
-		table.insert(self.pathPoints, {
-			position = position,
-			distance = distance,
-			width = self:getWidthAtDistance(distance)
-		})
+	for i = 1, visibleLength do
+		local segment = getSegmentFromPool()
+		if segment then
+			segment.Name = "Segment" .. i
+			local colorIndex = ((i - 1) % #self.bodyColors) + 1
+			segment.Color = self.bodyColors[colorIndex]
+			
+			-- Position behind head
+			local spacing = self.config.SegmentSpacing or 3.2
+			segment.Position = self.rootPart.Position - self.rootPart.CFrame.LookVector * (i * spacing)
+			segment.Parent = self.model
+			
+			self.segments[i] = segment
+			CollectionService:AddTag(segment, "SnakeSegment")
+		end
 	end
+	
+	self.visibleSegmentCount = visibleLength
 end
 
-function Snake:createBeamChain()
-	-- Clear existing
-	for _, beam in ipairs(self.beams) do
-		beam:Destroy()
-	end
+function Snake:createBeamSystem()
+	-- Client-only beam system
+	self.beamContainer = Instance.new("Part")
+	self.beamContainer.Name = "BeamContainer"
+	self.beamContainer.Size = Vector3new(1, 1, 1)
+	self.beamContainer.Transparency = 1
+	self.beamContainer.CanCollide = false
+	self.beamContainer.Anchored = true
+	self.beamContainer.Parent = self.model
+	
+	self.attachments = {}
 	self.beams = {}
 	
-	for _, attachment in ipairs(self.attachments) do
-		returnAttachmentToPool(attachment)
-	end
-	self.attachments = {}
+	-- Create attachments along the snake
+	local numAttachments = mathMin(self.length, 100)  -- Limit for performance
 	
-	-- Calculate attachment count based on length
-	local attachmentSpacing = BEAM_WIDTH_BASE * 0.8
-	local numAttachments = mathMin(mathFloor(self.length * BEAM_WIDTH_BASE / attachmentSpacing), ATTACHMENT_POOL_SIZE - 1)
-	
-	-- Create attachments
 	for i = 0, numAttachments do
-		local attachment = getAttachmentFromPool()
-		if attachment then
-			attachment.Parent = self.anchorPart
-			attachment.WorldPosition = self:getPositionAtDistance(i * attachmentSpacing)
-			table.insert(self.attachments, attachment)
-		end
+		local attachment = Instance.new("Attachment")
+		attachment.Name = "Attachment" .. i
+		attachment.Parent = self.beamContainer
+		attachment.WorldPosition = self.rootPart.Position - self.rootPart.CFrame.LookVector * (i * ATTACHMENT_SPACING)
+		table.insert(self.attachments, attachment)
 	end
 	
 	-- Create beams between attachments
 	for i = 1, #self.attachments - 1 do
 		local beam = Instance.new("Beam")
-		beam.Name = "BodyBeam" .. i
+		beam.Name = "Beam" .. i
 		beam.Attachment0 = self.attachments[i]
 		beam.Attachment1 = self.attachments[i + 1]
 		
 		-- Visual properties
-		beam.Width0 = self:getWidthAtDistance((i - 1) * attachmentSpacing)
-		beam.Width1 = self:getWidthAtDistance(i * attachmentSpacing)
+		local growthFactor = self:calculateGrowthFactor()
+		beam.Width0 = BEAM_WIDTH_BASE * growthFactor
+		beam.Width1 = BEAM_WIDTH_BASE * growthFactor * 0.8
 		beam.CurveSize0 = 0
 		beam.CurveSize1 = 0
 		beam.Segments = BEAM_SEGMENTS
-		beam.Transparency = BEAM_TRANSPARENCY
+		beam.Transparency = NumberSequence.new(0)
 		
-		-- Apply pattern colors
-		local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
-		beam.Color = ColorSequence.new(self.config.BodyColors[colorIndex])
+		-- Color
+		local colorIndex = ((i - 1) % #self.bodyColors) + 1
+		beam.Color = ColorSequence.new(self.bodyColors[colorIndex])
 		
 		-- Texture
-		beam.Texture = BEAM_TEXTURE
-		beam.TextureSpeed = BEAM_TEXTURE_SPEED
+		beam.Texture = "rbxasset://textures/ui/LuaChat/icons/ic-check.png"
+		beam.TextureSpeed = 2
 		beam.TextureLength = 2
 		beam.TextureMode = Enum.TextureMode.Wrap
-		
 		beam.FaceCamera = true
-		beam.Parent = self.anchorPart
 		
+		beam.Parent = self.beamContainer
 		table.insert(self.beams, beam)
 	end
-	
-	-- Update collision parts
-	self:updateCollisionParts()
 end
 
-function Snake:getPositionAtDistance(distance)
-	-- Interpolate position along path
-	local currentDist = 0
-	
-	for i = 2, #self.pathPoints do
-		local p1 = self.pathPoints[i - 1]
-		local p2 = self.pathPoints[i]
-		local segmentLength = (p2.position - p1.position).Magnitude
-		
-		if currentDist + segmentLength >= distance then
-			local t = (distance - currentDist) / segmentLength
-			return p1.position:Lerp(p2.position, t)
-		end
-		
-		currentDist = currentDist + segmentLength
+function Snake:addToHistory(data)
+	if self.historyCount < #self.positionHistory then
+		self.historyCount = self.historyCount + 1
+		self.positionHistory[self.historyCount] = data
+		self.historyHead = self.historyCount
+	else
+		self.historyHead = (self.historyHead % #self.positionHistory) + 1
+		self.positionHistory[self.historyHead] = data
+	end
+end
+
+function Snake:getFromHistory(stepsBack)
+	if stepsBack > self.historyCount then
+		return self.positionHistory[1]
 	end
 	
-	return self.pathPoints[#self.pathPoints].position
-end
-
-function Snake:getWidthAtDistance(distance)
-	-- Calculate width with taper
-	local maxDistance = self.length * BEAM_WIDTH_BASE
-	local t = distance / maxDistance
-	
-	-- Growth factor based on length
-	local growthFactor = self:calculateGrowthFactor()
-	local baseWidth = (self.config.SegmentSize.X or 4) * growthFactor
-	
-	-- Taper to tail
-	return baseWidth * (1 - t * 0.3)
+	local index = self.historyHead - stepsBack
+	if index < 1 then
+		index = index + #self.positionHistory
+	end
+	return self.positionHistory[index] or self.positionHistory[1]
 end
 
 function Snake:calculateGrowthFactor()
-	-- Match other optimized systems growth
-	local baseLength = self.config.InitialLength or 10
-	
 	if self.length <= 200 then
 		return 1
 	elseif self.length <= 2000 then
@@ -416,315 +401,268 @@ function Snake:calculateGrowthFactor()
 	end
 end
 
-function Snake:updateCollisionParts()
-	-- Clear old parts
-	for _, part in ipairs(self.collisionParts) do
-		returnCollisionPartToPool(part)
+function Snake:updateHead()
+	local growthFactor = self:calculateGrowthFactor()
+	local headSize = (self.config.HeadSize or Vector3new(4.5, 4.5, 4.5)) * growthFactor
+	
+	if self.head then
+		self.head.Size = headSize
+		self.head.CFrame = self.rootPart.CFrame
 	end
-	self.collisionParts = {}
 	
-	-- Create collision parts
-	local spacing = BEAM_WIDTH_BASE * 2
-	local numParts = mathMin(mathFloor(self.length * BEAM_WIDTH_BASE / spacing), COLLISION_PART_POOL_SIZE)
-	
-	for i = 0, numParts - 1 do
-		local part = getCollisionPartFromPool()
-		if part then
-			local distance = i * spacing
-			part.Position = self:getPositionAtDistance(distance)
-			part.Size = Vector3new(1, 1, 1) * self:getWidthAtDistance(distance)
-			part.Parent = self.model
-			table.insert(self.collisionParts, part)
-			
-			-- Tag for collision
-			part:SetAttribute("SnakeOwner", self.player.Name)
-			part:SetAttribute("SegmentIndex", i)
-			CollectionService:AddTag(part, "SnakeSegment")
-		end
-	end
-end
-
-function Snake:updatePath()
-	-- Add new head position
-	local headPos = self.rootPart.Position
-	local newPoint = {
-		position = headPos,
-		distance = 0,
-		width = self:getWidthAtDistance(0)
-	}
-	
-	-- Check minimum distance
-	if #self.pathPoints > 0 then
-		local lastPoint = self.pathPoints[1]
-		local dist = (headPos - lastPoint.position).Magnitude
+	-- Update eyes
+	if self.leftEye and self.rightEye then
+		local eyeScale = growthFactor * 0.8
+		self.leftEye.Size = Vector3new(0.8, 0.8, 0.8) * eyeScale
+		self.rightEye.Size = Vector3new(0.8, 0.8, 0.8) * eyeScale
+		self.leftPupil.Size = Vector3new(0.4, 0.4, 0.4) * eyeScale
+		self.rightPupil.Size = Vector3new(0.4, 0.4, 0.4) * eyeScale
 		
-		if dist < PATH_RESOLUTION * 0.5 then
-			return
-		end
+		local eyeSeparation = 0.7 * growthFactor
+		local eyeHeight = 0.7 * growthFactor
+		local eyeForward = -1.5 * growthFactor
+		
+		local headCF = self.rootPart.CFrame
+		self.leftEye.CFrame = headCF * CFramenew(-eyeSeparation, eyeHeight, eyeForward)
+		self.rightEye.CFrame = headCF * CFramenew(eyeSeparation, eyeHeight, eyeForward)
+		
+		self.leftPupil.CFrame = self.leftEye.CFrame * CFramenew(0, 0, -0.3 * growthFactor)
+		self.rightPupil.CFrame = self.rightEye.CFrame * CFramenew(0, 0, -0.3 * growthFactor)
 	end
-	
-	-- Add to path
-	table.insert(self.pathPoints, 1, newPoint)
-	
-	-- Recalculate distances
-	local totalDist = 0
-	for i = 2, #self.pathPoints do
-		local dist = (self.pathPoints[i].position - self.pathPoints[i-1].position).Magnitude
-		totalDist = totalDist + dist
-		self.pathPoints[i].distance = totalDist
-	end
-	
-	-- Trim to length
-	local maxDistance = self.length * BEAM_WIDTH_BASE
-	for i = #self.pathPoints, 1, -1 do
-		if self.pathPoints[i].distance > maxDistance then
-			table.remove(self.pathPoints, i)
-		else
-			break
-		end
-	end
-	
-	-- Add to history for networking
-	self.historyIndex = (self.historyIndex % HISTORY_SIZE) + 1
-	self.positionHistory[self.historyIndex] = {
-		position = headPos,
-		lookVector = self.rootPart.CFrame.LookVector,
-		time = tick()
-	}
 end
 
-function Snake:updateAttachments()
-	-- Update attachment positions
-	local spacing = BEAM_WIDTH_BASE * 0.8
+function Snake:updateSegments()
+	if IS_SERVER then
+		self:updateServerSegments()
+	else
+		self:updateClientBeams()
+	end
+end
+
+function Snake:updateServerSegments()
+	-- Server updates collision segments like other versions
+	local growthFactor = self:calculateGrowthFactor()
+	local baseSize = self.config.SegmentSize or Vector3new(4, 4, 4)
+	local currentSize = baseSize * growthFactor
+	local spacing = currentSize.X * 0.8
 	
+	local targetVisible = mathMin(self.length, MAX_VISIBLE_SEGMENTS)
+	
+	-- Update existing segments
+	for i = 1, mathMin(#self.segments, targetVisible) do
+		local segment = self.segments[i]
+		if segment and segment.Parent then
+			local delay = i * 0.8
+			local targetData = self:getFromHistory(mathFloor(delay))
+			
+			if targetData then
+				segment.CFrame = CFramenew(targetData.position, targetData.position + targetData.lookVector)
+				segment.Size = currentSize
+				
+				local glow = segment:FindFirstChild("glow")
+				if glow then
+					glow.Range = 4 * growthFactor
+				end
+			end
+		end
+	end
+	
+	-- Handle visibility changes
+	if targetVisible < self.visibleSegmentCount then
+		for i = targetVisible + 1, self.visibleSegmentCount do
+			if self.segments[i] then
+				self.segments[i].Parent = nil
+			end
+		end
+	elseif targetVisible > self.visibleSegmentCount then
+		for i = self.visibleSegmentCount + 1, targetVisible do
+			if self.segments[i] then
+				self.segments[i].Parent = self.model
+			else
+				local segment = getSegmentFromPool()
+				if segment then
+					segment.Name = "Segment" .. i
+					local colorIndex = ((i - 1) % #self.bodyColors) + 1
+					segment.Color = self.bodyColors[colorIndex]
+					segment.Parent = self.model
+					self.segments[i] = segment
+					CollectionService:AddTag(segment, "SnakeSegment")
+				end
+			end
+		end
+	end
+	
+	self.visibleSegmentCount = targetVisible
+end
+
+function Snake:updateClientBeams()
+	-- Client updates beam positions
+	if not self.attachments then return end
+	
+	local growthFactor = self:calculateGrowthFactor()
+	
+	-- Update attachment positions based on history
 	for i, attachment in ipairs(self.attachments) do
-		local distance = (i - 1) * spacing
-		attachment.WorldPosition = self:getPositionAtDistance(distance)
+		local delay = (i - 1) * 2  -- Spread out more
+		local historyData = self:getFromHistory(mathFloor(delay))
+		
+		if historyData then
+			attachment.WorldPosition = historyData.position
+		end
 	end
 	
 	-- Update beam widths
 	for i, beam in ipairs(self.beams) do
-		local distance0 = (i - 1) * spacing
-		local distance1 = i * spacing
-		beam.Width0 = self:getWidthAtDistance(distance0)
-		beam.Width1 = self:getWidthAtDistance(distance1)
+		beam.Width0 = BEAM_WIDTH_BASE * growthFactor * (1 - (i / #self.beams) * 0.3)
+		beam.Width1 = beam.Width0 * 0.9
+	end
+	
+	-- Recreate if length changed significantly
+	local desiredAttachments = mathMin(self.length, 100)
+	if math.abs(desiredAttachments - #self.attachments) > 10 then
+		-- Clear old
+		for _, beam in ipairs(self.beams) do
+			beam:Destroy()
+		end
+		for _, attachment in ipairs(self.attachments) do
+			attachment:Destroy()
+		end
+		self.beams = {}
+		self.attachments = {}
+		
+		-- Recreate
+		self:createBeamSystem()
 	end
 end
 
-function Snake:updateHead()
-	-- Update head and eyes
-	local growthFactor = self:calculateGrowthFactor()
-	local headCF = self.rootPart.CFrame
+function Snake:startUpdateLoop()
+	local updateCounter = 0
 	
-	self.head.CFrame = headCF
-	self.head.Size = self.config.HeadSize * growthFactor
-	
-	-- Update eyes with proper scaling
-	local eyeSpacing = 0.7 * growthFactor
-	local eyeHeight = 0.7 * growthFactor
-	local eyeForward = -1.5 * growthFactor
-	
-	self.leftEye.CFrame = headCF * CFramenew(-eyeSpacing, eyeHeight, eyeForward)
-	self.rightEye.CFrame = headCF * CFramenew(eyeSpacing, eyeHeight, eyeForward)
-	
-	self.leftPupil.CFrame = self.leftEye.CFrame * CFramenew(0, 0, -0.3 * growthFactor)
-	self.rightPupil.CFrame = self.rightEye.CFrame * CFramenew(0, 0, -0.3 * growthFactor)
-	
-	-- Scale eyes
-	local eyeScale = growthFactor * 0.8
-	self.leftEye.Size = Vector3new(0.8, 0.8, 0.8) * eyeScale
-	self.rightEye.Size = Vector3new(0.8, 0.8, 0.8) * eyeScale
-	self.leftPupil.Size = Vector3new(0.4, 0.4, 0.4) * eyeScale
-	self.rightPupil.Size = Vector3new(0.4, 0.4, 0.4) * eyeScale
-end
-
-function Snake:startUpdateLoops()
-	-- Main update
-	self.updateConnection = RunService.Heartbeat:Connect(function(dt)
-		-- Update path
-		self:updatePath()
+	self.updateConnection = RunService.Heartbeat:Connect(function()
+		if not self.character.Parent then
+			self:destroy()
+			return
+		end
+		
+		updateCounter = updateCounter + 1
+		
+		-- Update history
+		local currentPos = self.rootPart.Position
+		local lookVector = self.rootPart.CFrame.LookVector
+		
+		local lastHistory = self:getFromHistory(1)
+		local dist = (currentPos - lastHistory.position).Magnitude
+		
+		if dist > 0.1 then
+			self:addToHistory({
+				position = currentPos,
+				lookVector = lookVector
+			})
+		end
 		
 		-- Update visuals
 		self:updateHead()
-		self:updateAttachments()
+		self:updateSegments()
 		
-		-- Update collision less frequently
-		if tick() - self.lastUpdateTime > 0.1 then
-			self:updateCollisionParts()
-			self.lastUpdateTime = tick()
-		end
-		
-		-- Network update
-		if tick() - self.networkUpdateTime > (1 / NETWORK_UPDATE_RATE) then
-			self.networkUpdateTime = tick()
-			self:sendNetworkUpdate()
-		end
-		
-		-- Update attributes
-		self.model:SetAttribute("SnakeLength", self.length)
-	end)
-end
-
-function Snake:sendNetworkUpdate()
-	-- Send position data to server (compatible with SnakeNetworkHandler)
-	local networkFolder = ReplicatedStorage:FindFirstChild("SnakeNetworking")
-	if not networkFolder then return end
-	
-	local positionUpdate = networkFolder:FindFirstChild("PositionUpdate")
-	if positionUpdate and self.player == Players.LocalPlayer then
-		-- Compress data
-		local compressedHistory = {}
-		for i = 1, mathMin(10, #self.positionHistory) do
-			local data = self.positionHistory[i]
-			if data then
-				table.insert(compressedHistory, {
-					p = Vector3new(
-						math.floor(data.position.X * 10) / 10,
-						math.floor(data.position.Y * 10) / 10,
-						math.floor(data.position.Z * 10) / 10
-					),
-					l = data.lookVector
+		-- Network sync (client to server)
+		if IS_CLIENT and self.player == Players.LocalPlayer and updateCounter % 30 == 0 then
+			if remoteEvents.positionupdate then
+				remoteEvents.positionupdate:FireServer({
+					position = currentPos,
+					lookVector = lookVector,
+					length = self.length
 				})
 			end
 		end
-		
-		positionUpdate:FireServer({
-			history = compressedHistory,
-			length = self.length,
-			boosting = self.isBoosting
-		})
-	end
+	end)
 end
 
 function Snake:setLength(newLength)
 	self.length = mathMax(10, newLength)
 	
-	-- Update network
-	local networkFolder = ReplicatedStorage:FindFirstChild("SnakeNetworking")
-	if networkFolder then
-		local lengthUpdate = networkFolder:FindFirstChild("LengthUpdate")
-		if lengthUpdate and self.player == Players.LocalPlayer then
-			lengthUpdate:FireServer(self.length)
-		end
+	-- Update on server
+	if IS_SERVER then
+		self.player:SetAttribute("SnakeLength", self.length)
 	end
-	
-	-- Recreate beams if needed
-	local numAttachmentsNeeded = mathFloor(self.length * BEAM_WIDTH_BASE / (BEAM_WIDTH_BASE * 0.8))
-	if math.abs(numAttachmentsNeeded - #self.attachments) > 5 then
-		self:createBeamChain()
-	end
-end
-
-function Snake:applySkin(skinName)
-	self.skinName = skinName
-	
-	-- Load skin data (would come from your skin system)
-	local skinData = self:getSkinData(skinName)
-	if not skinData then return end
-	
-	-- Apply colors
-	self.config.HeadColor = skinData.HeadColor or self.config.HeadColor
-	self.config.BodyColors = skinData.BodyColors or self.config.BodyColors
-	
-	-- Update visuals
-	self.head.Color = self.config.HeadColor
-	local glow = self.head:FindFirstChild("PointLight")
-	if glow then
-		glow.Color = self.config.HeadColor
-	end
-	
-	-- Update beams
-	for i, beam in ipairs(self.beams) do
-		local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
-		beam.Color = ColorSequence.new(self.config.BodyColors[colorIndex])
-	end
-	
-	-- Send to network
-	local networkFolder = ReplicatedStorage:FindFirstChild("SnakeNetworking")
-	if networkFolder then
-		local skinUpdate = networkFolder:FindFirstChild("SkinUpdate")
-		if skinUpdate and self.player == Players.LocalPlayer then
-			skinUpdate:FireServer(skinName)
-		end
-	end
-end
-
-function Snake:getSkinData(skinName)
-	-- This should match your existing skin system
-	-- For now, basic skins
-	local skins = {
-		Default = {
-			HeadColor = Color3.fromRGB(76, 217, 100),
-			BodyColors = {
-				Color3.fromRGB(60, 180, 80),
-				Color3.fromRGB(80, 200, 100),
-				Color3.fromRGB(100, 220, 120),
-				Color3.fromRGB(80, 200, 100),
-				Color3.fromRGB(60, 180, 80),
-			}
-		},
-		Fire = {
-			HeadColor = Color3.fromRGB(255, 100, 0),
-			BodyColors = {
-				Color3.fromRGB(255, 0, 0),
-				Color3.fromRGB(255, 150, 0),
-				Color3.fromRGB(255, 100, 0),
-				Color3.fromRGB(255, 200, 0)
-			}
-		},
-		Ocean = {
-			HeadColor = Color3.fromRGB(0, 150, 255),
-			BodyColors = {
-				Color3.fromRGB(0, 100, 200),
-				Color3.fromRGB(0, 200, 255),
-				Color3.fromRGB(0, 150, 255),
-				Color3.fromRGB(0, 180, 255)
-			}
-		}
-	}
-	
-	return skins[skinName]
 end
 
 function Snake:destroy()
-	-- Cleanup
 	if self.updateConnection then
 		self.updateConnection:Disconnect()
 	end
 	
-	-- Return pooled objects
-	for _, attachment in ipairs(self.attachments) do
-		returnAttachmentToPool(attachment)
+	-- Clean up segments
+	for _, segment in pairs(self.segments) do
+		if IS_SERVER then
+			returnSegmentToPool(segment)
+		else
+			segment:Destroy()
+		end
 	end
 	
-	for _, part in ipairs(self.collisionParts) do
-		returnCollisionPartToPool(part)
+	-- Clean up beams
+	if self.beams then
+		for _, beam in ipairs(self.beams) do
+			beam:Destroy()
+		end
 	end
 	
-	-- Remove tags
-	if self.model then
-		CollectionService:RemoveTag(self.model, "PlayerSnake")
+	if self.attachments then
+		for _, attachment in ipairs(self.attachments) do
+			attachment:Destroy()
+		end
 	end
 	
-	-- Destroy model
 	if self.model then
 		self.model:Destroy()
 	end
 end
 
--- Module functions (compatible with existing system)
-function OptimizedSnakeSystemV8.new(character, config)
+-- Module
+local OptimizedSnakeSystemV8 = {}
+
+function OptimizedSnakeSystemV8.createSnake(character, config)
 	return Snake.new(character, config)
 end
 
 function OptimizedSnakeSystemV8.init()
-	-- Initialize pools
-	initializePools()
-	
-	-- Create network folder (for compatibility)
-	createNetworkEvents()
-	
-	print("✅ OptimizedSnakeSystemV8 - Continuous Beam System initialized!")
+	-- Initialize based on environment
+	if IS_SERVER then
+		initializeSegmentPool()
+		createNetworkEvents()
+		print("✅ OptimizedSnakeSystemV8 - Server initialized")
+	else
+		print("✅ OptimizedSnakeSystemV8 - Client initialized")
+		
+		-- Auto-create beam visuals for all snakes on client
+		local function handleCharacter(character)
+			wait(0.5)  -- Wait for server setup
+			
+			local player = Players:GetPlayerFromCharacter(character)
+			if player then
+				local config = {
+					InitialLength = player:GetAttribute("SnakeLength") or 55,
+					HeadColor = player:GetAttribute("HeadColor"),
+					SkinName = player:GetAttribute("EquippedSkin")
+				}
+				
+				Snake.new(character, config)
+			end
+		end
+		
+		-- Handle existing players
+		for _, player in pairs(Players:GetPlayers()) do
+			if player.Character then
+				handleCharacter(player.Character)
+			end
+			player.CharacterAdded:Connect(handleCharacter)
+		end
+		
+		-- Handle new players
+		Players.PlayerAdded:Connect(function(player)
+			player.CharacterAdded:Connect(handleCharacter)
+		end)
+	end
 end
 
 return OptimizedSnakeSystemV8
