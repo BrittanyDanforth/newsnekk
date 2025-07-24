@@ -8,16 +8,16 @@ local CollectionService = game:GetService("CollectionService")
 local TweenService = game:GetService("TweenService")
 
 -- Performance constants
-local ATTACHMENT_POOL_SIZE = 1000
-local BEAM_POOL_SIZE = 500
-local NETWORK_UPDATE_RATE = 20
-local MAX_VISIBLE_ATTACHMENTS = 300  -- More attachments for smoother curves
-local BOOST_VISIBLE_ATTACHMENTS = 250
-local HISTORY_SIZE = 2000
-local BEAM_TEXTURE = "" -- No texture for clean solid look, set to texture ID if you want patterns
+local ATTACHMENT_POOL_SIZE = 400  -- Reduced for better performance
+local BEAM_POOL_SIZE = 200  -- Reduced pool size
+local NETWORK_UPDATE_RATE = 10  -- HALF the network updates! (was 20)
+local MAX_VISIBLE_ATTACHMENTS = 100  -- Much fewer attachments
+local BOOST_VISIBLE_ATTACHMENTS = 80  -- Even fewer when boosting
+local HISTORY_SIZE = 500  -- Smaller history buffer
+local BEAM_TEXTURE = "" -- No texture for clean solid look
 
 -- Attachment spacing
-local ATTACHMENT_SPACING = 0.5 -- Ultra-close spacing for no gaps
+local ATTACHMENT_SPACING = 1.2 -- Wider spacing but beams will compensate
 
 -- Fast references
 local CFramenew = CFrame.new
@@ -73,8 +73,8 @@ local function initializeAttachmentPool()
 		-- Face camera for consistent appearance from all angles
 		beam.FaceCamera = true
 		
-		-- Maximum segments for ultra-smooth curves
-		beam.Segments = 100
+		-- Optimized segments for performance
+		beam.Segments = 25  -- Reduced from 100 - still smooth but much faster
 		
 		-- Lighting for glowing effect
 		beam.LightEmission = 0.8
@@ -405,7 +405,7 @@ end
 
 function Snake:initializeBeamBody()
 	local maxVisible = self.isBoosting and BOOST_VISIBLE_ATTACHMENTS or MAX_VISIBLE_ATTACHMENTS
-	self.visibleAttachmentCount = mathMin(self.length * 3, maxVisible) -- More attachments for smoother body
+	self.visibleAttachmentCount = mathMin(self.length, maxVisible) -- Reasonable attachment count
 	
 	local growthFactor = self:calculateGrowthFactor()
 	local beamWidth = 5 * growthFactor -- Base width
@@ -541,6 +541,8 @@ end
 
 function Snake:setupUpdateLoop()
 	local frameCount = 0
+	local lastHeadUpdate = 0
+	local lastBodyUpdate = 0
 	
 	-- Main update loop
 	self.updateConnection = RunService.Heartbeat:Connect(function(dt)
@@ -553,20 +555,28 @@ function Snake:setupUpdateLoop()
 		end
 		
 		frameCount = frameCount + 1
+		local currentTime = tick()
 		
-		-- Update position history
+		-- Always update position history (lightweight)
 		local currentPos = self.rootPart.Position
 		local currentLook = self.rootPart.CFrame.LookVector
 		self:addToHistory(currentPos, currentLook)
 		
-		-- Update head
-		self:updateHead()
+		-- Update head at 30 FPS
+		if currentTime - lastHeadUpdate > 0.033 then
+			self:updateHead()
+			lastHeadUpdate = currentTime
+		end
 		
-		-- Update beam body
-		self:updateBeamBody()
+		-- Update body at different rates based on boost
+		local bodyUpdateRate = self.isBoosting and 0.05 or 0.066  -- 20 FPS boost, 15 FPS normal
+		if currentTime - lastBodyUpdate > bodyUpdateRate then
+			self:updateBeamBody()
+			lastBodyUpdate = currentTime
+		end
 		
-		-- Update collision parts
-		if frameCount % 2 == 0 then
+		-- Update collision parts rarely
+		if frameCount % 10 == 0 then
 			self:updateCollisionParts()
 		end
 	end)
@@ -840,11 +850,24 @@ end
 
 function Snake:sendNetworkUpdate()
 	if remoteEvents.positionupdate then
-		remoteEvents.positionupdate:FireServer({
-			position = self.rootPart.Position,
-			lookVector = self.rootPart.CFrame.LookVector,
-			boosting = self.isBoosting
-		})
+		-- Round position to reduce network data
+		local pos = self.rootPart.Position
+		local roundedPos = Vector3new(
+			math.floor(pos.X * 10) / 10,
+			math.floor(pos.Y * 10) / 10,
+			math.floor(pos.Z * 10) / 10
+		)
+		
+		-- Only send if position changed significantly
+		if not self.lastNetworkPos or (self.lastNetworkPos - roundedPos).Magnitude > 0.5 then
+			self.lastNetworkPos = roundedPos
+			
+			remoteEvents.positionupdate:FireServer({
+				p = roundedPos,  -- Shortened key names
+				l = self.rootPart.CFrame.LookVector,
+				b = self.isBoosting and 1 or 0  -- Boolean as number
+			})
+		end
 	end
 end
 
