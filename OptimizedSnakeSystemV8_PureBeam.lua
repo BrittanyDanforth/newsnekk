@@ -315,19 +315,19 @@ function Snake:createHead()
 	local headSize = self.config.HeadSize or Vector3.new(20, 20, 20) -- MASSIVE head!
 	head.Size = headSize
 	head.Shape = Enum.PartType.Block -- Block shape for consistency
-	head.Material = Enum.Material.SmoothPlastic -- FORCE smooth plastic material
+	head.Material = Enum.Material.Neon -- Match body glow style
 	head.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	head.CanCollide = false
 	head.CanTouch = true
 	head.CanQuery = true
 	head.Anchored = true
-	head.Transparency = 0 -- Fully opaque
-	head.Reflectance = 0 -- No reflectance
-	head.CastShadow = true -- Cast shadows for solid appearance
+	head.Transparency = 0.1 -- Slight transparency to match beam aesthetic
+	head.Reflectance = 0
+	head.CastShadow = false -- No shadows for glowing effect
 	head.Parent = self.model
 	
-	-- Force head to be properly sized (5% bigger than 5.5)
-	head.Size = Vector3.new(5.775, 5.775, 5.775)
+	-- Force head to be properly sized
+	head.Size = Vector3.new(5.2, 5.2, 5.2)  -- Slightly smaller for better proportion
 	print("HEAD SIZE SET TO:", head.Size)
 
 	-- Tag for collision
@@ -336,7 +336,12 @@ function Snake:createHead()
 
 	-- No inner glow needed - head is already neon material
 
-	-- No head light for solid plastic appearance
+	-- Add subtle glow to match body
+	local glow = Instance.new("PointLight")
+	glow.Brightness = 1.5  -- Subtle glow
+	glow.Range = 6
+	glow.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
+	glow.Parent = head
 
 	-- Modern eye design - flat rectangular eyes
 	local function createEye(name, xOffset)
@@ -580,15 +585,15 @@ end
 
 function Snake:updateHead()
 	local growthFactor = self:calculateGrowthFactor()
-	-- MINIMUM size of 5.775, can only get bigger with growth
-	local baseSize = math.max(5.775, (self.config.HeadSize or Vector3.new(5.775, 5.775, 5.775)).X)
+	-- MINIMUM size of 5.2, can only get bigger with growth
+	local baseSize = math.max(5.2, (self.config.HeadSize or Vector3.new(5.2, 5.2, 5.2)).X)
 	local headSize = Vector3.new(baseSize, baseSize, baseSize) * growthFactor
 	
-	-- Never let it get smaller than 5.775x5.775x5.775
+	-- Never let it get smaller than 5.2x5.2x5.2
 	headSize = Vector3.new(
-		math.max(5.775, headSize.X),
-		math.max(5.775, headSize.Y),
-		math.max(5.775, headSize.Z)
+		math.max(5.2, headSize.X),
+		math.max(5.2, headSize.Y),
+		math.max(5.2, headSize.Z)
 	)
 	
 	self.head.Size = headSize
@@ -616,7 +621,12 @@ function Snake:updateHead()
 		self.rightEye.CFrame = headCF * CFramenew(eyeSeparation, eyeHeight, eyeForward)
 	end
 	
-	-- No head light updates needed
+	-- Update head light
+	local glow = self.head:FindFirstChild("PointLight")
+	if glow then
+		glow.Range = 6 * growthFactor
+		glow.Brightness = 1.5
+	end
 end
 
 function Snake:updateBeamBody()
