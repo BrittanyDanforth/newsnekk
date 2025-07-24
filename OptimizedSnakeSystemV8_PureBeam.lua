@@ -8,16 +8,16 @@ local CollectionService = game:GetService("CollectionService")
 local TweenService = game:GetService("TweenService")
 
 -- Performance constants
-local ATTACHMENT_POOL_SIZE = 500
-local BEAM_POOL_SIZE = 250
+local ATTACHMENT_POOL_SIZE = 1000
+local BEAM_POOL_SIZE = 500
 local NETWORK_UPDATE_RATE = 20
-local MAX_VISIBLE_ATTACHMENTS = 150
-local BOOST_VISIBLE_ATTACHMENTS = 120
-local HISTORY_SIZE = 1500
+local MAX_VISIBLE_ATTACHMENTS = 300  -- More attachments for smoother curves
+local BOOST_VISIBLE_ATTACHMENTS = 250
+local HISTORY_SIZE = 2000
 local BEAM_TEXTURE = "" -- No texture for clean solid look, set to texture ID if you want patterns
 
 -- Attachment spacing
-local ATTACHMENT_SPACING = 3 -- Distance between attachments
+local ATTACHMENT_SPACING = 1.5 -- Much closer spacing for smoother curves
 
 -- Fast references
 local CFramenew = CFrame.new
@@ -60,20 +60,20 @@ local function initializeAttachmentPool()
 		local beam = Instance.new("Beam")
 		beam.Name = "PooledBeam" .. i
 		beam.Texture = BEAM_TEXTURE
-		beam.TextureSpeed = 2 -- Animated texture flow
-		beam.TextureLength = 2
+		beam.TextureSpeed = 0 -- No animation for cleaner look
+		beam.TextureLength = 1
 		beam.TextureMode = Enum.TextureMode.Stretch
 		beam.Width0 = 4
 		beam.Width1 = 4
 		beam.FaceCamera = true
-		beam.Segments = 20 -- Very smooth curves
-		beam.LightEmission = 0.8
+		beam.Segments = 50 -- Ultra smooth curves - more segments = rounder appearance
+		beam.LightEmission = 0.6
 		beam.LightInfluence = 0
-		beam.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(0.5, 0),
-			NumberSequenceKeypoint.new(1, 0.2)
-		})
+		beam.Transparency = NumberSequence.new(0) -- Fully opaque
+		beam.CurveSize0 = 0 -- No curve distortion
+		beam.CurveSize1 = 0
+		-- Add ZOffset to prevent z-fighting
+		beam.ZOffset = 0.1
 		beam.Parent = holder
 		beam.Enabled = false
 		BeamPool[i] = beam
@@ -132,11 +132,15 @@ end
 -- Create network events
 local remoteEvents = {}
 local function createNetworkEvents()
+	-- Wait a frame to ensure ReplicatedStorage is ready
+	wait()
+	
 	local folder = ReplicatedStorage:FindFirstChild("SnakeNetworking")
 	if not folder then
 		folder = Instance.new("Folder")
 		folder.Name = "SnakeNetworking"
 		folder.Parent = ReplicatedStorage
+		print("✅ Created SnakeNetworking folder")
 	end
 
 	local events = {"PositionUpdate", "LengthUpdate", "SkinUpdate"}
@@ -149,6 +153,8 @@ local function createNetworkEvents()
 		end
 		remoteEvents[eventName:lower()] = event
 	end
+	
+	return folder
 end
 
 -- Snake Class
@@ -234,6 +240,51 @@ function Snake:getFromHistory(stepsBack)
 		index = index + self.historySize
 	end
 	return self.positionHistory[index]
+end
+
+function Snake:getInterpolatedHistory(targetTime)
+	-- Find two history points around the target time
+	local bestBefore, bestAfter = nil, nil
+	local currentTime = tick()
+	
+	-- Search through recent history
+	for i = 0, mathMin(100, self.historySize - 1) do
+		local index = self.historyIndex - i
+		if index < 1 then index = index + self.historySize end
+		
+		local entry = self.positionHistory[index]
+		if entry and entry.time then
+			if entry.time <= targetTime then
+				if not bestBefore or entry.time > bestBefore.time then
+					bestBefore = entry
+				end
+			else
+				if not bestAfter or entry.time < bestAfter.time then
+					bestAfter = entry
+				end
+			end
+			
+			-- Stop searching if we found both
+			if bestBefore and bestAfter then
+				break
+			end
+		end
+	end
+	
+	-- Interpolate between points
+	if bestBefore and bestAfter and bestAfter.time > bestBefore.time then
+		local alpha = (targetTime - bestBefore.time) / (bestAfter.time - bestBefore.time)
+		alpha = mathMin(mathMax(alpha, 0), 1)
+		
+		return {
+			position = bestBefore.position:Lerp(bestAfter.position, alpha),
+			lookVector = bestBefore.lookVector:Lerp(bestAfter.lookVector, alpha).Unit,
+			time = targetTime
+		}
+	end
+	
+	-- Fallback to nearest
+	return bestBefore or bestAfter or self.positionHistory[self.historyIndex]
 end
 
 function Snake:createHead()
@@ -476,11 +527,11 @@ end
 function Snake:updateBeamBody()
 	local growthFactor = self:calculateGrowthFactor()
 	local beamWidth = 4 * growthFactor
-	local spacing = ATTACHMENT_SPACING * growthFactor * 0.8 -- Tighter spacing to prevent gaps
+	local spacing = ATTACHMENT_SPACING * growthFactor * 0.6 -- Even tighter for no gaps
 	
 	-- Update visible attachment count
 	local targetVisible = self.isBoosting and BOOST_VISIBLE_ATTACHMENTS or MAX_VISIBLE_ATTACHMENTS
-	targetVisible = mathMin(mathCeil(self.length / 2), targetVisible)
+	targetVisible = mathMin(self.length * 2, targetVisible) -- More attachments relative to length
 	
 	-- Update attachment positions based on history
 	local currentTime = tick()
@@ -489,29 +540,34 @@ function Snake:updateBeamBody()
 		speed = speed * 2
 	end
 	
+	-- First pass: Update positions
 	for i = 1, mathMin(#self.attachments, targetVisible) do
 		local attachment = self.attachments[i]
 		if attachment then
-			-- Calculate position from history with more precision
-			local distanceBehind = (i - 1) * spacing -- Start from 0 for head connection
+			-- Calculate position from history with interpolation
+			local distanceBehind = (i - 1) * spacing
 			local timeOffset = distanceBehind / speed
-			local historySteps = mathFloor(timeOffset * 60) -- 60 FPS history
+			local historyTime = currentTime - timeOffset
 			
-			local historyData = self:getFromHistory(mathMin(historySteps, self.historySize - 1))
+			-- Use interpolated history for smoother curves
+			local historyData = self:getInterpolatedHistory(historyTime)
 			if historyData then
-				-- Get base position
 				local targetPos = historyData.position
-				
-				-- Add slight wave motion for organic feel
-				local waveOffset = math.sin(currentTime * 3 + i * 0.5) * 0.1 * growthFactor
-				targetPos = targetPos + Vector3new(0, waveOffset, 0)
-				
-				-- Smooth position update
 				local currentWorldPos = attachment.WorldPosition
 				
-				-- Stronger lerp for first few segments, weaker for tail
-				local lerpFactor = 0.4 - (i / targetVisible) * 0.2
-				if currentWorldPos.Y > -9000 then -- Check if not in pool position
+				-- Dynamic lerp based on turning speed
+				local turnSpeed = 0
+				if i > 1 and self.attachmentPositions[i-1] then
+					local prevPos = self.attachmentPositions[i-1]
+					turnSpeed = (targetPos - prevPos).Unit:Dot(historyData.lookVector)
+				end
+				
+				-- Stronger lerp when turning for tighter curves
+				local baseLerp = 0.5
+				local turnLerp = mathMax(0.7, 1 - math.abs(turnSpeed))
+				local lerpFactor = baseLerp * turnLerp
+				
+				if currentWorldPos.Y > -9000 then
 					targetPos = currentWorldPos:Lerp(targetPos, lerpFactor)
 				end
 				
@@ -521,18 +577,54 @@ function Snake:updateBeamBody()
 		end
 	end
 	
+	-- Second pass: Smooth out sharp angles
+	for i = 3, mathMin(#self.attachments - 1, targetVisible - 1) do
+		if self.attachmentPositions[i-1] and self.attachmentPositions[i] and self.attachmentPositions[i+1] then
+			local prev = self.attachmentPositions[i-1]
+			local curr = self.attachmentPositions[i]
+			local next = self.attachmentPositions[i+1]
+			
+			-- Calculate angle
+			local dir1 = (curr - prev).Unit
+			local dir2 = (next - curr).Unit
+			local dot = dir1:Dot(dir2)
+			
+			-- If angle is too sharp, smooth it
+			if dot < 0.9 then -- ~25 degree threshold
+				local smoothed = (prev + next) / 2
+				local blend = 0.3 * (1 - dot) -- More smoothing for sharper angles
+				self.attachments[i].WorldPosition = curr:Lerp(smoothed, blend)
+				self.attachmentPositions[i] = self.attachments[i].WorldPosition
+			end
+		end
+	end
+	
 	-- Update beam widths and colors
 	for i = 1, #self.beams do
 		local beam = self.beams[i]
 		if beam and beam.Enabled and i < targetVisible then
-			beam.Width0 = beamWidth
-			beam.Width1 = beamWidth
+			-- Variable width for more organic look
+			local segmentProgress = i / targetVisible
+			local widthMultiplier = 1 - (segmentProgress * 0.3) -- Taper towards tail
+			
+			beam.Width0 = beamWidth * widthMultiplier
+			beam.Width1 = beamWidth * widthMultiplier
+			
+			-- Make beams thicker to appear more round
+			beam.Width0 = beam.Width0 * 1.2
+			beam.Width1 = beam.Width1 * 1.2
+			
+			-- Smooth width transitions between segments
+			if i > 1 and self.beams[i-1] then
+				local prevBeam = self.beams[i-1]
+				beam.Width0 = prevBeam.Width1
+			end
 			
 			-- Pulse effect when boosting
 			if self.isBoosting then
-				local pulse = math.sin(currentTime * 10) * 0.2 + 1
-				beam.Width0 = beamWidth * pulse
-				beam.Width1 = beamWidth * pulse
+				local pulse = math.sin(currentTime * 10 + i * 0.1) * 0.15 + 1
+				beam.Width0 = beam.Width0 * pulse
+				beam.Width1 = beam.Width1 * pulse
 			end
 		elseif beam and i >= targetVisible then
 			beam.Enabled = false
