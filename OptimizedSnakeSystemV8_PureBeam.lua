@@ -315,30 +315,20 @@ function Snake:createHead()
 	local headSize = self.config.HeadSize or Vector3.new(20, 20, 20) -- MASSIVE head!
 	head.Size = headSize
 	head.Shape = Enum.PartType.Block -- Block shape for consistency
-	head.Material = self.config.HeadMaterial or Enum.Material.ForceField
+	head.Material = self.config.HeadMaterial or Enum.Material.Neon -- Neon for proper size visibility
 	head.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	head.CanCollide = false
 	head.CanTouch = true
 	head.CanQuery = true
 	head.Anchored = true
-	head.Transparency = 0.1 -- Slight transparency for glow effect
+	head.Transparency = 0 -- Fully opaque for proper visibility
 	head.Parent = self.model
 
 	-- Tag for collision
 	CollectionService:AddTag(head, "SnakeHead")
 	head:SetAttribute("PlayerId", self.player.UserId)
 
-	-- Create inner glow part
-	local innerGlow = Instance.new("Part")
-	innerGlow.Name = "InnerGlow"
-	innerGlow.Size = headSize * 0.8
-	innerGlow.Shape = Enum.PartType.Block
-	innerGlow.Material = Enum.Material.Neon
-	innerGlow.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
-	innerGlow.CanCollide = false
-	innerGlow.Anchored = true
-	innerGlow.Transparency = 0.3
-	innerGlow.Parent = self.model
+	-- No inner glow needed - head is already neon material
 
 	-- Head light
 	local glow = Instance.new("PointLight")
@@ -372,7 +362,6 @@ function Snake:createHead()
 	self.leftEye = createEye("LeftEye", -1.2)
 	self.rightEye = createEye("RightEye", 1.2)
 	self.head = head
-	self.innerGlow = innerGlow
 
 	-- Create multiple attachment points for smoother head-to-body transition
 	self.headAttachments = {}
@@ -598,11 +587,7 @@ function Snake:updateHead()
 	local headCF = CFramenew(currentPos, currentPos + currentLook)
 	self.head.CFrame = headCF
 	
-	-- Update inner glow
-	if self.innerGlow then
-		self.innerGlow.Size = headSize * 0.8
-		self.innerGlow.CFrame = headCF
-	end
+	-- Head updates handled above
 	
 	-- Update eyes with sleek positioning
 	if self.leftEye and self.rightEye then
