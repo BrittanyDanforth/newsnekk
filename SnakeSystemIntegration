@@ -281,7 +281,7 @@ local function onCharacterAdded(character)
 		end)
 	end
 
-	-- Update loop
+	-- Update loop (V8 handles its own updates internally)
 	local updateConnection
 	updateConnection = RunService.Heartbeat:Connect(function(dt)
 		if not character.Parent or humanoid.Health <= 0 then
@@ -289,8 +289,10 @@ local function onCharacterAdded(character)
 			return
 		end
 
-		if snake and activeSnakes[player] == snake then
-			snake:update(dt)
+		-- V8 uses internal update loop, no need to call update
+		-- Just check if snake still exists
+		if not snake or activeSnakes[player] ~= snake then
+			updateConnection:Disconnect()
 		end
 	end)
 
