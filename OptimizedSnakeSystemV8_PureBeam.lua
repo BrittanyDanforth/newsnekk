@@ -17,7 +17,7 @@ local HISTORY_SIZE = 2000
 local BEAM_TEXTURE = "" -- No texture for clean solid look, set to texture ID if you want patterns
 
 -- Attachment spacing
-local ATTACHMENT_SPACING = 1.5 -- Much closer spacing for smoother curves
+local ATTACHMENT_SPACING = 0.5 -- Ultra-close spacing for no gaps
 
 -- Fast references
 local CFramenew = CFrame.new
@@ -55,25 +55,46 @@ local function initializeAttachmentPool()
 		ActiveAttachments[attachment] = false
 	end
 	
-	-- Initialize beam pool
+	-- Initialize beam pool with premium appearance
 	for i = 1, BEAM_POOL_SIZE do
 		local beam = Instance.new("Beam")
 		beam.Name = "PooledBeam" .. i
-		beam.Texture = BEAM_TEXTURE
-		beam.TextureSpeed = 0 -- No animation for cleaner look
-		beam.TextureLength = 1
-		beam.TextureMode = Enum.TextureMode.Stretch
-		beam.Width0 = 4
-		beam.Width1 = 4
+		
+		-- Premium beam settings for smooth, round appearance
+		beam.Texture = "rbxasset://textures/ui/LuaApp/graphic/gr-radial-thin-glow-64.png" -- Radial glow texture
+		beam.TextureSpeed = 0
+		beam.TextureLength = 0.5
+		beam.TextureMode = Enum.TextureMode.Static
+		
+		-- Width settings for round appearance
+		beam.Width0 = 6
+		beam.Width1 = 6
+		
+		-- Face camera for consistent appearance from all angles
 		beam.FaceCamera = true
-		beam.Segments = 50 -- Ultra smooth curves - more segments = rounder appearance
-		beam.LightEmission = 0.6
+		
+		-- Maximum segments for ultra-smooth curves
+		beam.Segments = 100
+		
+		-- Lighting for glowing effect
+		beam.LightEmission = 0.8
 		beam.LightInfluence = 0
-		beam.Transparency = NumberSequence.new(0) -- Fully opaque
-		beam.CurveSize0 = 0 -- No curve distortion
+		beam.Brightness = 2
+		
+		-- Transparency for smooth edges
+		beam.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.3),
+			NumberSequenceKeypoint.new(0.5, 0),
+			NumberSequenceKeypoint.new(1, 0.3)
+		})
+		
+		-- No curve distortion
+		beam.CurveSize0 = 0
 		beam.CurveSize1 = 0
-		-- Add ZOffset to prevent z-fighting
-		beam.ZOffset = 0.1
+		
+		-- Slight offset to prevent overlapping
+		beam.ZOffset = -0.1
+		
 		beam.Parent = holder
 		beam.Enabled = false
 		BeamPool[i] = beam
@@ -288,64 +309,90 @@ function Snake:getInterpolatedHistory(targetTime)
 end
 
 function Snake:createHead()
-	-- Create head part
+	-- Create a sleek, modern head design
 	local head = Instance.new("Part")
 	head.Name = "SnakeHead"
-	head.Size = self.config.HeadSize or Vector3.new(4.5, 4.5, 4.5)
-	head.Shape = Enum.PartType.Ball
-	head.Material = self.config.HeadMaterial or Enum.Material.Neon
+	local headSize = self.config.HeadSize or Vector3.new(5, 5, 5)
+	head.Size = headSize
+	head.Shape = Enum.PartType.Block -- Block shape for consistency
+	head.Material = self.config.HeadMaterial or Enum.Material.ForceField
 	head.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	head.CanCollide = false
 	head.CanTouch = true
 	head.CanQuery = true
 	head.Anchored = true
-	head.Transparency = 0
+	head.Transparency = 0.1 -- Slight transparency for glow effect
 	head.Parent = self.model
 
 	-- Tag for collision
 	CollectionService:AddTag(head, "SnakeHead")
 	head:SetAttribute("PlayerId", self.player.UserId)
 
-	-- Head glow
+	-- Create inner glow part
+	local innerGlow = Instance.new("Part")
+	innerGlow.Name = "InnerGlow"
+	innerGlow.Size = headSize * 0.8
+	innerGlow.Shape = Enum.PartType.Block
+	innerGlow.Material = Enum.Material.Neon
+	innerGlow.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
+	innerGlow.CanCollide = false
+	innerGlow.Anchored = true
+	innerGlow.Transparency = 0.3
+	innerGlow.Parent = self.model
+
+	-- Head light
 	local glow = Instance.new("PointLight")
-	glow.Brightness = 2
-	glow.Range = 8
+	glow.Brightness = 3
+	glow.Range = 10
 	glow.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	glow.Parent = head
 
-	-- Eyes
+	-- Modern eye design - flat rectangular eyes
 	local function createEye(name, xOffset)
 		local eye = Instance.new("Part")
 		eye.Name = name
-		eye.Size = Vector3.new(0.8, 0.8, 0.8)
-		eye.Shape = Enum.PartType.Ball
+		eye.Size = Vector3.new(0.8, 1.2, 0.2) -- Rectangular eyes
+		eye.Shape = Enum.PartType.Block
 		eye.Material = Enum.Material.Neon
 		eye.Color = Color3.fromRGB(255, 255, 255)
 		eye.CanCollide = false
 		eye.Anchored = true
 		eye.Parent = self.model
 
-		local pupil = Instance.new("Part")
-		pupil.Name = name .. "Pupil"
-		pupil.Size = Vector3.new(0.4, 0.4, 0.4)
-		pupil.Shape = Enum.PartType.Ball
-		pupil.Material = Enum.Material.Neon
-		pupil.Color = Color3.fromRGB(0, 0, 0)
-		pupil.CanCollide = false
-		pupil.Anchored = true
-		pupil.Parent = self.model
+		-- Eye glow
+		local eyeGlow = Instance.new("SurfaceLight")
+		eyeGlow.Face = Enum.NormalId.Front
+		eyeGlow.Brightness = 2
+		eyeGlow.Color = Color3.fromRGB(255, 255, 255)
+		eyeGlow.Parent = eye
 
-		return eye, pupil
+		return eye, nil -- No pupils for cleaner look
 	end
 
-	self.leftEye, self.leftPupil = createEye("LeftEye", -0.7)
-	self.rightEye, self.rightPupil = createEye("RightEye", 0.7)
+	self.leftEye = createEye("LeftEye", -1.2)
+	self.rightEye = createEye("RightEye", 1.2)
 	self.head = head
+	self.innerGlow = innerGlow
 
-	-- Create head attachment for first beam
-	self.headAttachment = Instance.new("Attachment")
-	self.headAttachment.Name = "HeadAttachment"
-	self.headAttachment.Parent = head
+	-- Create multiple attachment points for smoother head-to-body transition
+	self.headAttachments = {}
+	
+	-- Front attachment (for first body beam)
+	local frontAttachment = Instance.new("Attachment")
+	frontAttachment.Name = "HeadAttachmentFront"
+	frontAttachment.Position = Vector3.new(0, 0, -headSize.Z/2)
+	frontAttachment.Parent = head
+	self.headAttachments[1] = frontAttachment
+	
+	-- Back attachment (for smoother transition)
+	local backAttachment = Instance.new("Attachment")
+	backAttachment.Name = "HeadAttachmentBack" 
+	backAttachment.Position = Vector3.new(0, 0, headSize.Z/2)
+	backAttachment.Parent = head
+	self.headAttachments[2] = backAttachment
+	
+	-- Keep reference for compatibility
+	self.headAttachment = backAttachment
 end
 
 function Snake:calculateGrowthFactor()
@@ -363,11 +410,11 @@ end
 
 function Snake:initializeBeamBody()
 	local maxVisible = self.isBoosting and BOOST_VISIBLE_ATTACHMENTS or MAX_VISIBLE_ATTACHMENTS
-	self.visibleAttachmentCount = mathMin(mathCeil(self.length / 2), maxVisible)
+	self.visibleAttachmentCount = mathMin(self.length * 3, maxVisible) -- More attachments for smoother body
 	
 	local growthFactor = self:calculateGrowthFactor()
-	local beamWidth = 4 * growthFactor
-	local spacing = ATTACHMENT_SPACING * growthFactor * 0.8
+	local beamWidth = 5 * growthFactor -- Base width
+	local spacing = ATTACHMENT_SPACING * growthFactor
 	
 	-- Create invisible parts for collision detection at key points
 	self.collisionParts = {}
@@ -376,8 +423,22 @@ function Snake:initializeBeamBody()
 	local startPos = self.rootPart.Position
 	local startLook = self.rootPart.CFrame.LookVector
 	
-	-- Create attachments and beams
-	for i = 1, self.visibleAttachmentCount do
+	-- Create transition attachments from head to body
+	local transitionCount = 3
+	for i = 1, transitionCount do
+		local attachment = getAttachmentFromPool()
+		if attachment then
+			attachment.Name = "TransitionAttachment" .. i
+			local progress = i / transitionCount
+			local offset = startLook * (progress * spacing * 2)
+			attachment.WorldPosition = startPos - offset
+			self.attachments[i] = attachment
+			self.attachmentPositions[i] = attachment.WorldPosition
+		end
+	end
+	
+	-- Create main body attachments
+	for i = transitionCount + 1, self.visibleAttachmentCount do
 		local attachment = getAttachmentFromPool()
 		if attachment then
 			attachment.Name = "BodyAttachment" .. i
@@ -389,8 +450,8 @@ function Snake:initializeBeamBody()
 			
 			self.attachments[i] = attachment
 			
-			-- Create collision part every 5 attachments
-			if i % 5 == 0 and i <= 30 then
+			-- Create collision part every 10 attachments
+			if i % 10 == 0 and i <= 60 then
 				local collisionPart = Instance.new("Part")
 				collisionPart.Name = "CollisionSegment" .. i
 				collisionPart.Size = Vector3.new(beamWidth, beamWidth, beamWidth)
@@ -409,43 +470,76 @@ function Snake:initializeBeamBody()
 				
 				table.insert(self.collisionParts, {part = collisionPart, attachmentIndex = i})
 			end
-			
-			-- Create beam connecting to previous attachment
-			if i > 1 then
-				local beam = getBeamFromPool()
-				if beam then
-					beam.Attachment0 = (i == 2) and self.headAttachment or self.attachments[i-1]
-					beam.Attachment1 = attachment
-					
-					-- Set beam color based on position with gradient
-					local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
-					local color = self.config.BodyColors[colorIndex]
-					local nextColorIndex = (i % #self.config.BodyColors) + 1
-					local nextColor = self.config.BodyColors[nextColorIndex]
-					
-					beam.Color = ColorSequence.new({
-						ColorSequenceKeypoint.new(0, color),
-						ColorSequenceKeypoint.new(1, nextColor)
-					})
-					beam.Width0 = beamWidth
-					beam.Width1 = beamWidth
-					
-					self.beams[i-1] = beam
-				end
-			end
 		end
 	end
 	
-	-- Connect first beam from head
+	-- Create beams with smooth transitions
+	for i = 1, self.visibleAttachmentCount - 1 do
+		local beam = getBeamFromPool()
+		if beam and self.attachments[i] and self.attachments[i+1] then
+			beam.Attachment0 = self.attachments[i]
+			beam.Attachment1 = self.attachments[i+1]
+			
+			-- Smooth color gradient along body
+			local progress = i / self.visibleAttachmentCount
+			local colorIndex = math.floor(progress * #self.config.BodyColors) + 1
+			colorIndex = math.min(colorIndex, #self.config.BodyColors)
+			local color = self.config.BodyColors[colorIndex]
+			
+			-- Create gradient effect
+			local nextColorIndex = (colorIndex % #self.config.BodyColors) + 1
+			local nextColor = self.config.BodyColors[nextColorIndex]
+			
+			beam.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, color),
+				ColorSequenceKeypoint.new(0.5, Color3.new(
+					(color.R + nextColor.R) / 2,
+					(color.G + nextColor.G) / 2,
+					(color.B + nextColor.B) / 2
+				)),
+				ColorSequenceKeypoint.new(1, nextColor)
+			})
+			
+			-- Width tapering
+			local widthMultiplier = 1 - (progress * 0.4) -- Taper to 60% at tail
+			beam.Width0 = beamWidth * widthMultiplier
+			beam.Width1 = beamWidth * widthMultiplier * 0.95 -- Slight taper per segment
+			
+			self.beams[i] = beam
+		end
+	end
+	
+	-- Special head-to-body beam with smooth transition
 	if #self.attachments > 0 then
-		local firstBeam = getBeamFromPool()
-		if firstBeam then
-			firstBeam.Attachment0 = self.headAttachment
-			firstBeam.Attachment1 = self.attachments[1]
-			firstBeam.Color = ColorSequence.new(self.config.BodyColors[1])
-			firstBeam.Width0 = beamWidth * 1.2 -- Slightly wider at head
-			firstBeam.Width1 = beamWidth
-			table.insert(self.beams, 1, firstBeam)
+		local headBeam = getBeamFromPool()
+		if headBeam then
+			headBeam.Attachment0 = self.headAttachment
+			headBeam.Attachment1 = self.attachments[1]
+			
+			-- Match head color transitioning to body
+			local headColor = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
+			local bodyColor = self.config.BodyColors[1]
+			
+			headBeam.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, headColor),
+				ColorSequenceKeypoint.new(0.3, headColor),
+				ColorSequenceKeypoint.new(0.7, bodyColor),
+				ColorSequenceKeypoint.new(1, bodyColor)
+			})
+			
+			-- Smooth width transition from head
+			headBeam.Width0 = self.head.Size.X * 0.8
+			headBeam.Width1 = beamWidth
+			
+			-- Extra transparency for smooth blend
+			headBeam.Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.5),
+				NumberSequenceKeypoint.new(0.2, 0.2),
+				NumberSequenceKeypoint.new(0.8, 0.2),
+				NumberSequenceKeypoint.new(1, 0.3)
+			})
+			
+			table.insert(self.beams, 1, headBeam)
 		end
 	end
 end
@@ -496,7 +590,7 @@ end
 
 function Snake:updateHead()
 	local growthFactor = self:calculateGrowthFactor()
-	local headSize = (self.config.HeadSize or Vector3.new(4.5, 4.5, 4.5)) * growthFactor
+	local headSize = (self.config.HeadSize or Vector3.new(5, 5, 5)) * growthFactor
 	self.head.Size = headSize
 	
 	local currentPos = self.rootPart.Position
@@ -504,30 +598,38 @@ function Snake:updateHead()
 	local headCF = CFramenew(currentPos, currentPos + currentLook)
 	self.head.CFrame = headCF
 	
-	-- Update eyes
+	-- Update inner glow
+	if self.innerGlow then
+		self.innerGlow.Size = headSize * 0.8
+		self.innerGlow.CFrame = headCF
+	end
+	
+	-- Update eyes with sleek positioning
 	if self.leftEye and self.rightEye then
-		local eyeScale = growthFactor * 0.8
-		self.leftEye.Size = Vector3.new(0.8, 0.8, 0.8) * eyeScale
-		self.rightEye.Size = Vector3.new(0.8, 0.8, 0.8) * eyeScale
-		self.leftPupil.Size = Vector3.new(0.4, 0.4, 0.4) * eyeScale
-		self.rightPupil.Size = Vector3.new(0.4, 0.4, 0.4) * eyeScale
+		local eyeScale = growthFactor
+		self.leftEye.Size = Vector3.new(0.8, 1.2, 0.2) * eyeScale
+		self.rightEye.Size = Vector3.new(0.8, 1.2, 0.2) * eyeScale
 		
-		local eyeSeparation = 0.7 * growthFactor
-		local eyeHeight = 0.7 * growthFactor
-		local eyeForward = -1.5 * growthFactor
+		local eyeSeparation = 1.2 * growthFactor
+		local eyeHeight = 0.5 * growthFactor
+		local eyeForward = -2.3 * growthFactor
 		
+		-- Position eyes on the front face
 		self.leftEye.CFrame = headCF * CFramenew(-eyeSeparation, eyeHeight, eyeForward)
 		self.rightEye.CFrame = headCF * CFramenew(eyeSeparation, eyeHeight, eyeForward)
-		
-		self.leftPupil.CFrame = self.leftEye.CFrame * CFramenew(0, 0, -0.3 * growthFactor)
-		self.rightPupil.CFrame = self.rightEye.CFrame * CFramenew(0, 0, -0.3 * growthFactor)
+	end
+	
+	-- Update head light
+	local glow = self.head:FindFirstChild("PointLight")
+	if glow then
+		glow.Range = 10 * growthFactor
 	end
 end
 
 function Snake:updateBeamBody()
 	local growthFactor = self:calculateGrowthFactor()
-	local beamWidth = 4 * growthFactor
-	local spacing = ATTACHMENT_SPACING * growthFactor * 0.6 -- Even tighter for no gaps
+	local beamWidth = 5 * growthFactor
+	local spacing = ATTACHMENT_SPACING * growthFactor
 	
 	-- Update visible attachment count
 	local targetVisible = self.isBoosting and BOOST_VISIBLE_ATTACHMENTS or MAX_VISIBLE_ATTACHMENTS
