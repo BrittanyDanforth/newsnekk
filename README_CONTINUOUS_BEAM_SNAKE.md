@@ -32,9 +32,10 @@ This is a revolutionary snake movement system that uses **continuous beams** ins
 ## Installation
 
 1. Place `OptimizedSnakeSystemV8_ContinuousBeam.lua` in ReplicatedStorage
-2. Replace your existing `SnakeMovement` LocalScript with the new version
-3. Update `CharacterSetup` with the new simplified version
-4. That's it! The system handles everything else
+2. Your existing `SnakeSystemIntegration` will automatically load V8 first
+3. `SnakeMovement` LocalScript continues to handle player movement input
+4. `SnakeNetworkHandler` continues to handle networking
+5. That's it! The beam system integrates seamlessly with your existing architecture
 
 ## Performance Comparison
 
@@ -124,17 +125,21 @@ Skins are defined as simple color schemes:
 
 ## Migration from Old System
 
-1. **Remove old scripts:**
-   - Old CharacterSetup segments code
-   - OptimizedSnakeSystem versions 1-7
-   - Any segment pooling systems
+1. **Keep your existing architecture:**
+   - SnakeSystemIntegration (will auto-load V8)
+   - SnakeNetworkHandler (unchanged)
+   - SnakeMovement (for player input)
+   
+2. **Remove old visual systems:**
+   - CharacterSetup (replaced by OptimizedSnakeSystem)
+   - Any manual segment creation code
 
-2. **Update dependent systems:**
+3. **Update dependent systems:**
    - Orb collection to use rootPart
    - Length display to use new API
    - Skin system to use new format
 
-3. **Test thoroughly:**
+4. **Test thoroughly:**
    - Movement at all speeds
    - Collision with orbs
    - Skin changes
