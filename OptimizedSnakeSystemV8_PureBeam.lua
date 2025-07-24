@@ -315,7 +315,7 @@ function Snake:createHead()
 	local headSize = self.config.HeadSize or Vector3.new(20, 20, 20) -- MASSIVE head!
 	head.Size = headSize
 	head.Shape = Enum.PartType.Block -- Block shape for consistency
-	head.Material = Enum.Material.Plastic -- FORCE plastic material, ignore config
+	head.Material = Enum.Material.SmoothPlastic -- FORCE smooth plastic material
 	head.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	head.CanCollide = false
 	head.CanTouch = true
@@ -326,8 +326,8 @@ function Snake:createHead()
 	head.CastShadow = true -- Cast shadows for solid appearance
 	head.Parent = self.model
 	
-	-- Force head to be properly sized (10% bigger)
-	head.Size = Vector3.new(5.5, 5.5, 5.5)
+	-- Force head to be properly sized (5% bigger than 5.5)
+	head.Size = Vector3.new(5.775, 5.775, 5.775)
 	print("HEAD SIZE SET TO:", head.Size)
 
 	-- Tag for collision
@@ -580,15 +580,15 @@ end
 
 function Snake:updateHead()
 	local growthFactor = self:calculateGrowthFactor()
-	-- MINIMUM size of 5.5, can only get bigger with growth
-	local baseSize = math.max(5.5, (self.config.HeadSize or Vector3.new(5.5, 5.5, 5.5)).X)
+	-- MINIMUM size of 5.775, can only get bigger with growth
+	local baseSize = math.max(5.775, (self.config.HeadSize or Vector3.new(5.775, 5.775, 5.775)).X)
 	local headSize = Vector3.new(baseSize, baseSize, baseSize) * growthFactor
 	
-	-- Never let it get smaller than 5.5x5.5x5.5
+	-- Never let it get smaller than 5.775x5.775x5.775
 	headSize = Vector3.new(
-		math.max(5.5, headSize.X),
-		math.max(5.5, headSize.Y),
-		math.max(5.5, headSize.Z)
+		math.max(5.775, headSize.X),
+		math.max(5.775, headSize.Y),
+		math.max(5.775, headSize.Z)
 	)
 	
 	self.head.Size = headSize
@@ -607,9 +607,9 @@ function Snake:updateHead()
 		self.leftEye.Size = Vector3.new(1.0, 1.5, 0.2) * eyeScale
 		self.rightEye.Size = Vector3.new(1.0, 1.5, 0.2) * eyeScale
 		
-		local eyeSeparation = 1.3 * growthFactor  -- Compact spacing for 5x5 head
-		local eyeHeight = 0.5 * growthFactor
-		local eyeForward = -2.2 * growthFactor  -- Close position for 5x5 head
+		local eyeSeparation = 1.4 * growthFactor  -- Spacing for 5.775 head
+		local eyeHeight = 0.6 * growthFactor
+		local eyeForward = -(headSize.Z / 2 + 0.1)  -- Position ON the front face, not inside
 		
 		-- Position eyes on the front face
 		self.leftEye.CFrame = headCF * CFramenew(-eyeSeparation, eyeHeight, eyeForward)

@@ -129,7 +129,7 @@ local DEFAULT_CONFIG = {
 	MaxSegments = 50000,  -- MASSIVE SNAKES! Was 10000
 	SegmentSpacing = 3.2,  -- Original spacing
 	SegmentSize = Vector3.new(4, 4, 4),  -- Original size
-	HeadSize = Vector3.new(5.5, 5.5, 5.5), -- Perfect head size
+	HeadSize = Vector3.new(5.775, 5.775, 5.775), -- Perfect head size (5% bigger)
 	HeadColor = Color3.fromRGB(76, 217, 100),
 	BodyColors = {
 		Color3.fromRGB(60, 180, 80),
@@ -138,7 +138,7 @@ local DEFAULT_CONFIG = {
 		Color3.fromRGB(80, 200, 100),
 		Color3.fromRGB(60, 180, 80),
 	},
-	HeadMaterial = Enum.Material.Plastic, -- Solid plastic head
+	HeadMaterial = Enum.Material.SmoothPlastic, -- Smooth plastic head
 	BodyMaterial = Enum.Material.Neon,
 	GlowIntensity = 2,
 	GlowRange = 6
