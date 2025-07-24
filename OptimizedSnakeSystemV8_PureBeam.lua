@@ -315,7 +315,7 @@ function Snake:createHead()
 	local headSize = self.config.HeadSize or Vector3.new(20, 20, 20) -- MASSIVE head!
 	head.Size = headSize
 	head.Shape = Enum.PartType.Block -- Block shape for consistency
-	head.Material = self.config.HeadMaterial or Enum.Material.Neon -- Neon for proper size visibility
+	head.Material = self.config.HeadMaterial or Enum.Material.Plastic -- Solid plastic material
 	head.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	head.CanCollide = false
 	head.CanTouch = true
@@ -324,8 +324,8 @@ function Snake:createHead()
 	head.Transparency = 0 -- Fully opaque for proper visibility
 	head.Parent = self.model
 	
-	-- Force head to be properly sized
-	head.Size = Vector3.new(5, 5, 5)
+	-- Force head to be properly sized (10% bigger)
+	head.Size = Vector3.new(5.5, 5.5, 5.5)
 	print("HEAD SIZE SET TO:", head.Size)
 
 	-- Tag for collision
@@ -583,15 +583,15 @@ end
 
 function Snake:updateHead()
 	local growthFactor = self:calculateGrowthFactor()
-	-- MINIMUM size of 5, can only get bigger with growth
-	local baseSize = math.max(5, (self.config.HeadSize or Vector3.new(5, 5, 5)).X)
+	-- MINIMUM size of 5.5, can only get bigger with growth
+	local baseSize = math.max(5.5, (self.config.HeadSize or Vector3.new(5.5, 5.5, 5.5)).X)
 	local headSize = Vector3.new(baseSize, baseSize, baseSize) * growthFactor
 	
-	-- Never let it get smaller than 5x5x5
+	-- Never let it get smaller than 5.5x5.5x5.5
 	headSize = Vector3.new(
-		math.max(5, headSize.X),
-		math.max(5, headSize.Y),
-		math.max(5, headSize.Z)
+		math.max(5.5, headSize.X),
+		math.max(5.5, headSize.Y),
+		math.max(5.5, headSize.Z)
 	)
 	
 	self.head.Size = headSize

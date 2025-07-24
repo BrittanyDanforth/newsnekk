@@ -129,7 +129,7 @@ local DEFAULT_CONFIG = {
 	MaxSegments = 50000,  -- MASSIVE SNAKES! Was 10000
 	SegmentSpacing = 3.2,  -- Original spacing
 	SegmentSize = Vector3.new(4, 4, 4),  -- Original size
-	HeadSize = Vector3.new(5, 5, 5), -- Compact head size
+	HeadSize = Vector3.new(5.5, 5.5, 5.5), -- Perfect head size
 	HeadColor = Color3.fromRGB(76, 217, 100),
 	BodyColors = {
 		Color3.fromRGB(60, 180, 80),
