@@ -312,7 +312,7 @@ function Snake:createHead()
 	-- Create a sleek, modern head design
 	local head = Instance.new("Part")
 	head.Name = "SnakeHead"
-	local headSize = self.config.HeadSize or Vector3.new(7, 7, 7) -- Bigger head!
+	local headSize = self.config.HeadSize or Vector3.new(12, 12, 12) -- MUCH bigger head to match body!
 	head.Size = headSize
 	head.Shape = Enum.PartType.Block -- Block shape for consistency
 	head.Material = self.config.HeadMaterial or Enum.Material.ForceField
@@ -351,7 +351,7 @@ function Snake:createHead()
 	local function createEye(name, xOffset)
 		local eye = Instance.new("Part")
 		eye.Name = name
-		eye.Size = Vector3.new(1.2, 1.6, 0.3) -- Bigger rectangular eyes
+		eye.Size = Vector3.new(2.0, 3.0, 0.5) -- Much bigger eyes for bigger head
 		eye.Shape = Enum.PartType.Block
 		eye.Material = Enum.Material.Neon
 		eye.Color = Color3.fromRGB(255, 255, 255)
@@ -527,9 +527,9 @@ function Snake:initializeBeamBody()
 				ColorSequenceKeypoint.new(1, bodyColor)
 			})
 			
-			-- Smooth width transition from head
-			headBeam.Width0 = self.head.Size.X * 0.8
-			headBeam.Width1 = beamWidth
+			-- Smooth width transition from huge head to body
+			headBeam.Width0 = self.head.Size.X * 0.5  -- Start at half head width since head is huge
+			headBeam.Width1 = beamWidth * 1.2  -- Slightly wider body connection
 			
 			-- Extra transparency for smooth blend
 			headBeam.Transparency = NumberSequence.new({
@@ -590,7 +590,7 @@ end
 
 function Snake:updateHead()
 	local growthFactor = self:calculateGrowthFactor()
-	local headSize = (self.config.HeadSize or Vector3.new(7, 7, 7)) * growthFactor
+	local headSize = (self.config.HeadSize or Vector3.new(12, 12, 12)) * growthFactor
 	self.head.Size = headSize
 	
 	local currentPos = self.rootPart.Position
@@ -607,12 +607,12 @@ function Snake:updateHead()
 	-- Update eyes with sleek positioning
 	if self.leftEye and self.rightEye then
 		local eyeScale = growthFactor
-		self.leftEye.Size = Vector3.new(1.2, 1.6, 0.3) * eyeScale
-		self.rightEye.Size = Vector3.new(1.2, 1.6, 0.3) * eyeScale
+		self.leftEye.Size = Vector3.new(2.0, 3.0, 0.5) * eyeScale
+		self.rightEye.Size = Vector3.new(2.0, 3.0, 0.5) * eyeScale
 		
-		local eyeSeparation = 1.8 * growthFactor  -- Wider spacing for bigger head
-		local eyeHeight = 0.7 * growthFactor
-		local eyeForward = -3.2 * growthFactor  -- Further forward for bigger head
+		local eyeSeparation = 3.0 * growthFactor  -- Much wider for huge head
+		local eyeHeight = 1.0 * growthFactor
+		local eyeForward = -5.5 * growthFactor  -- Much further forward for huge head
 		
 		-- Position eyes on the front face
 		self.leftEye.CFrame = headCF * CFramenew(-eyeSeparation, eyeHeight, eyeForward)
