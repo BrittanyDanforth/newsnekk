@@ -27,8 +27,8 @@ local MAX_SEGMENT_SIZE = 10
 local GLOW_INTENSITY_MIN = 1
 local GLOW_INTENSITY_MAX = 3
 local BEAM_SEGMENTS = 10 -- Back to normal
-local BEAM_MIN_WIDTH = 4 -- Increased to cover gaps better
-local BEAM_MAX_WIDTH = 14 -- Increased for better coverage
+local BEAM_MIN_WIDTH = 2 -- Reduced to fit inside segments
+local BEAM_MAX_WIDTH = 8 -- Reduced to not stick out
 
 -- Network optimization cache
 local NetworkCache = {}
@@ -340,8 +340,8 @@ function Snake:createBody()
 	headBeam.Attachment1 = self.attachments[1]
 
 	-- Head beam properties (matching body beams)
-	headBeam.Width0 = BEAM_MIN_WIDTH
-	headBeam.Width1 = BEAM_MIN_WIDTH
+	headBeam.Width0 = MIN_HEAD_SIZE * 0.8
+	headBeam.Width1 = MIN_HEAD_SIZE * 0.8
 	headBeam.CurveSize0 = 0
 	headBeam.CurveSize1 = 0
 	headBeam.FaceCamera = true
@@ -371,8 +371,8 @@ function Snake:createBody()
 		beam.Attachment1 = self.attachments[i + 1]
 
 		-- Enhanced beam visuals for better gap coverage
-		beam.Width0 = BEAM_MIN_WIDTH
-		beam.Width1 = BEAM_MIN_WIDTH
+		beam.Width0 = MIN_SEGMENT_SIZE * 0.8
+		beam.Width1 = MIN_SEGMENT_SIZE * 0.8
 		beam.CurveSize0 = 0
 		beam.CurveSize1 = 0
 		beam.FaceCamera = true
@@ -575,9 +575,14 @@ function Snake:updateBodyUnified()
 end
 
 function Snake:updateBeams()
+	-- Get current segment size for proper beam scaling
+	local segmentSize = MIN_SEGMENT_SIZE + (MAX_SEGMENT_SIZE - MIN_SEGMENT_SIZE) * (self.growthFactor - 1) / 9
+	
 	-- Update head beam
 	if self.headBeam then
-		local width = BEAM_MIN_WIDTH + (BEAM_MAX_WIDTH - BEAM_MIN_WIDTH) * (self.growthFactor - 1) / 9
+		-- Scale beam width to be 80% of segment size to stay inside
+		local headSize = MIN_HEAD_SIZE + (MAX_HEAD_SIZE - MIN_HEAD_SIZE) * (self.growthFactor - 1) / 9
+		local width = headSize * 0.8
 		self.headBeam.Width0 = width
 		self.headBeam.Width1 = width
 		self.headBeam.LightEmission = self.isBoosting and 1 or 0.9
@@ -593,8 +598,10 @@ function Snake:updateBeams()
 	for i, beam in ipairs(self.beams) do
 		if beam and beam.Parent and i <= self.visibleSegmentCount then
 			local progress = i / self.visibleSegmentCount
-			local width = BEAM_MIN_WIDTH + (BEAM_MAX_WIDTH - BEAM_MIN_WIDTH) * (self.growthFactor - 1) / 9
-			width = width * (1 - progress * 0.3) -- Taper
+			local taper = 1 - progress * 0.3
+			
+			-- Scale beam to 80% of segment size to keep it inside
+			local width = segmentSize * taper * 0.8
 
 			beam.Width0 = width
 			beam.Width1 = width
@@ -645,8 +652,8 @@ function Snake:addSegments(count)
 			beam.Attachment1 = self.attachments[i]
 
 			-- Enhanced beam properties
-			beam.Width0 = BEAM_MIN_WIDTH
-			beam.Width1 = BEAM_MIN_WIDTH
+			beam.Width0 = MIN_SEGMENT_SIZE * 0.8
+			beam.Width1 = MIN_SEGMENT_SIZE * 0.8
 			beam.CurveSize0 = 0
 			beam.CurveSize1 = 0
 			beam.FaceCamera = true
