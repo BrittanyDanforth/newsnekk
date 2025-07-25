@@ -5,7 +5,7 @@ return {
 	HeadSize = Vector3.new(3, 3, 3),
 	SegmentSize = Vector3.new(2.5, 2.5, 2.5),
 	SegmentSpacing = 2.2,
-	SegmentGap = 3.0, -- For SnakeMovement path system
+	SegmentGap = 2.5, -- Reduced from 3.0 for tighter segments
 
 	-- BODY SETTINGS
 	InitialLength = 105,
@@ -27,7 +27,12 @@ return {
 	BoostFollowSpeed = 0.99,
 	UpdateRate = 1,
 	MinDistance = 0.02,
-	PathSmoothness = 0.9,
+	PathSmoothness = 0.92, -- Increased from 0.9 for smoother paths
+	
+	-- TURNING SETTINGS
+	TurnSpeed = 3.8, -- Smooth turning speed
+	BaseSpeed = 50,
+	BoostSpeed = 100,
 
 	-- MATERIALS
 	HeadMaterial = Enum.Material.ForceField,

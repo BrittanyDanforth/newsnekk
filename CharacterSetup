@@ -91,7 +91,7 @@ local taskWait = task.wait
 local Config = {
 	HeadSize = Vector3new(4.5, 4.5, 4.5),  -- Bigger head
 	SegmentSize = Vector3new(3.5, 3.5, 4),  -- Thinner but still good
-	SegmentSpacing = 3.2,  -- Tighter for more segments visible
+	SegmentSpacing = 2.8,  -- Reduced from 3.2 for tighter, smoother appearance
 	InitialLength = 5000,  -- Starting length
 	MaxSegments = 10000,  -- INSANE MAX for absolutely MASSIVE snakes!
 	HeadColor = Color3.fromRGB(76, 217, 100), -- Classic green
@@ -102,7 +102,7 @@ local Config = {
 		Color3.fromRGB(80, 200, 100),
 		Color3.fromRGB(60, 180, 80),
 	},
-	FollowSpeed = 0.92,
+	FollowSpeed = 0.95,  -- Increased from 0.92 for tighter following
 	UpdateRate = 30,
 	MinDistance = 0.02,
 	BoostSpeed = 32,
@@ -1316,7 +1316,23 @@ local function createUltraSmoothSnake(character)
 							lerpSpeed = followSpeed * 0.8
 						end
 
+						-- Enhanced smooth interpolation with easing
 						local newPos = currentSegmentPos:Lerp(segmentPos, lerpSpeed)
+						
+						-- Apply additional smoothing for better curves
+						if i > 1 and prevSegment then
+							-- Use weighted average with previous segment for smoother curves
+							local prevDir = (currentSegmentPos - prevSegment.Position).Unit
+							local targetDir = (segmentPos - prevSegment.Position).Unit
+							
+							-- Smooth direction change
+							if prevDir.Magnitude > 0.1 and targetDir.Magnitude > 0.1 then
+								local smoothFactor = 0.3 * (1 - lerpSpeed * 0.5) -- More smoothing for distant segments
+								local blendedDir = prevDir:Lerp(targetDir, 1 - smoothFactor).Unit
+								local adjustedPos = prevSegment.Position + blendedDir * activeConfig.SegmentSpacing
+								newPos = newPos:Lerp(adjustedPos, smoothFactor)
+							end
+						end
 
 						segment.CFrame = CFramenew(newPos)
 					end
