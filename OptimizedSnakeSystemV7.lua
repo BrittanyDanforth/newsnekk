@@ -9,14 +9,14 @@ local CollectionService = game:GetService("CollectionService")
 -- Performance constants
 local SEGMENT_POOL_SIZE = 3000
 local NETWORK_UPDATE_RATE = 20
-local MAX_VISIBLE_SEGMENTS = 300  -- More segments for smoother look
-local BOOST_VISIBLE_SEGMENTS = 250  -- Still good when boosting
-local HISTORY_SIZE = 1500
-local GAP_CHECK_INTERVAL = 10  -- Check for gaps every 10 frames
+local MAX_VISIBLE_SEGMENTS = 350  -- Increased from 300 for smoother look
+local BOOST_VISIBLE_SEGMENTS = 300  -- Increased from 250
+local HISTORY_SIZE = 2000  -- Increased from 1500 for better interpolation
+local GAP_CHECK_INTERVAL = 5  -- Reduced from 10 for more frequent gap checking
 
 -- Gap healing settings
-local MAX_SEGMENT_DISTANCE = 8  -- Max distance before considered a gap
-local GAP_HEAL_SPEED = 0.3  -- How fast gaps close
+local MAX_SEGMENT_DISTANCE = 6  -- Reduced from 8 for tighter segments
+local GAP_HEAL_SPEED = 0.4  -- Increased from 0.3 for faster gap healing
 
 -- Fast references
 local CFramenew = CFrame.new
@@ -198,31 +198,92 @@ end
 function Snake:getInterpolatedHistory(targetTime)
 	-- Find two history points around the target time
 	local bestBefore, bestAfter = nil, nil
+	local secondBefore, secondAfter = nil, nil
 	
 	for i = 1, self.historySize do
 		local entry = self.positionHistory[i]
 		if entry then
 			if entry.time <= targetTime then
 				if not bestBefore or entry.time > bestBefore.time then
+					secondBefore = bestBefore
 					bestBefore = entry
+				elseif not secondBefore or entry.time > secondBefore.time then
+					secondBefore = entry
 				end
 			else
 				if not bestAfter or entry.time < bestAfter.time then
+					secondAfter = bestAfter
 					bestAfter = entry
+				elseif not secondAfter or entry.time < secondAfter.time then
+					secondAfter = entry
 				end
 			end
 		end
 	end
 	
-	-- If we have both points, interpolate
+	-- If we have both points, use Catmull-Rom spline for smooth interpolation
 	if bestBefore and bestAfter and bestAfter.time > bestBefore.time then
 		local alpha = (targetTime - bestBefore.time) / (bestAfter.time - bestBefore.time)
 		alpha = mathMin(mathMax(alpha, 0), 1)
 		
-		return {
-			position = bestBefore.position:Lerp(bestAfter.position, alpha),
-			lookVector = bestBefore.lookVector:Lerp(bestAfter.lookVector, alpha).Unit
-		}
+		-- Use Catmull-Rom spline if we have 4 points
+		if secondBefore and secondAfter then
+			-- Catmull-Rom spline interpolation
+			local t = alpha
+			local t2 = t * t
+			local t3 = t2 * t
+			
+			local p0 = secondBefore.position
+			local p1 = bestBefore.position
+			local p2 = bestAfter.position
+			local p3 = secondAfter.position
+			
+			-- Catmull-Rom basis with tension factor for smoother curves
+			local tension = 0.5
+			local v0 = (p2 - p0) * tension
+			local v1 = (p3 - p1) * tension
+			
+			local a = p1
+			local b = v0
+			local c = (p2 - p1) * 3 - v0 * 2 - v1
+			local d = (p1 - p2) * 2 + v0 + v1
+			
+			local smoothPos = a + b * t + c * t2 + d * t3
+			
+			-- Smooth look vector interpolation using slerp
+			local look1 = bestBefore.lookVector
+			local look2 = bestAfter.lookVector
+			local dot = look1:Dot(look2)
+			dot = mathMin(mathMax(dot, -1), 1)
+			
+			local smoothLook
+			if math.abs(dot) > 0.9995 then
+				-- Vectors are very similar, use linear interpolation
+				smoothLook = look1:Lerp(look2, alpha).Unit
+			else
+				-- Use spherical interpolation for smoother rotation
+				local theta = math.acos(dot)
+				local sinTheta = math.sin(theta)
+				local a = math.sin((1 - alpha) * theta) / sinTheta
+				local b = math.sin(alpha * theta) / sinTheta
+				smoothLook = (look1 * a + look2 * b).Unit
+			end
+			
+			return {
+				position = smoothPos,
+				lookVector = smoothLook
+			}
+		else
+			-- Fallback to cubic interpolation with easing
+			local t = alpha
+			-- Smoothstep function for smoother interpolation
+			t = t * t * (3 - 2 * t)
+			
+			return {
+				position = bestBefore.position:Lerp(bestAfter.position, t),
+				lookVector = bestBefore.lookVector:Lerp(bestAfter.lookVector, t).Unit
+			}
+		end
 	end
 	
 	-- Fallback to nearest point
@@ -437,14 +498,14 @@ function Snake:updateSegments()
 	local growthFactor = self:calculateGrowthFactor()
 	local baseSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
 	local currentSize = baseSize * growthFactor
-	local spacing = currentSize.X * 0.8  -- Tight spacing
+	local spacing = currentSize.X * 0.65  -- Reduced from 0.8 for tighter spacing
 	
 	-- Adjust visible segments based on boost
 	local targetVisible = self.isBoosting and BOOST_VISIBLE_SEGMENTS or MAX_VISIBLE_SEGMENTS
 	targetVisible = mathMin(self.length, targetVisible)
 	
-	-- Smart history calculation
-	local historyStepsPerUnit = self.isBoosting and 1.2 or 1.5
+	-- Smart history calculation with smoother timing
+	local historyStepsPerUnit = self.isBoosting and 1.0 or 1.2  -- Adjusted for smoother movement
 	local currentTime = tick()
 	
 	-- Update existing segments
@@ -541,14 +602,48 @@ function Snake:checkAndHealGaps()
 			if distance > expectedDistance * 1.5 then
 				local segment = self.segments[i]
 				if segment and segment.Parent then
-					-- Smoothly move segment closer to previous
-					local targetPos = prevPos + (currPos - prevPos).Unit * expectedDistance
-					local newPos = currPos:Lerp(targetPos, GAP_HEAL_SPEED)
+					-- Get neighboring positions for smoother curve
+					local prevPrevPos = self.segmentPositions[i-2] or prevPos
+					local nextPos = self.segmentPositions[i+1] or currPos
 					
-					-- Update position
-					self.segmentPositions[i] = newPos
-					local lookDir = (currPos - prevPos).Unit
-					segment.CFrame = CFramenew(newPos, newPos + lookDir)
+					-- Use cubic bezier for smooth gap healing
+					local targetPos = prevPos + (currPos - prevPos).Unit * expectedDistance
+					
+					-- Calculate control points for smoother curve
+					local controlPoint1 = prevPrevPos:Lerp(prevPos, 1.5)
+					local controlPoint2 = nextPos:Lerp(currPos, 1.5)
+					
+					-- Cubic bezier interpolation
+					local t = GAP_HEAL_SPEED
+					local t2 = t * t
+					local t3 = t2 * t
+					local mt = 1 - t
+					local mt2 = mt * mt
+					local mt3 = mt2 * mt
+					
+					-- Bezier curve calculation
+					local smoothPos = mt3 * currPos +
+									 3 * mt2 * t * controlPoint2 +
+									 3 * mt * t2 * controlPoint1 +
+									 t3 * targetPos
+					
+					-- Apply smoothed position
+					self.segmentPositions[i] = smoothPos
+					
+					-- Calculate smooth look direction
+					local lookDir
+					if i < self.visibleSegmentCount then
+						local nextSegPos = self.segmentPositions[i+1]
+						if nextSegPos then
+							lookDir = (smoothPos - nextSegPos).Unit
+						else
+							lookDir = (prevPos - smoothPos).Unit
+						end
+					else
+						lookDir = (prevPos - smoothPos).Unit
+					end
+					
+					segment.CFrame = CFramenew(smoothPos, smoothPos + lookDir)
 				end
 			end
 		end
