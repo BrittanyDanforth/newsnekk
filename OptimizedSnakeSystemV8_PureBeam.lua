@@ -326,9 +326,10 @@ function Snake:createHead()
 	head.CastShadow = false -- No shadows for glowing effect
 	head.Parent = self.model
 	
-	-- Force head to be properly sized
-	head.Size = Vector3.new(5.2, 5.2, 5.2)  -- Slightly smaller for better proportion
-	print("HEAD SIZE SET TO:", head.Size)
+	-- Set initial head size based on snake length
+	local headSize, _ = self:getProportionalSizes()
+	head.Size = Vector3.new(headSize, headSize, headSize)
+	print("HEAD SIZE SET TO:", head.Size, "for length:", self.length)
 
 	-- Tag for collision
 	CollectionService:AddTag(head, "SnakeHead")
@@ -392,42 +393,44 @@ end
 
 function Snake:calculateGrowthFactor()
 	local length = self.length
-	-- Much slower width growth, prioritize LENGTH
-	if length <= 1000 then
-		return 1.0
-	elseif length <= 10000 then
-		return 1.0 + (length - 1000) / 18000  -- Only 1.5x at 10k
-	elseif length <= 50000 then
-		return 1.5 + (length - 10000) / 80000  -- Only 2x at 50k
-	else
-		return 2.0 + mathMin((length - 50000) / 100000, 0.5)  -- Max 2.5x ever
-	end
+	-- Logarithmic growth for smooth scaling at all sizes
+	local factor = 1.0 + math.log10(math.max(1, length / 100)) * 0.3
+	-- Cap at reasonable size
+	return math.min(factor, 3.0)  -- Max 3x size at extreme lengths
+end
+
+function Snake:getProportionalSizes()
+	local growthFactor = self:calculateGrowthFactor()
+	
+	-- Dynamic sizing based on length
+	local baseHeadSize = 4.5  -- Smaller base head
+	local baseBodyWidth = 4.0  -- Base body width
+	
+	-- Head should be slightly bigger than body
+	local headSize = baseHeadSize * growthFactor * 1.2
+	local bodyWidth = baseBodyWidth * growthFactor
+	
+	-- Ensure minimum sizes for visibility
+	headSize = math.max(headSize, 4.0)
+	bodyWidth = math.max(bodyWidth, 3.5)
+	
+	return headSize, bodyWidth
 end
 
 function Snake:initializeBeamBody()
-	local maxVisible = self.isBoosting and BOOST_VISIBLE_ATTACHMENTS or MAX_VISIBLE_ATTACHMENTS
+	-- Calculate visible segments based on snake length
+	local baseVisible = self.isBoosting and BOOST_VISIBLE_ATTACHMENTS or MAX_VISIBLE_ATTACHMENTS
 	
-	-- Scale attachments with length for LONG snakes
-	if self.length > 1000 then
-		-- Much more aggressive scaling for huge snakes
-		local lengthMultiplier = mathMin(self.length / 500, 10)  -- Up to 10x more
-		maxVisible = mathMin(maxVisible * lengthMultiplier, 800)  -- Higher cap
-	end
+	-- Dynamic scaling based on length
+	local visibleRatio = math.min(1.0, 200 / math.max(1, self.length))  -- Show more % for smaller snakes
+	local minVisible = math.max(20, self.length * visibleRatio)  -- At least 20 segments
+	local maxVisible = math.min(600, baseVisible + math.sqrt(self.length) * 5)  -- Scale with square root
 	
-	-- For REALLY long snakes, ensure we show enough
-	if self.length >= 10000 then
-		maxVisible = mathMax(maxVisible, 400)  -- At least 400 segments
-	end
-	if self.length >= 50000 then
-		maxVisible = mathMax(maxVisible, 600)  -- At least 600 segments for 50K
-	end
+	self.visibleAttachmentCount = math.floor(math.max(minVisible, math.min(self.length, maxVisible)))
 	
-	self.visibleAttachmentCount = mathMin(self.length, maxVisible)
-	print("Snake length:", self.length, "Visible attachments:", self.visibleAttachmentCount)
-	
-	local growthFactor = self:calculateGrowthFactor()
-	local beamWidth = 5 * growthFactor -- Base width
-	local spacing = ATTACHMENT_SPACING * growthFactor
+	-- Get proportional sizes
+	local headSize, bodyWidth = self:getProportionalSizes()
+	local spacing = ATTACHMENT_SPACING * (bodyWidth / 4)  -- Scale spacing with body size
 	
 	-- Create invisible parts for collision detection at key points
 	self.collisionParts = {}
@@ -467,7 +470,7 @@ function Snake:initializeBeamBody()
 			if i % 10 == 0 and i <= 60 then
 				local collisionPart = Instance.new("Part")
 				collisionPart.Name = "CollisionSegment" .. i
-				collisionPart.Size = Vector3.new(beamWidth, beamWidth, beamWidth)
+				collisionPart.Size = Vector3.new(bodyWidth, bodyWidth, bodyWidth)
 				collisionPart.Shape = Enum.PartType.Ball
 				collisionPart.Transparency = 1
 				collisionPart.CanCollide = false
@@ -513,10 +516,10 @@ function Snake:initializeBeamBody()
 				ColorSequenceKeypoint.new(1, nextColor)
 			})
 			
-			-- Width tapering
-			local widthMultiplier = 1 - (progress * 0.4) -- Taper to 60% at tail
-			beam.Width0 = beamWidth * widthMultiplier
-			beam.Width1 = beamWidth * widthMultiplier * 0.95 -- Slight taper per segment
+			-- Width tapering for natural look
+			local widthMultiplier = 1 - (progress * 0.3) -- Taper to 70% at tail
+			beam.Width0 = bodyWidth * widthMultiplier
+			beam.Width1 = bodyWidth * widthMultiplier * 0.98 -- Very slight taper per segment
 			
 			self.beams[i] = beam
 		end
@@ -540,9 +543,9 @@ function Snake:initializeBeamBody()
 				ColorSequenceKeypoint.new(1, bodyColor)
 			})
 			
-			-- Smooth width transition from huge head to body
-			headBeam.Width0 = self.head.Size.X * 0.5  -- Start at half head width since head is huge
-			headBeam.Width1 = beamWidth * 1.2  -- Slightly wider body connection
+			-- Smooth width transition from head to body
+			headBeam.Width0 = headSize * 0.8  -- Start slightly smaller than head
+			headBeam.Width1 = bodyWidth  -- Match body width
 			
 			-- Extra transparency for smooth blend
 			headBeam.Transparency = NumberSequence.new({
@@ -612,20 +615,14 @@ function Snake:setupUpdateLoop()
 end
 
 function Snake:updateHead()
-	local growthFactor = self:calculateGrowthFactor()
-	-- MINIMUM size of 5.2, can only get bigger with growth
-	local baseSize = math.max(5.2, (self.config.HeadSize or Vector3.new(5.2, 5.2, 5.2)).X)
-	local headSize = Vector3.new(baseSize, baseSize, baseSize) * growthFactor
+	-- Get proportional sizes
+	local headSize, _ = self:getProportionalSizes()
+	local headVector = Vector3.new(headSize, headSize, headSize)
 	
-	-- Never let it get smaller than 5.2x5.2x5.2
-	headSize = Vector3.new(
-		math.max(5.2, headSize.X),
-		math.max(5.2, headSize.Y),
-		math.max(5.2, headSize.Z)
-	)
-	
-	self.head.Size = headSize
-	print("UPDATE HEAD SIZE TO:", headSize)
+	-- Smooth size transitions
+	if self.head.Size ~= headVector then
+		self.head.Size = self.head.Size:Lerp(headVector, 0.1)
+	end
 	
 	local currentPos = self.rootPart.Position
 	local currentLook = self.rootPart.CFrame.LookVector
@@ -658,28 +655,17 @@ function Snake:updateHead()
 end
 
 function Snake:updateBeamBody()
-	local growthFactor = self:calculateGrowthFactor()
-	local beamWidth = 5 * growthFactor
-	local spacing = ATTACHMENT_SPACING * growthFactor
+	-- Get proportional sizes
+	local headSize, bodyWidth = self:getProportionalSizes()
+	local spacing = ATTACHMENT_SPACING * (bodyWidth / 4)
 	
-	-- Update visible attachment count - scale with length!
-	local targetVisible = self.isBoosting and BOOST_VISIBLE_ATTACHMENTS or MAX_VISIBLE_ATTACHMENTS
+	-- Calculate visible segments dynamically
+	local baseVisible = self.isBoosting and BOOST_VISIBLE_ATTACHMENTS or MAX_VISIBLE_ATTACHMENTS
+	local visibleRatio = math.min(1.0, 200 / math.max(1, self.length))
+	local minVisible = math.max(20, self.length * visibleRatio)
+	local maxVisible = math.min(600, baseVisible + math.sqrt(self.length) * 5)
 	
-	-- Scale visible segments with length for LONG snakes
-	if self.length > 1000 then
-		local lengthMultiplier = mathMin(self.length / 500, 10)
-		targetVisible = mathMin(targetVisible * lengthMultiplier, 800)
-	end
-	
-	-- Ensure minimum visibility for huge snakes
-	if self.length >= 10000 then
-		targetVisible = mathMax(targetVisible, 400)
-	end
-	if self.length >= 50000 then
-		targetVisible = mathMax(targetVisible, 600)
-	end
-	
-	targetVisible = mathMin(self.length, targetVisible)
+	local targetVisible = math.floor(math.max(minVisible, math.min(self.length, maxVisible)))
 	
 	-- Update attachment positions based on history
 	local currentTime = tick()
@@ -751,16 +737,12 @@ function Snake:updateBeamBody()
 	for i = 1, #self.beams do
 		local beam = self.beams[i]
 		if beam and beam.Enabled and i < targetVisible then
-			-- Variable width for more organic look
+			-- Variable width for organic look with proper proportions
 			local segmentProgress = i / targetVisible
-			local widthMultiplier = 1 - (segmentProgress * 0.3) -- Taper towards tail
+			local widthMultiplier = 1 - (segmentProgress * 0.25) -- Taper to 75% at tail
 			
-			beam.Width0 = beamWidth * widthMultiplier
-			beam.Width1 = beamWidth * widthMultiplier
-			
-			-- Make beams thicker to appear more round
-			beam.Width0 = beam.Width0 * 1.2
-			beam.Width1 = beam.Width1 * 1.2
+			beam.Width0 = bodyWidth * widthMultiplier
+			beam.Width1 = bodyWidth * widthMultiplier * 0.98  -- Slight taper between segments
 			
 			-- Smooth width transitions between segments
 			if i > 1 and self.beams[i-1] then
