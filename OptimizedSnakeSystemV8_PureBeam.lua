@@ -29,11 +29,11 @@ local BEAM_MIN_WIDTH = 2
 local BEAM_MAX_WIDTH = 8
 
 -- Gap Bridge Constants - NEW!
-local GAP_THRESHOLD = 8 -- Lower threshold for earlier detection
-local BRIDGE_BEAM_SEGMENTS = 20 -- Extra smooth for bridges
-local BRIDGE_BEAM_CURVE = 3 -- Natural curve
-local MAX_BRIDGE_BEAMS = 100 -- More bridge beams available
-local BEAM_OVERLAP_FACTOR = 1.2 -- Overlap beams slightly
+local GAP_THRESHOLD = 12 -- Higher threshold to reduce unnecessary bridges
+local BRIDGE_BEAM_SEGMENTS = 10 -- Matching regular beam segments
+local BRIDGE_BEAM_CURVE = 0.5 -- Much subtler curve
+local MAX_BRIDGE_BEAMS = 50 -- Reduce max bridge beams
+local BEAM_OVERLAP_FACTOR = 0.9 -- Less overlap for subtler appearance
 
 -- Create network events
 local remoteEvents = {}
@@ -301,10 +301,10 @@ function Snake:createBody()
 		beam.CurveSize1 = 0
 		beam.FaceCamera = true
 		beam.Segments = BEAM_SEGMENTS
-		beam.Texture = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
+		beam.Texture = "" -- Remove texture for cleaner look
 		beam.TextureMode = Enum.TextureMode.Stretch
 		beam.TextureLength = 1
-		beam.TextureSpeed = 2
+		beam.TextureSpeed = 0
 		beam.LightEmission = 0.5
 		beam.LightInfluence = 0
 		beam.Transparency = NumberSequence.new(0)
@@ -321,22 +321,22 @@ function Snake:createBody()
 	for i = 1, MAX_BRIDGE_BEAMS do
 		local bridgeBeam = Instance.new("Beam")
 		bridgeBeam.Name = "BridgeBeam" .. i
-		bridgeBeam.Width0 = BEAM_MIN_WIDTH * 1.5
-		bridgeBeam.Width1 = BEAM_MIN_WIDTH * 1.5
+		bridgeBeam.Width0 = BEAM_MIN_WIDTH * 0.8 -- Thinner than regular beams
+		bridgeBeam.Width1 = BEAM_MIN_WIDTH * 0.8
 		bridgeBeam.CurveSize0 = -BRIDGE_BEAM_CURVE
 		bridgeBeam.CurveSize1 = BRIDGE_BEAM_CURVE
 		bridgeBeam.FaceCamera = true
 		bridgeBeam.Segments = BRIDGE_BEAM_SEGMENTS
-		bridgeBeam.Texture = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
+		bridgeBeam.Texture = "" -- No texture for cleaner look
 		bridgeBeam.TextureMode = Enum.TextureMode.Stretch
-		bridgeBeam.TextureLength = 2
-		bridgeBeam.TextureSpeed = 3
-		bridgeBeam.LightEmission = 0.8
+		bridgeBeam.TextureLength = 1
+		bridgeBeam.TextureSpeed = 0
+		bridgeBeam.LightEmission = 0.3 -- Much less glow
 		bridgeBeam.LightInfluence = 0
 		bridgeBeam.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.1),
-			NumberSequenceKeypoint.new(0.5, 0),
-			NumberSequenceKeypoint.new(1, 0.1)
+			NumberSequenceKeypoint.new(0, 0.5), -- More transparent
+			NumberSequenceKeypoint.new(0.5, 0.3),
+			NumberSequenceKeypoint.new(1, 0.5)
 		})
 		bridgeBeam.Enabled = false
 		bridgeBeam.Parent = attachmentPart
@@ -514,59 +514,43 @@ function Snake:updateBody()
 		
 		-- Check if we need a bridge beam
 		if distance > GAP_THRESHOLD or (next.index - current.index) > 1 then
-			-- Find the best bridge beam
-			for j = 1, math.min(3, MAX_BRIDGE_BEAMS - bridgeBeamIndex + 1) do -- Multiple beams for large gaps
-				if bridgeBeamIndex <= MAX_BRIDGE_BEAMS then
-					local bridgeData = self.bridgeBeams[bridgeBeamIndex]
-					local bridgeBeam = bridgeData.beam
+			-- Use only one subtle bridge beam per gap
+			if bridgeBeamIndex <= MAX_BRIDGE_BEAMS then
+				local bridgeData = self.bridgeBeams[bridgeBeamIndex]
+				local bridgeBeam = bridgeData.beam
+				
+				-- Use interpolated positions if needed
+				if self.attachments[current.index] and self.attachments[next.index] then
+					bridgeBeam.Attachment0 = self.attachments[current.index]
+					bridgeBeam.Attachment1 = self.attachments[next.index]
 					
-					-- Determine attachment points
-					local startIdx = current.index + (j - 1) * 0.3
-					local endIdx = next.index - (j - 1) * 0.3
+					-- Color based on position
+					local colorIndex = ((current.index - 1) % #self.config.BodyColors) + 1
+					bridgeBeam.Color = ColorSequence.new(self.config.BodyColors[colorIndex])
 					
-					-- Use interpolated positions if needed
-					if self.attachments[current.index] and self.attachments[next.index] then
-						bridgeBeam.Attachment0 = self.attachments[current.index]
-						bridgeBeam.Attachment1 = self.attachments[next.index]
-						
-						-- Color based on position
-						local colorIndex = ((current.index - 1) % #self.config.BodyColors) + 1
-						bridgeBeam.Color = ColorSequence.new(self.config.BodyColors[colorIndex])
-						
-						-- Dynamic properties based on gap
-						local gapRatio = math.min(distance / GAP_THRESHOLD, 3)
-						local bridgeWidth = (BEAM_MIN_WIDTH + (BEAM_MAX_WIDTH - BEAM_MIN_WIDTH) * (self.growthFactor - 1) / 9) * BEAM_OVERLAP_FACTOR
-						
-						bridgeBeam.Width0 = bridgeWidth * (1 + gapRatio * 0.2)
-						bridgeBeam.Width1 = bridgeWidth * (1 + gapRatio * 0.2)
-						
-						-- Natural curve
-						local curveAmount = BRIDGE_BEAM_CURVE * gapRatio * (j * 0.5)
-						bridgeBeam.CurveSize0 = -curveAmount
-						bridgeBeam.CurveSize1 = curveAmount
-						
-						-- Glow based on boost
-						bridgeBeam.LightEmission = self.isBoosting and 1.2 or 0.8
-						
-						-- Transparency for layered effect
-						if j > 1 then
-							bridgeBeam.Transparency = NumberSequence.new({
-								NumberSequenceKeypoint.new(0, 0.3),
-								NumberSequenceKeypoint.new(0.5, 0.2),
-								NumberSequenceKeypoint.new(1, 0.3)
-							})
-						else
-							bridgeBeam.Transparency = NumberSequence.new({
-								NumberSequenceKeypoint.new(0, 0.1),
-								NumberSequenceKeypoint.new(0.5, 0),
-								NumberSequenceKeypoint.new(1, 0.1)
-							})
-						end
-						
-						bridgeBeam.Enabled = true
-						bridgeData.active = true
-						bridgeBeamIndex = bridgeBeamIndex + 1
-					end
+					-- Subtle properties - barely visible
+					local bridgeWidth = BEAM_MIN_WIDTH * 0.6 -- Very thin
+					
+					bridgeBeam.Width0 = bridgeWidth
+					bridgeBeam.Width1 = bridgeWidth
+					
+					-- Minimal curve
+					bridgeBeam.CurveSize0 = -BRIDGE_BEAM_CURVE
+					bridgeBeam.CurveSize1 = BRIDGE_BEAM_CURVE
+					
+					-- Very subtle glow
+					bridgeBeam.LightEmission = 0.2
+					
+					-- High transparency for subtlety
+					bridgeBeam.Transparency = NumberSequence.new({
+						NumberSequenceKeypoint.new(0, 0.7),
+						NumberSequenceKeypoint.new(0.5, 0.5),
+						NumberSequenceKeypoint.new(1, 0.7)
+					})
+					
+					bridgeBeam.Enabled = true
+					bridgeData.active = true
+					bridgeBeamIndex = bridgeBeamIndex + 1
 				end
 			end
 		end
@@ -582,17 +566,6 @@ function Snake:updateBody()
 			beam.Width0 = width
 			beam.Width1 = width
 			beam.LightEmission = self.isBoosting and 1 or 0.5
-			
-			-- Check if this beam spans a gap
-			if segmentPositions[i] and segmentPositions[i + 1] then
-				local segDistance = (segmentPositions[i] - segmentPositions[i + 1]).Magnitude
-				if segDistance > GAP_THRESHOLD * 0.7 then
-					-- Make the beam slightly thicker and brighter for gaps
-					beam.Width0 = width * 1.3
-					beam.Width1 = width * 1.3
-					beam.LightEmission = self.isBoosting and 1.3 or 0.7
-				end
-			end
 			
 			-- Boost glow effect
 			if self.isBoosting then
@@ -646,9 +619,9 @@ function Snake:addSegments(count)
 			beam.Width1 = BEAM_MIN_WIDTH
 			beam.FaceCamera = true
 			beam.Segments = BEAM_SEGMENTS
-			beam.Texture = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
+			beam.Texture = "" -- Remove texture for cleaner look
 			beam.TextureMode = Enum.TextureMode.Stretch
-			beam.TextureSpeed = 2
+			beam.TextureSpeed = 0
 			beam.LightEmission = 0.5
 			beam.LightInfluence = 0
 			
