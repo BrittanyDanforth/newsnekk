@@ -10,58 +10,23 @@ local Debris = game:GetService("Debris")
 
 -- Performance Constants
 local SEGMENT_UPDATE_RATE = 60 -- 60 FPS baby
-local NETWORK_UPDATE_RATE = 15 -- Optimized network rate
+local NETWORK_UPDATE_RATE = 20 -- Network at 20 FPS
 local MAX_SEGMENTS = 500 -- Maximum visible segments
-local SEGMENT_SPACING = 0.5 -- Tighter spacing to eliminate gaps
-local HISTORY_SIZE = 600 -- Optimized history
+local SEGMENT_SPACING = 0.8 -- Tighter spacing for smoother look
+local HISTORY_SIZE = 2000 -- Large history for smooth trailing
 local GROWTH_CHECK_INTERVAL = 10 -- Check growth every 10 frames
-local COLLISION_SEGMENTS = 30 -- Reduced from 50 for better performance
-local LOD_DISTANCE = 150 -- Increased LOD distance
-local SMOOTH_SEGMENTS = 50 -- Number of segments to always update smoothly
+local COLLISION_SEGMENTS = 50 -- First 50 segments for collision
 
 -- Visual Constants
-local MIN_HEAD_SIZE = 2.5 -- Reduced from 3
-local MAX_HEAD_SIZE = 9 -- Reduced from 12
+local MIN_HEAD_SIZE = 3
+local MAX_HEAD_SIZE = 12
 local MIN_SEGMENT_SIZE = 2.5
 local MAX_SEGMENT_SIZE = 10
 local GLOW_INTENSITY_MIN = 1
 local GLOW_INTENSITY_MAX = 3
 local BEAM_SEGMENTS = 10 -- Back to normal
-local BEAM_MIN_WIDTH = 2 -- Reduced to fit inside segments
-local BEAM_MAX_WIDTH = 8 -- Reduced to not stick out
-
--- Network optimization cache
-local NetworkCache = {}
-NetworkCache.__index = NetworkCache
-
-function NetworkCache.new()
-	local self = setmetatable({}, NetworkCache)
-	self.lastPosition = Vector3.new()
-	self.lastLookVector = Vector3.new()
-	self.lastLength = 0
-	self.lastBoosting = false
-	self.deltaThreshold = 0.5 -- Only send if moved more than this
-	return self
-end
-
-function NetworkCache:hasSignificantChange(position, lookVector, length, boosting)
-	local positionDelta = (position - self.lastPosition).Magnitude
-	local lookDelta = (lookVector - self.lastLookVector).Magnitude
-	local lengthChanged = math.abs(length - self.lastLength) > 0.1
-	local boostChanged = boosting ~= self.lastBoosting
-
-	return positionDelta > self.deltaThreshold or 
-		lookDelta > 0.1 or 
-		lengthChanged or 
-		boostChanged
-end
-
-function NetworkCache:update(position, lookVector, length, boosting)
-	self.lastPosition = position
-	self.lastLookVector = lookVector
-	self.lastLength = length
-	self.lastBoosting = boosting
-end
+local BEAM_MIN_WIDTH = 2.5 -- Slightly wider than original
+local BEAM_MAX_WIDTH = 10 -- Reasonable max
 
 -- Create network events
 local remoteEvents = {}
@@ -136,9 +101,7 @@ function Snake.new(character, config)
 	self.historyIndex = 0
 
 	-- Performance optimization
-	self.networkCache = NetworkCache.new()
 	self.lastBeamUpdate = 0
-	self.camera = workspace.CurrentCamera
 
 	-- Visual components
 	self.model = Instance.new("Model")
@@ -340,8 +303,8 @@ function Snake:createBody()
 	headBeam.Attachment1 = self.attachments[1]
 
 	-- Head beam properties (matching body beams)
-	headBeam.Width0 = MIN_HEAD_SIZE * 0.8
-	headBeam.Width1 = MIN_HEAD_SIZE * 0.8
+	headBeam.Width0 = BEAM_MIN_WIDTH
+	headBeam.Width1 = BEAM_MIN_WIDTH
 	headBeam.CurveSize0 = 0
 	headBeam.CurveSize1 = 0
 	headBeam.FaceCamera = true
@@ -352,11 +315,7 @@ function Snake:createBody()
 	headBeam.TextureSpeed = 0
 	headBeam.LightEmission = 0.9
 	headBeam.LightInfluence = 0
-	headBeam.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.02),
-		NumberSequenceKeypoint.new(0.5, 0),
-		NumberSequenceKeypoint.new(1, 0.02)
-	})
+	headBeam.Transparency = NumberSequence.new(0) -- COMPLETELY SOLID
 
 	-- Use first body color for head beam
 	headBeam.Color = ColorSequence.new(self.config.BodyColors[1])
@@ -371,8 +330,8 @@ function Snake:createBody()
 		beam.Attachment1 = self.attachments[i + 1]
 
 		-- Enhanced beam visuals for better gap coverage
-		beam.Width0 = MIN_SEGMENT_SIZE * 0.8
-		beam.Width1 = MIN_SEGMENT_SIZE * 0.8
+		beam.Width0 = BEAM_MIN_WIDTH
+		beam.Width1 = BEAM_MIN_WIDTH
 		beam.CurveSize0 = 0
 		beam.CurveSize1 = 0
 		beam.FaceCamera = true
@@ -381,13 +340,9 @@ function Snake:createBody()
 		beam.TextureMode = Enum.TextureMode.Stretch
 		beam.TextureLength = 2
 		beam.TextureSpeed = 0
-		beam.LightEmission = 0.9
+		beam.LightEmission = 0.9 -- SUPER BRIGHT
 		beam.LightInfluence = 0
-		beam.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.02),
-			NumberSequenceKeypoint.new(0.5, 0),
-			NumberSequenceKeypoint.new(1, 0.02)
-		})
+		beam.Transparency = NumberSequence.new(0) -- COMPLETELY SOLID - NO TRANSPARENCY!
 
 		-- Color
 		local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
@@ -452,9 +407,9 @@ function Snake:startUpdateLoop()
 			self.growthFactor = self:calculateGrowthFactor()
 		end
 
-		-- Update visuals
+		-- Update visuals every frame for smoothness
 		self:updateHead()
-		self:updateBodyUnified() -- Use unified update method
+		self:updateBody()
 
 		-- Handle boost effects
 		if self.isBoosting then
@@ -465,11 +420,11 @@ function Snake:startUpdateLoop()
 			self.headGlow.Brightness = GLOW_INTENSITY_MIN
 		end
 
-		-- Optimized network updates
+		-- Network updates
 		local now = tick()
 		if self.player == Players.LocalPlayer and now - lastNetworkUpdate > 1/NETWORK_UPDATE_RATE then
 			lastNetworkUpdate = now
-			self:sendOptimizedNetworkUpdate()
+			self:sendNetworkUpdate()
 		end
 	end)
 end
@@ -512,7 +467,7 @@ function Snake:updateHead()
 	self.headGlow.Range = 10 + headSize * 2
 end
 
-function Snake:updateBodyUnified()
+function Snake:updateBody()
 	-- Calculate required segments
 	local requiredSegments = math.min(math.ceil(self.actualLength / 2), MAX_SEGMENTS)
 
@@ -521,36 +476,25 @@ function Snake:updateBodyUnified()
 		self:addSegments(requiredSegments - self.visibleSegmentCount)
 	end
 
-	-- Update all segments with unified system
+	-- Update each segment
 	local segmentSize = MIN_SEGMENT_SIZE + (MAX_SEGMENT_SIZE - MIN_SEGMENT_SIZE) * (self.growthFactor - 1) / 9
 	local spacing = segmentSize * SEGMENT_SPACING
 
 	for i = 1, self.visibleSegmentCount do
 		local segment = self.segments[i]
 		if segment and segment.Parent then
-			-- Calculate position from history with proper spacing
-			local stepsBack = math.floor(i * spacing / 1.5) -- Adjusted for smoother trailing
+			-- Calculate position from history
+			local stepsBack = math.floor(i * spacing / 2)
 			local histData = self:getHistoricalPosition(stepsBack)
 
 			if histData then
-				-- Use adaptive lerp factor based on distance from head
-				local lerpFactor
-				if i <= SMOOTH_SEGMENTS then
-					-- First segments are always smooth
-					lerpFactor = 0.4
-				else
-					-- Further segments use LOD
-					local distance = self:getDistanceToCamera(segment.Position)
-					lerpFactor = distance < LOD_DISTANCE and 0.3 or 0.2
-				end
-
 				-- Smooth position update
 				local targetPos = histData.position
 				local currentPos = segment.Position
-				segment.Position = currentPos:Lerp(targetPos, lerpFactor)
+				segment.Position = currentPos:Lerp(targetPos, 0.3)
 
 				-- Update size with taper
-				local taper = 1 - (i / self.visibleSegmentCount) * 0.3
+				local taper = 1 - (i / self.visibleSegmentCount) * 0.3 -- 30% taper at tail
 				segment.Size = Vector3.new(segmentSize * taper, segmentSize * taper, segmentSize * taper)
 
 				-- FORCE SEGMENTS TO BE SOLID ALWAYS!!!
@@ -570,48 +514,28 @@ function Snake:updateBodyUnified()
 		self.attachments[self.visibleSegmentCount + 1].WorldPosition = self.segments[self.visibleSegmentCount].Position
 	end
 
-	-- Update beams
-	self:updateBeams()
-end
-
-function Snake:updateBeams()
-	-- Get current segment size for proper beam scaling
-	local segmentSize = MIN_SEGMENT_SIZE + (MAX_SEGMENT_SIZE - MIN_SEGMENT_SIZE) * (self.growthFactor - 1) / 9
-	
-	-- Update head beam
+	-- Update head beam width and appearance
 	if self.headBeam then
-		-- Scale beam width to be 80% of segment size to stay inside
-		local headSize = MIN_HEAD_SIZE + (MAX_HEAD_SIZE - MIN_HEAD_SIZE) * (self.growthFactor - 1) / 9
-		local width = headSize * 0.8
+		local width = BEAM_MIN_WIDTH + (BEAM_MAX_WIDTH - BEAM_MIN_WIDTH) * (self.growthFactor - 1) / 9
 		self.headBeam.Width0 = width
 		self.headBeam.Width1 = width
 		self.headBeam.LightEmission = self.isBoosting and 1 or 0.9
-		
-		-- Ensure head beam is connected properly
-		if self.headAttachment and self.attachments[1] then
-			self.headBeam.Attachment0 = self.headAttachment
-			self.headBeam.Attachment1 = self.attachments[1]
-		end
+		self.headBeam.Transparency = NumberSequence.new(0) -- ALWAYS FULLY SOLID
 	end
 
 	-- Update beam widths and appearance
 	for i, beam in ipairs(self.beams) do
 		if beam and beam.Parent and i <= self.visibleSegmentCount then
 			local progress = i / self.visibleSegmentCount
-			local taper = 1 - progress * 0.3
-			
-			-- Scale beam to 80% of segment size to keep it inside
-			local width = segmentSize * taper * 0.8
+			local width = BEAM_MIN_WIDTH + (BEAM_MAX_WIDTH - BEAM_MIN_WIDTH) * (self.growthFactor - 1) / 9
+			width = width * (1 - progress * 0.3) -- Taper
 
 			beam.Width0 = width
 			beam.Width1 = width
 			beam.LightEmission = self.isBoosting and 1 or 0.9
-			
-			-- Ensure beam connections are valid
-			if self.attachments[i] and self.attachments[i + 1] then
-				beam.Attachment0 = self.attachments[i]
-				beam.Attachment1 = self.attachments[i + 1]
-			end
+
+			-- Always solid, no transparency
+			beam.Transparency = NumberSequence.new(0) -- ALWAYS FULLY SOLID
 		end
 	end
 end
@@ -652,8 +576,8 @@ function Snake:addSegments(count)
 			beam.Attachment1 = self.attachments[i]
 
 			-- Enhanced beam properties
-			beam.Width0 = MIN_SEGMENT_SIZE * 0.8
-			beam.Width1 = MIN_SEGMENT_SIZE * 0.8
+			beam.Width0 = BEAM_MIN_WIDTH
+			beam.Width1 = BEAM_MIN_WIDTH
 			beam.CurveSize0 = 0
 			beam.CurveSize1 = 0
 			beam.FaceCamera = true
@@ -664,11 +588,7 @@ function Snake:addSegments(count)
 			beam.TextureSpeed = 0
 			beam.LightEmission = 0.9
 			beam.LightInfluence = 0
-			beam.Transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0, 0.02),
-				NumberSequenceKeypoint.new(0.5, 0),
-				NumberSequenceKeypoint.new(1, 0.02)
-			})
+			beam.Transparency = NumberSequence.new(0) -- COMPLETELY SOLID - NO TRANSPARENCY!
 
 			local colorIdx = ((i - 1) % #self.config.BodyColors) + 1
 			beam.Color = ColorSequence.new(self.config.BodyColors[colorIdx])
@@ -727,34 +647,14 @@ function Snake:setBoosting(boosting)
 	end
 end
 
-function Snake:sendOptimizedNetworkUpdate()
-	if not remoteEvents.positionupdate then return end
-
-	local position = self.rootPart.Position
-	local lookVector = self.rootPart.CFrame.LookVector
-	local length = self.targetLength
-	local boosting = self.isBoosting
-
-	-- Only send if there's a significant change
-	if self.networkCache:hasSignificantChange(position, lookVector, length, boosting) then
-		-- Compress data
-		local compressedData = {
-			p = {
-				math.floor(position.X * 10) / 10,
-				math.floor(position.Y * 10) / 10,
-				math.floor(position.Z * 10) / 10
-			},
-			l = {
-				math.floor(lookVector.X * 100) / 100,
-				math.floor(lookVector.Y * 100) / 100,
-				math.floor(lookVector.Z * 100) / 100
-			},
-			len = math.floor(length),
-			b = boosting and 1 or 0
-		}
-
-		remoteEvents.positionupdate:FireServer(compressedData)
-		self.networkCache:update(position, lookVector, length, boosting)
+function Snake:sendNetworkUpdate()
+	if remoteEvents.positionupdate then
+		remoteEvents.positionupdate:FireServer({
+			position = self.rootPart.Position,
+			lookVector = self.rootPart.CFrame.LookVector,
+			length = self.targetLength,
+			boosting = self.isBoosting
+		})
 	end
 end
 
@@ -795,8 +695,7 @@ local OptimizedSnakeSystemV8 = {}
 function OptimizedSnakeSystemV8.init()
 	createNetworkEvents()
 	print("✅ Snake System V8 - ULTRA SMOOTH INITIALIZED")
-	print("🐍 Features: Dynamic Growth | Smooth Movement | Zero Lag | Unified Update System")
-	print("⚡ FIXED: No more split segments | Consistent smoothness | Better gap coverage")
+	print("🐍 Features: Dynamic Growth | Smooth Movement | Zero Lag | Head-Body Connection Fixed")
 end
 
 function OptimizedSnakeSystemV8.createSnake(character, config)
