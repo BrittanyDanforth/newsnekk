@@ -1,5 +1,5 @@
 -- Optimized Snake System V8 Fixed - NO GAPS, SMOOTH AS BUTTER
--- Better head visuals + Zero gaps between segments
+-- Keeps all the dynamic scaling, just fixes the segment positioning
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -12,20 +12,20 @@ local Debris = game:GetService("Debris")
 local SEGMENT_UPDATE_RATE = 60 -- 60 FPS baby
 local NETWORK_UPDATE_RATE = 20 -- Network at 20 FPS
 local MAX_SEGMENTS = 500 -- Maximum visible segments
-local SEGMENT_SPACING = 0.5 -- TIGHTER spacing to eliminate gaps
+local SEGMENT_SPACING = 0.65 -- Reduced from 0.8 for tighter segments
 local HISTORY_SIZE = 2000 -- Large history for smooth trailing
 local GROWTH_CHECK_INTERVAL = 10 -- Check growth every 10 frames
 
--- Visual Constants
+-- Visual Constants (KEEP ORIGINAL SIZES)
 local MIN_HEAD_SIZE = 3
 local MAX_HEAD_SIZE = 12
-local MIN_SEGMENT_SIZE = 3 -- Slightly larger minimum
-local MAX_SEGMENT_SIZE = 11 -- Slightly larger to overlap better
+local MIN_SEGMENT_SIZE = 2.5
+local MAX_SEGMENT_SIZE = 10
 local GLOW_INTENSITY_MIN = 1
 local GLOW_INTENSITY_MAX = 3
-local BEAM_SEGMENTS = 20 -- More segments for smoother curves
-local BEAM_MIN_WIDTH = 3.5 -- Wider beams to cover gaps
-local BEAM_MAX_WIDTH = 12 -- Wider max for better coverage
+local BEAM_SEGMENTS = 10
+local BEAM_MIN_WIDTH = 2.5
+local BEAM_MAX_WIDTH = 10
 
 -- Create network events
 local remoteEvents = {}
@@ -147,7 +147,7 @@ function Snake:calculateGrowthFactor()
 end
 
 function Snake:createHead()
-	-- Main head part (KEEP THE GOOD LOOKING HEAD)
+	-- Main head part
 	local head = Instance.new("Part")
 	head.Name = "SnakeHead"
 	head.Shape = Enum.PartType.Ball
@@ -216,10 +216,10 @@ function Snake:createHead()
 	CollectionService:AddTag(head, "SnakeHead")
 	head:SetAttribute("PlayerId", self.player.UserId)
 
-	-- Create head attachment for beam connection - POSITION IT AT BACK OF HEAD
+	-- Create head attachment for beam connection - POSITION AT BACK OF HEAD
 	local headAttachment = Instance.new("Attachment")
 	headAttachment.Name = "HeadAttachment"
-	headAttachment.Position = Vector3.new(0, 0, MIN_HEAD_SIZE/2) -- At back of head
+	headAttachment.Position = Vector3.new(0, 0, MIN_HEAD_SIZE/2) -- Back of head
 	headAttachment.Parent = head
 	self.headAttachment = headAttachment
 
@@ -292,14 +292,14 @@ function Snake:createBody()
 	finalAttachment.Parent = attachmentPart
 	self.attachments[segmentCount + 1] = finalAttachment
 
-	-- CREATE HEAD-TO-BODY BEAM - EXTRA WIDE TO PREVENT GAP
+	-- CREATE HEAD-TO-BODY BEAM
 	local headBeam = Instance.new("Beam")
 	headBeam.Name = "HeadBeam"
 	headBeam.Attachment0 = self.headAttachment
 	headBeam.Attachment1 = self.attachments[1]
 
-	-- Head beam properties - EXTRA COVERAGE
-	headBeam.Width0 = BEAM_MIN_WIDTH * 1.2 -- Extra wide at head
+	-- Head beam properties (KEEP ORIGINAL)
+	headBeam.Width0 = BEAM_MIN_WIDTH
 	headBeam.Width1 = BEAM_MIN_WIDTH
 	headBeam.CurveSize0 = 0
 	headBeam.CurveSize1 = 0
@@ -307,9 +307,9 @@ function Snake:createBody()
 	headBeam.Segments = BEAM_SEGMENTS
 	headBeam.Texture = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
 	headBeam.TextureMode = Enum.TextureMode.Stretch
-	headBeam.TextureLength = 1.5 -- Shorter texture length for better coverage
+	headBeam.TextureLength = 2
 	headBeam.TextureSpeed = 0
-	headBeam.LightEmission = 1 -- Max brightness
+	headBeam.LightEmission = 0.9
 	headBeam.LightInfluence = 0
 	headBeam.Transparency = NumberSequence.new(0) -- COMPLETELY SOLID
 
@@ -325,7 +325,7 @@ function Snake:createBody()
 		beam.Attachment0 = self.attachments[i]
 		beam.Attachment1 = self.attachments[i + 1]
 
-		-- Enhanced beam visuals for ZERO gaps
+		-- KEEP ORIGINAL BEAM PROPERTIES
 		beam.Width0 = BEAM_MIN_WIDTH
 		beam.Width1 = BEAM_MIN_WIDTH
 		beam.CurveSize0 = 0
@@ -334,9 +334,9 @@ function Snake:createBody()
 		beam.Segments = BEAM_SEGMENTS
 		beam.Texture = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
 		beam.TextureMode = Enum.TextureMode.Stretch
-		beam.TextureLength = 1.5 -- Shorter for better coverage
+		beam.TextureLength = 2
 		beam.TextureSpeed = 0
-		beam.LightEmission = 1 -- MAX BRIGHTNESS
+		beam.LightEmission = 0.9
 		beam.LightInfluence = 0
 		beam.Transparency = NumberSequence.new(0) -- COMPLETELY SOLID
 
@@ -427,7 +427,7 @@ function Snake:updateHead()
 	local cf = CFrame.lookAt(self.rootPart.Position, self.rootPart.Position + self.rootPart.CFrame.LookVector)
 	self.head.CFrame = cf
 
-	-- Update head attachment position to stay at back of head
+	-- Update head attachment position to scale with head
 	self.headAttachment.Position = Vector3.new(0, 0, headSize/2)
 
 	-- Update eyes
@@ -458,19 +458,21 @@ function Snake:updateBody()
 		self:addSegments(requiredSegments - self.visibleSegmentCount)
 	end
 
-	-- Update each segment - TIGHTER SPACING
+	-- Update each segment with ADJUSTED spacing calculation
 	local segmentSize = MIN_SEGMENT_SIZE + (MAX_SEGMENT_SIZE - MIN_SEGMENT_SIZE) * (self.growthFactor - 1) / 9
-	local spacing = segmentSize * SEGMENT_SPACING -- Using tighter spacing
+	local spacing = segmentSize * SEGMENT_SPACING
 
-	-- SPECIAL HANDLING FOR FIRST SEGMENT - CLOSER TO HEAD
+	-- Special handling for first segment - CLOSER TO HEAD
 	if self.segments[1] and self.segments[1].Parent then
-		local firstSegmentOffset = (MIN_HEAD_SIZE + segmentSize) * 0.45 -- Very close to head
-		local histData = self:getHistoricalPosition(math.floor(firstSegmentOffset))
+		local headSize = MIN_HEAD_SIZE + (MAX_HEAD_SIZE - MIN_HEAD_SIZE) * (self.growthFactor - 1) / 9
+		-- First segment very close to head
+		local firstSegmentSteps = math.floor((headSize + segmentSize) * 0.4) -- Closer!
+		local histData = self:getHistoricalPosition(firstSegmentSteps)
 		
 		if histData then
 			local targetPos = histData.position
 			local currentPos = self.segments[1].Position
-			self.segments[1].Position = currentPos:Lerp(targetPos, 0.4) -- Faster lerp for first segment
+			self.segments[1].Position = currentPos:Lerp(targetPos, 0.35) -- Faster lerp
 			self.segments[1].Size = Vector3.new(segmentSize, segmentSize, segmentSize)
 			
 			if self.attachments[1] then
@@ -479,12 +481,12 @@ function Snake:updateBody()
 		end
 	end
 
-	-- Update remaining segments
+	-- Update remaining segments with tighter spacing
 	for i = 2, self.visibleSegmentCount do
 		local segment = self.segments[i]
 		if segment and segment.Parent then
-			-- Calculate position from history with tighter spacing
-			local stepsBack = math.floor((i - 1) * spacing * 1.2) -- Adjusted multiplier for tighter follow
+			-- Adjusted position calculation for tighter following
+			local stepsBack = math.floor((i - 1) * spacing * 1.1) -- Slightly tighter
 			local histData = self:getHistoricalPosition(stepsBack)
 
 			if histData then
@@ -510,26 +512,25 @@ function Snake:updateBody()
 		self.attachments[self.visibleSegmentCount + 1].WorldPosition = self.segments[self.visibleSegmentCount].Position
 	end
 
-	-- Update head beam width - EXTRA WIDE TO PREVENT GAP
+	-- Update head beam width - DYNAMIC SCALING LIKE ORIGINAL
 	if self.headBeam then
 		local width = BEAM_MIN_WIDTH + (BEAM_MAX_WIDTH - BEAM_MIN_WIDTH) * (self.growthFactor - 1) / 9
-		self.headBeam.Width0 = width * 1.3 -- Extra wide at head connection
+		self.headBeam.Width0 = width
 		self.headBeam.Width1 = width
-		self.headBeam.LightEmission = 1 -- Always max brightness
+		self.headBeam.LightEmission = self.isBoosting and 1 or 0.9
 		self.headBeam.Transparency = NumberSequence.new(0) -- ALWAYS FULLY SOLID
 	end
 
-	-- Update beam widths
+	-- Update beam widths - KEEP ORIGINAL DYNAMIC SCALING
 	for i, beam in ipairs(self.beams) do
 		if beam and beam.Parent and i <= self.visibleSegmentCount then
 			local progress = i / self.visibleSegmentCount
 			local width = BEAM_MIN_WIDTH + (BEAM_MAX_WIDTH - BEAM_MIN_WIDTH) * (self.growthFactor - 1) / 9
 			width = width * (1 - progress * 0.3) -- Taper
-			
-			-- Make beams slightly wider to ensure overlap
-			beam.Width0 = width * 1.1
-			beam.Width1 = width * 1.1
-			beam.LightEmission = 1 -- Max brightness
+
+			beam.Width0 = width
+			beam.Width1 = width
+			beam.LightEmission = self.isBoosting and 1 or 0.9
 			beam.Transparency = NumberSequence.new(0) -- ALWAYS FULLY SOLID
 		end
 	end
@@ -570,18 +571,18 @@ function Snake:addSegments(count)
 			beam.Attachment0 = self.attachments[i - 1]
 			beam.Attachment1 = self.attachments[i]
 
-			-- Enhanced beam properties
-			beam.Width0 = BEAM_MIN_WIDTH * 1.1 -- Slightly wider
-			beam.Width1 = BEAM_MIN_WIDTH * 1.1
+			-- KEEP ORIGINAL PROPERTIES
+			beam.Width0 = BEAM_MIN_WIDTH
+			beam.Width1 = BEAM_MIN_WIDTH
 			beam.CurveSize0 = 0
 			beam.CurveSize1 = 0
 			beam.FaceCamera = true
 			beam.Segments = BEAM_SEGMENTS
 			beam.Texture = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
 			beam.TextureMode = Enum.TextureMode.Stretch
-			beam.TextureLength = 1.5
+			beam.TextureLength = 2
 			beam.TextureSpeed = 0
-			beam.LightEmission = 1 -- MAX BRIGHTNESS
+			beam.LightEmission = 0.9
 			beam.LightInfluence = 0
 			beam.Transparency = NumberSequence.new(0) -- COMPLETELY SOLID
 
@@ -689,8 +690,8 @@ local OptimizedSnakeSystemV8 = {}
 
 function OptimizedSnakeSystemV8.init()
 	createNetworkEvents()
-	print("✅ Snake System V8 Fixed - NO GAPS, BETTER HEAD")
-	print("🐍 Features: Dynamic Growth | Smooth Movement | Zero Gaps | Beautiful Head Design")
+	print("✅ Snake System V8 Fixed - ULTRA SMOOTH INITIALIZED")
+	print("🐍 Features: Dynamic Growth | Smooth Movement | Zero Gaps | Perfect Scaling")
 end
 
 function OptimizedSnakeSystemV8.createSnake(character, config)
