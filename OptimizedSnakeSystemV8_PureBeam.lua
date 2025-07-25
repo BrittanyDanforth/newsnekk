@@ -10,11 +10,12 @@ local Debris = game:GetService("Debris")
 
 -- Performance Constants
 local SEGMENT_UPDATE_RATE = 60 -- 60 FPS baby
-local NETWORK_UPDATE_RATE = 20 -- Network at 20 FPS
-local MAX_SEGMENTS = 500 -- Maximum visible segments
-local SEGMENT_SPACING = 0.8 -- Tighter spacing for smoother look
+local NETWORK_UPDATE_RATE = 15 -- Match server rate
+local MAX_SEGMENTS = 300 -- Optimized for performance
+local SEGMENT_SPACING = 0.6 -- Tighter for seamless beams
 local HISTORY_SIZE = 2000 -- Large history for smooth trailing
 local GROWTH_CHECK_INTERVAL = 10 -- Check growth every 10 frames
+local BEAM_UPDATE_BATCH = 20 -- Update beams in batches to prevent lag
 
 -- Visual Constants
 local MIN_HEAD_SIZE = 3
@@ -23,9 +24,10 @@ local MIN_SEGMENT_SIZE = 2.5
 local MAX_SEGMENT_SIZE = 10
 local GLOW_INTENSITY_MIN = 1
 local GLOW_INTENSITY_MAX = 3
-local BEAM_SEGMENTS = 10 -- Smooth curves
-local BEAM_MIN_WIDTH = 2
-local BEAM_MAX_WIDTH = 8
+local BEAM_SEGMENTS = 8 -- Optimized for performance
+local BEAM_MIN_WIDTH = 2.5
+local BEAM_MAX_WIDTH = 9
+local MAX_BEAM_COUNT = 200 -- Maximum beams for zero lag
 
 -- Create network events
 local remoteEvents = {}
@@ -219,7 +221,7 @@ function Snake:createBody()
 	-- Calculate initial segment count based on length
 	local segmentCount = math.min(math.ceil(self.length / 2), MAX_SEGMENTS)
 	
-	-- Create attachment holder
+	-- Create attachment holder (invisible, just holds attachments)
 	local attachmentPart = Instance.new("Part")
 	attachmentPart.Name = "BeamHolder"
 	attachmentPart.Transparency = 1
@@ -229,7 +231,14 @@ function Snake:createBody()
 	attachmentPart.Size = Vector3.new(1, 1, 1)
 	attachmentPart.Parent = self.model
 	
-	-- Create physical segments for collision
+	-- Create beam container for organization
+	local beamFolder = Instance.new("Folder")
+	beamFolder.Name = "Beams"
+	beamFolder.Parent = self.model
+	
+	-- Create physical segments with optimized collision
+	local collisionInterval = math.max(5, math.floor(segmentCount / 20)) -- Dynamic collision interval
+	
 	for i = 1, segmentCount do
 		local segment = Instance.new("Part")
 		segment.Name = "Segment" .. i
@@ -237,19 +246,20 @@ function Snake:createBody()
 		segment.Material = Enum.Material.Neon
 		segment.Size = Vector3.new(MIN_SEGMENT_SIZE, MIN_SEGMENT_SIZE, MIN_SEGMENT_SIZE)
 		segment.CanCollide = false
-		segment.CanTouch = i <= 50 -- Only first 50 segments for collision
+		segment.CanTouch = (i % collisionInterval == 0 and i <= 100) -- Smart collision
 		segment.CanQuery = false
 		segment.Anchored = true
+		segment.CastShadow = false -- Performance
 		
 		-- Color pattern
 		local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
 		segment.Color = self.config.BodyColors[colorIndex]
 		
-		-- Glow for nearby segments
-		if i <= 20 then
+		-- Glow only for nearby segments (performance)
+		if i <= 15 then
 			local segmentGlow = Instance.new("PointLight")
 			segmentGlow.Brightness = 0.5
-			segmentGlow.Range = 8
+			segmentGlow.Range = 6
 			segmentGlow.Color = segment.Color
 			segmentGlow.Shadows = false
 			segmentGlow.Parent = segment
@@ -258,58 +268,63 @@ function Snake:createBody()
 		segment.Parent = self.model
 		self.segments[i] = segment
 		
-		-- Collision tagging for first segments
-		if i <= 50 then
+		-- Collision tagging for important segments
+		if i % collisionInterval == 0 and i <= 100 then
 			CollectionService:AddTag(segment, "SnakeSegment")
 			segment:SetAttribute("SegmentIndex", i)
 			segment:SetAttribute("OwnerName", self.player.Name)
 		end
 		
-		-- Create attachments for beams
-		local attachment0 = Instance.new("Attachment")
-		attachment0.Name = "Attachment" .. i
-		attachment0.Parent = attachmentPart
-		self.attachments[i] = attachment0
+		-- Create attachment for this segment
+		local attachment = Instance.new("Attachment")
+		attachment.Name = "Attachment" .. i
+		attachment.Parent = attachmentPart
+		self.attachments[i] = attachment
 	end
 	
-	-- Add final attachment
-	local finalAttachment = Instance.new("Attachment")
-	finalAttachment.Name = "AttachmentFinal"
-	finalAttachment.Parent = attachmentPart
-	self.attachments[segmentCount + 1] = finalAttachment
+	-- Create CONTINUOUS beam chain - this is the key!
+	local beamCount = math.min(segmentCount - 1, MAX_BEAM_COUNT)
 	
-	-- Create smooth beams between segments
-	for i = 1, math.min(segmentCount, 100) do -- Limit beams for performance
+	for i = 1, beamCount do
 		local beam = Instance.new("Beam")
 		beam.Name = "Beam" .. i
 		beam.Attachment0 = self.attachments[i]
 		beam.Attachment1 = self.attachments[i + 1]
 		
-		-- Beam visuals
+		-- Optimized beam visuals
 		beam.Width0 = BEAM_MIN_WIDTH
 		beam.Width1 = BEAM_MIN_WIDTH
 		beam.CurveSize0 = 0
 		beam.CurveSize1 = 0
 		beam.FaceCamera = true
 		beam.Segments = BEAM_SEGMENTS
-		beam.Texture = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
-		beam.TextureMode = Enum.TextureMode.Stretch
+		
+		-- No texture for better performance
+		beam.Texture = ""
+		beam.TextureMode = Enum.TextureMode.Static
 		beam.TextureLength = 1
-		beam.TextureSpeed = 2
-		beam.LightEmission = 0.5
+		beam.TextureSpeed = 0
+		
+		beam.LightEmission = 0.8
 		beam.LightInfluence = 0
 		beam.Transparency = NumberSequence.new(0)
 		
-		-- Color
-		local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
-		beam.Color = ColorSequence.new(self.config.BodyColors[colorIndex])
+		-- Smooth color gradient
+		local colorIndex1 = ((i - 1) % #self.config.BodyColors) + 1
+		local colorIndex2 = (i % #self.config.BodyColors) + 1
+		beam.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, self.config.BodyColors[colorIndex1]),
+			ColorSequenceKeypoint.new(1, self.config.BodyColors[colorIndex2])
+		})
 		
-		beam.Parent = attachmentPart
+		beam.Parent = beamFolder
 		self.beams[i] = beam
 	end
 	
 	self.attachmentPart = attachmentPart
+	self.beamFolder = beamFolder
 	self.visibleSegmentCount = segmentCount
+	self.activeBeamCount = beamCount
 end
 
 function Snake:updatePositionHistory()
@@ -415,69 +430,95 @@ function Snake:updateBody()
 		self:addSegments(requiredSegments - self.visibleSegmentCount)
 	end
 	
-	-- Update each segment
+	-- Update segments in optimized way
 	local segmentSize = MIN_SEGMENT_SIZE + (MAX_SEGMENT_SIZE - MIN_SEGMENT_SIZE) * (self.growthFactor - 1) / 9
 	local spacing = segmentSize * SEGMENT_SPACING
 	
-	for i = 1, self.visibleSegmentCount do
-		local segment = self.segments[i]
-		if segment and segment.Parent then
-			-- Calculate position from history
-			local stepsBack = math.floor(i * spacing / 2)
-			local histData = self:getHistoricalPosition(stepsBack)
-			
-			if histData then
-				-- Smooth position update
-				local targetPos = histData.position
-				local currentPos = segment.Position
-				segment.Position = currentPos:Lerp(targetPos, 0.3)
+	-- Batch process segments for performance
+	local batchSize = 10
+	local updateCount = math.min(self.visibleSegmentCount, requiredSegments)
+	
+	for batch = 1, math.ceil(updateCount / batchSize) do
+		local startIdx = (batch - 1) * batchSize + 1
+		local endIdx = math.min(batch * batchSize, updateCount)
+		
+		for i = startIdx, endIdx do
+			local segment = self.segments[i]
+			if segment and segment.Parent then
+				-- Calculate position from history
+				local stepsBack = math.floor(i * spacing / 2)
+				local histData = self:getHistoricalPosition(stepsBack)
 				
-				-- Update size with taper
-				local taper = 1 - (i / self.visibleSegmentCount) * 0.3 -- 30% taper at tail
-				segment.Size = Vector3.new(segmentSize * taper, segmentSize * taper, segmentSize * taper)
-				
-				-- Update attachment positions for beams
-				if self.attachments[i] then
-					self.attachments[i].WorldPosition = segment.Position
+				if histData then
+					-- Ultra smooth position update
+					local targetPos = histData.position
+					local currentPos = segment.Position
+					local newPos = currentPos:Lerp(targetPos, 0.4) -- Slightly faster lerp
+					
+					segment.Position = newPos
+					
+					-- Update size with smooth taper
+					local taper = 1 - (i / updateCount) * 0.25 -- 25% taper
+					local taperSmooth = math.sin((1 - i / updateCount) * math.pi * 0.5) * 0.75 + 0.25
+					segment.Size = Vector3.new(segmentSize * taperSmooth, segmentSize * taperSmooth, segmentSize * taperSmooth)
+					
+					-- Update attachment for perfect beam connectivity
+					if self.attachments[i] then
+						self.attachments[i].WorldPosition = newPos
+					end
 				end
 			end
 		end
 	end
 	
-	-- Update final attachment
-	if self.attachments[self.visibleSegmentCount + 1] and self.segments[self.visibleSegmentCount] then
-		self.attachments[self.visibleSegmentCount + 1].WorldPosition = self.segments[self.visibleSegmentCount].Position
-	end
+	-- Update beams for seamless connection
+	local beamUpdateCount = math.min(self.activeBeamCount, requiredSegments - 1)
 	
-	-- Update beam widths
-	for i, beam in ipairs(self.beams) do
-		if beam and beam.Parent and i <= self.visibleSegmentCount then
-			local progress = i / self.visibleSegmentCount
-			local width = BEAM_MIN_WIDTH + (BEAM_MAX_WIDTH - BEAM_MIN_WIDTH) * (self.growthFactor - 1) / 9
-			width = width * (1 - progress * 0.3) -- Taper
+	for i = 1, beamUpdateCount do
+		local beam = self.beams[i]
+		if beam and beam.Parent then
+			-- Calculate beam width with smooth taper
+			local progress = i / beamUpdateCount
+			local baseWidth = BEAM_MIN_WIDTH + (BEAM_MAX_WIDTH - BEAM_MIN_WIDTH) * (self.growthFactor - 1) / 9
+			
+			-- Smooth taper function for natural look
+			local taperFactor = math.cos(progress * math.pi * 0.5) * 0.7 + 0.3
+			local width = baseWidth * taperFactor
 			
 			beam.Width0 = width
-			beam.Width1 = width
-			beam.LightEmission = self.isBoosting and 1 or 0.5
+			beam.Width1 = width * 0.9 -- Slight taper between segments
 			
-			-- Boost glow effect
+			-- Dynamic light emission
 			if self.isBoosting then
+				beam.LightEmission = 1.2
 				beam.Transparency = NumberSequence.new({
 					NumberSequenceKeypoint.new(0, 0),
-					NumberSequenceKeypoint.new(0.5, 0.2),
-					NumberSequenceKeypoint.new(1, 0)
+					NumberSequenceKeypoint.new(0.5, 0.1),
+					NumberSequenceKeypoint.new(1, 0.2)
 				})
 			else
+				beam.LightEmission = 0.8
 				beam.Transparency = NumberSequence.new(0)
 			end
+			
+			-- Ensure beam is visible
+			beam.Enabled = true
+		end
+	end
+	
+	-- Hide excess beams smoothly
+	for i = beamUpdateCount + 1, #self.beams do
+		if self.beams[i] then
+			self.beams[i].Enabled = false
 		end
 	end
 end
 
 function Snake:addSegments(count)
-	for i = self.visibleSegmentCount + 1, self.visibleSegmentCount + count do
-		if i > MAX_SEGMENTS then break end
-		
+	local startIdx = self.visibleSegmentCount + 1
+	local endIdx = math.min(startIdx + count - 1, MAX_SEGMENTS)
+	
+	for i = startIdx, endIdx do
 		-- Create new segment
 		local segment = Instance.new("Part")
 		segment.Name = "Segment" .. i
@@ -485,9 +526,10 @@ function Snake:addSegments(count)
 		segment.Material = Enum.Material.Neon
 		segment.Size = Vector3.new(MIN_SEGMENT_SIZE, MIN_SEGMENT_SIZE, MIN_SEGMENT_SIZE)
 		segment.CanCollide = false
-		segment.CanTouch = i <= 50
+		segment.CanTouch = false -- Will be set dynamically
 		segment.CanQuery = false
 		segment.Anchored = true
+		segment.CastShadow = false
 		
 		local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
 		segment.Color = self.config.BodyColors[colorIndex]
@@ -501,32 +543,37 @@ function Snake:addSegments(count)
 		attachment.Parent = self.attachmentPart
 		self.attachments[i] = attachment
 		
-		-- Create beam if within limit
-		if i <= 100 and self.attachments[i - 1] then
+		-- Create beam to previous segment
+		if i > 1 and self.activeBeamCount < MAX_BEAM_COUNT then
 			local beam = Instance.new("Beam")
-			beam.Name = "Beam" .. i
+			beam.Name = "Beam" .. self.activeBeamCount + 1
 			beam.Attachment0 = self.attachments[i - 1]
 			beam.Attachment1 = self.attachments[i]
 			
+			-- Consistent beam properties
 			beam.Width0 = BEAM_MIN_WIDTH
 			beam.Width1 = BEAM_MIN_WIDTH
 			beam.FaceCamera = true
 			beam.Segments = BEAM_SEGMENTS
-			beam.Texture = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
-			beam.TextureMode = Enum.TextureMode.Stretch
-			beam.TextureSpeed = 2
-			beam.LightEmission = 0.5
+			beam.Texture = ""
+			beam.LightEmission = 0.8
 			beam.LightInfluence = 0
 			
-			local colorIdx = ((i - 1) % #self.config.BodyColors) + 1
-			beam.Color = ColorSequence.new(self.config.BodyColors[colorIdx])
+			-- Color gradient
+			local colorIdx1 = ((i - 2) % #self.config.BodyColors) + 1
+			local colorIdx2 = ((i - 1) % #self.config.BodyColors) + 1
+			beam.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, self.config.BodyColors[colorIdx1]),
+				ColorSequenceKeypoint.new(1, self.config.BodyColors[colorIdx2])
+			})
 			
-			beam.Parent = self.attachmentPart
-			self.beams[i] = beam
+			beam.Parent = self.beamFolder
+			self.beams[self.activeBeamCount + 1] = beam
+			self.activeBeamCount = self.activeBeamCount + 1
 		end
 	end
 	
-	self.visibleSegmentCount = math.min(self.visibleSegmentCount + count, MAX_SEGMENTS)
+	self.visibleSegmentCount = endIdx
 end
 
 function Snake:grow(amount)
@@ -575,13 +622,28 @@ function Snake:setBoosting(boosting)
 	end
 end
 
+-- Optimized network update
 function Snake:sendNetworkUpdate()
 	if remoteEvents.positionupdate then
+		-- Compress path data
+		local compressedPath = {}
+		local skipInterval = math.max(1, math.floor(self.visibleSegmentCount / 50))
+		
+		for i = 1, self.visibleSegmentCount, skipInterval do
+			if self.segments[i] then
+				local pos = self.segments[i].Position
+				table.insert(compressedPath, {
+					x = math.floor(pos.X * 10) / 10,
+					y = math.floor(pos.Y * 10) / 10,
+					z = math.floor(pos.Z * 10) / 10
+				})
+			end
+		end
+		
 		remoteEvents.positionupdate:FireServer({
-			position = self.rootPart.Position,
-			lookVector = self.rootPart.CFrame.LookVector,
+			path = compressedPath,
 			length = self.targetLength,
-			boosting = self.isBoosting
+			speed = self.isBoosting and 32 or 16
 		})
 	end
 end
