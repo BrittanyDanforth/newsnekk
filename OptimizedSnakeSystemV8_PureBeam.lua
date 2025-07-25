@@ -309,27 +309,19 @@ function Snake:getInterpolatedHistory(targetTime)
 end
 
 function Snake:createHead()
-	-- Create a sleek, modern head design
+	-- Create simple, working head
 	local head = Instance.new("Part")
 	head.Name = "SnakeHead"
-	local headSize = self.config.HeadSize or Vector3.new(20, 20, 20) -- MASSIVE head!
-	head.Size = headSize
-	head.Shape = Enum.PartType.Block -- Block shape for consistency
-	head.Material = Enum.Material.Neon -- Match body glow style
+	head.Size = Vector3.new(6, 6, 6) -- Fixed size for now
+	head.Shape = Enum.PartType.Ball
+	head.Material = Enum.Material.Neon
 	head.Color = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
 	head.CanCollide = false
 	head.CanTouch = true
 	head.CanQuery = true
 	head.Anchored = true
-	head.Transparency = 0.1 -- Slight transparency to match beam aesthetic
-	head.Reflectance = 0
-	head.CastShadow = false -- No shadows for glowing effect
+	head.Transparency = 0
 	head.Parent = self.model
-	
-	-- Set initial head size based on snake length
-	local headSize, _ = self:getProportionalSizes()
-	head.Size = Vector3.new(headSize, headSize, headSize)
-	print("HEAD SIZE SET TO:", head.Size, "for length:", self.length)
 
 	-- Tag for collision
 	CollectionService:AddTag(head, "SnakeHead")
