@@ -12,11 +12,11 @@ local Debris = game:GetService("Debris")
 local SEGMENT_UPDATE_RATE = 60 -- 60 FPS baby
 local NETWORK_UPDATE_RATE = 20 -- Network at 20 FPS
 local MAX_PHYSICAL_SEGMENTS = 50 -- Only 50 physical parts for collision
-local MAX_VISUAL_BEAMS = 200 -- 200 beams max for visuals
-local SEGMENT_SPACING = 0.8 -- Tighter spacing for smoother look
+local MAX_VISUAL_BEAMS = 300 -- More beams for smoother curves
+local SEGMENT_SPACING = 0.6 -- Tighter spacing for smoother look
 local HISTORY_SIZE = 5000 -- Massive history for long snakes
 local GROWTH_CHECK_INTERVAL = 10 -- Check growth every 10 frames
-local BEAM_SEGMENT_LENGTH = 25 -- Each beam covers 25 units of snake length
+local BEAM_SEGMENT_LENGTH = 15 -- Shorter beams for smoother curves
 
 -- Visual Constants
 local MIN_HEAD_SIZE = 3
@@ -25,9 +25,10 @@ local MIN_SEGMENT_SIZE = 2.5
 local MAX_SEGMENT_SIZE = 10
 local GLOW_INTENSITY_MIN = 1
 local GLOW_INTENSITY_MAX = 3
-local BEAM_SEGMENTS = 20 -- More segments for smoother curves
-local BEAM_MIN_WIDTH = 3 -- Thicker minimum
-local BEAM_MAX_WIDTH = 15 -- Thicker maximum
+local BEAM_SEGMENTS = 10 -- Balanced for performance
+local BEAM_MIN_WIDTH = 3.5 -- Slightly thicker
+local BEAM_MAX_WIDTH = 14 -- Slightly smaller max
+local BEAM_CURVE_SIZE = 0.5 -- Add curves to beams for smoother turns
 
 -- Create network events
 local remoteEvents = {}
@@ -246,9 +247,9 @@ function Snake:createOptimizedBody()
 		local segment = Instance.new("Part")
 		segment.Name = "PhysicalSegment" .. i
 		segment.Shape = Enum.PartType.Ball
-		segment.Material = Enum.Material.ForceField
+		segment.Material = Enum.Material.Neon -- Back to Neon for better glow
 		segment.Size = Vector3.new(MIN_SEGMENT_SIZE, MIN_SEGMENT_SIZE, MIN_SEGMENT_SIZE)
-		segment.Transparency = 0.5 -- Semi-transparent since beams do the visual work
+		segment.Transparency = i <= 10 and 0 or 0.3 -- First 10 segments fully visible
 		segment.CanCollide = false
 		segment.CanTouch = true -- All physical segments can collide
 		segment.CanQuery = false
@@ -313,22 +314,22 @@ function Snake:configureBeam(beam, index, isHeadBeam)
 	local colorIndex = ((index - 1) % #self.config.BodyColors) + 1
 	local color = isHeadBeam and self.config.HeadColor or self.config.BodyColors[colorIndex]
 	
-	-- Beam properties for maximum visibility
+	-- Beam properties for maximum visibility and smoothness
 	beam.Color = ColorSequence.new(color)
 	beam.Transparency = NumberSequence.new(0) -- FULLY OPAQUE
 	beam.LightEmission = 1 -- MAXIMUM BRIGHTNESS
 	beam.LightInfluence = 0
-	beam.Texture = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
+	beam.Texture = "" -- Remove texture for smoother appearance
 	beam.TextureMode = Enum.TextureMode.Stretch
 	beam.TextureLength = 1
-	beam.TextureSpeed = self.isBoosting and 2 or 0
+	beam.TextureSpeed = 0
 	beam.Width0 = BEAM_MIN_WIDTH
 	beam.Width1 = BEAM_MIN_WIDTH
-	beam.CurveSize0 = 0
-	beam.CurveSize1 = 0
+	beam.CurveSize0 = BEAM_CURVE_SIZE -- Add curves for smoother turns
+	beam.CurveSize1 = -BEAM_CURVE_SIZE -- Opposite curve for natural flow
 	beam.FaceCamera = true
 	beam.Segments = BEAM_SEGMENTS
-	beam.ZOffset = -1 -- Render behind parts
+	beam.ZOffset = 0 -- Same level as parts for better blending
 end
 
 function Snake:updatePositionHistory()
@@ -383,26 +384,26 @@ function Snake:startUpdateLoop()
 		if self.isBoosting then
 			self.boostParticles.Rate = 50
 			self.headGlow.Brightness = GLOW_INTENSITY_MAX
-			-- Update beam texture speed
+			-- Visual boost effects on beams
 			for _, beam in pairs(self.visualBeams) do
 				if beam and beam.Parent then
-					beam.TextureSpeed = 2
+					beam.LightEmission = 1
 				end
 			end
 			if self.headBeam then
-				self.headBeam.TextureSpeed = 2
+				self.headBeam.LightEmission = 1
 			end
 		else
 			self.boostParticles.Rate = 0
 			self.headGlow.Brightness = GLOW_INTENSITY_MIN
-			-- Reset beam texture speed
+			-- Reset beam effects
 			for _, beam in pairs(self.visualBeams) do
 				if beam and beam.Parent then
-					beam.TextureSpeed = 0
+					beam.LightEmission = 0.8
 				end
 			end
 			if self.headBeam then
-				self.headBeam.TextureSpeed = 0
+				self.headBeam.LightEmission = 0.8
 			end
 		end
 
@@ -457,10 +458,25 @@ function Snake:updateOptimizedBody()
 			local histData = self:getHistoricalPosition(stepsBack)
 			
 			if histData then
-				-- Smooth position update
+				-- Smooth position update with interpolation
 				local targetPos = histData.position
 				local currentPos = segment.Position
-				segment.Position = currentPos:Lerp(targetPos, 0.3)
+				
+				-- Add smooth interpolation between history points for curves
+				if i > 1 and i < MAX_PHYSICAL_SEGMENTS then
+					local prevStepsBack = math.floor((i - 1) * spacing / 2)
+					local nextStepsBack = math.floor((i + 1) * spacing / 2)
+					local prevData = self:getHistoricalPosition(prevStepsBack)
+					local nextData = self:getHistoricalPosition(nextStepsBack)
+					
+					if prevData and nextData then
+						-- Bezier-like smoothing
+						local midPoint = (prevData.position + nextData.position) / 2
+						targetPos = targetPos:Lerp(midPoint, 0.3)
+					end
+				end
+				
+				segment.Position = currentPos:Lerp(targetPos, 0.4)
 				
 				-- Update size
 				segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
@@ -479,7 +495,7 @@ function Snake:updateOptimizedBody()
 	-- Update beam attachments positions
 	local beamWidth = BEAM_MIN_WIDTH + (BEAM_MAX_WIDTH - BEAM_MIN_WIDTH) * (self.growthFactor - 1) / 9
 	
-	-- Update each beam attachment position
+	-- Update each beam attachment position with smoothing
 	for i = 1, requiredBeams + 1 do
 		local attachment = self.beamAttachments[i]
 		if attachment then
@@ -489,7 +505,28 @@ function Snake:updateOptimizedBody()
 			local histData = self:getHistoricalPosition(stepsBack)
 			
 			if histData then
-				attachment.WorldPosition = histData.position
+				local targetPos = histData.position
+				
+				-- Smooth out positions for middle attachments
+				if i > 1 and i < requiredBeams then
+					local prevDist = (i - 2) * BEAM_SEGMENT_LENGTH
+					local nextDist = i * BEAM_SEGMENT_LENGTH
+					local prevSteps = math.floor(prevDist / 2)
+					local nextSteps = math.floor(nextDist / 2)
+					
+					local prevData = self:getHistoricalPosition(prevSteps)
+					local nextData = self:getHistoricalPosition(nextSteps)
+					
+					if prevData and nextData then
+						-- Create smooth curve through points
+						local direction = (nextData.position - prevData.position).Unit
+						local perpendicular = Vector3.new(-direction.Z, 0, direction.X)
+						local curveOffset = perpendicular * math.sin(i * 0.1) * 0.2
+						targetPos = targetPos + curveOffset
+					end
+				end
+				
+				attachment.WorldPosition = targetPos
 			end
 		end
 	end
@@ -500,7 +537,7 @@ function Snake:updateOptimizedBody()
 		self.headBeam.Width1 = beamWidth
 	end
 	
-	-- Update body beam widths with taper
+	-- Update body beam widths with taper and dynamic curves
 	for i = 1, requiredBeams do
 		local beam = self.visualBeams[i]
 		if beam and beam.Parent then
@@ -508,7 +545,25 @@ function Snake:updateOptimizedBody()
 			local taperFactor = 1 - progress * 0.4 -- 40% taper at tail
 			
 			beam.Width0 = beamWidth * taperFactor
-			beam.Width1 = beamWidth * taperFactor * 0.9 -- Slight taper within segment
+			beam.Width1 = beamWidth * taperFactor * 0.95 -- Very slight taper
+			
+			-- Dynamic curve adjustment based on movement
+			if i > 1 and i < requiredBeams then
+				local currentAttach = self.beamAttachments[i]
+				local nextAttach = self.beamAttachments[i + 1]
+				local prevAttach = self.beamAttachments[i - 1]
+				
+				if currentAttach and nextAttach and prevAttach then
+					local dir1 = (currentAttach.WorldPosition - prevAttach.WorldPosition).Unit
+					local dir2 = (nextAttach.WorldPosition - currentAttach.WorldPosition).Unit
+					local turnAngle = math.acos(math.clamp(dir1:Dot(dir2), -1, 1))
+					
+					-- Adjust curve based on turn angle
+					local curveAmount = math.sin(turnAngle) * BEAM_CURVE_SIZE * 2
+					beam.CurveSize0 = curveAmount
+					beam.CurveSize1 = -curveAmount
+				end
+			end
 			
 			-- Ensure beam is visible
 			beam.Enabled = true
