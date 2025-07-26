@@ -1499,18 +1499,23 @@ function AISnake.new(startPosition)
 	self.Segments = {}
 	self.CurrentLength = self.Config.InitialLength
 
+	-- FIXED: Proper position history initialization
 	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.2) + 20
 	self.PositionHistory = table.create(self.MaxHistorySize)
 	self.HistoryHead = 1
-	local initialHistoryPoint = { position = self.Position, lookVector = self.Direction }
+
+	-- Initialize history with proper spread to prevent stretching
 	for i = 1, self.MaxHistorySize do
-		self.PositionHistory[i] = initialHistoryPoint
+		local historyOffset = self.Direction * (-i * 0.5)
+		local historyPos = self.Position + historyOffset
+		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
 	end
 
 	function self:addToHistory(data)
 		self.PositionHistory[self.HistoryHead] = data
 		self.HistoryHead = (self.HistoryHead % self.MaxHistorySize) + 1
 	end
+
 	function self:getFromHistory(stepsBack)
 		local index = self.HistoryHead - stepsBack
 		if index < 1 then
@@ -1519,25 +1524,17 @@ function AISnake.new(startPosition)
 		return self.PositionHistory[index]
 	end
 
-	-- Create all segments at spawn position initially (prevents dragging on respawn)
+	-- FIXED: Create segments at proper positions
 	for i = 1, self.CurrentLength do
-		-- Start all segments BEHIND the head position
-		local offset = self.Direction * (-i * self.SegmentSpacing)
-		local pos = self.Position + offset
+		local segmentOffset = self.Direction * (-i * self.SegmentSpacing * 0.15)
+		local pos = self.Position + segmentOffset
 		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
 		local color = self.Config.BodyColors[colorIndex]
 		local segment = createSegment(i, pos, color, self.Config, self.Model, i)
 		self.Segments[i] = segment
-		
-		-- Make segments invisible initially to prevent visual glitch
+
+		-- Start segments invisible
 		segment.Transparency = 1
-	end
-	
-	-- Populate position history with proper spread positions
-	for i = 1, self.MaxHistorySize do
-		local historyOffset = self.Direction * (-i * 0.5) -- Smaller spacing for history
-		local historyPos = self.Position + historyOffset
-		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
 	end
 	
 	-- Make segments visible after a frame
@@ -1557,6 +1554,9 @@ function AISnake.new(startPosition)
 	self._lastPositions = {}
 	self._stuckCheckTime = 0
 	self._lastStuckCheck = tick()
+
+	-- Spawn protection
+	self._spawnProtection = tick() + 3  -- 3 second spawn protection
 
 	return self
 end
