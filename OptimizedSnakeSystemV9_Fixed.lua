@@ -806,12 +806,27 @@ function Snake:addSegments(count)
 			beam.Parent = self.attachmentPart
 			self.beams[i - 1] = beam
 
-			-- Animate beam growth
+			-- Animate beam growth (width only - transparency needs custom animation)
 			TweenService:Create(beam, TweenInfo.new(0.3), {
 				Width0 = beamWidth,
-				Width1 = beamWidth,
-				Transparency = NumberSequence.new(0)
+				Width1 = beamWidth
 			}):Play()
+			
+			-- Custom transparency animation for NumberSequence
+			local startTime = tick()
+			local transparencyConnection
+			transparencyConnection = RunService.Heartbeat:Connect(function()
+				local elapsed = tick() - startTime
+				local progress = math.min(elapsed / 0.3, 1) -- 0.3 second duration
+				
+				-- Interpolate from 0.8 to 0
+				local transparency = 0.8 * (1 - progress)
+				beam.Transparency = NumberSequence.new(transparency)
+				
+				if progress >= 1 then
+					transparencyConnection:Disconnect()
+				end
+			end)
 		end
 
 		-- Add strategic overlap beams for new segments in critical areas
