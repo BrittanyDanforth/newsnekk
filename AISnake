@@ -1519,36 +1519,39 @@ function AISnake.new(startPosition)
 		return self.PositionHistory[index]
 	end
 
-	-- Create all segments at spawn position initially (prevents dragging on respawn)
+	-- Calculate proper segment spacing based on config (matching updateMovement logic)
+	local segmentSpacingMultiplier = 0.15  -- This matches the spacing used in updateMovement
+	local actualSegmentSpacing = self.Config.SegmentSpacing * segmentSpacingMultiplier
+	
+	-- Create all segments with proper initial positions
 	for i = 1, self.CurrentLength do
-		-- Start all segments BEHIND the head position
-		local offset = self.Direction * (-i * self.SegmentSpacing)
-		local pos = self.Position + offset
+		-- Position segments using the same spacing as updateMovement
+		local segmentOffset = i * actualSegmentSpacing
+		local pos = self.Position - self.Direction * segmentOffset
+		
 		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
 		local color = self.Config.BodyColors[colorIndex]
 		local segment = createSegment(i, pos, color, self.Config, self.Model, i)
 		self.Segments[i] = segment
 		
-		-- Make segments invisible initially to prevent visual glitch
-		segment.Transparency = 1
+		-- Segments start visible - no need for delayed visibility
+		segment.Transparency = 0
 	end
 	
-	-- Populate position history with proper spread positions
+	-- Populate position history to match segment positions
+	-- This prevents the initial "pull" effect
 	for i = 1, self.MaxHistorySize do
-		local historyOffset = self.Direction * (-i * 0.5) -- Smaller spacing for history
-		local historyPos = self.Position + historyOffset
+		-- Use consistent spacing for smooth following
+		local historyOffset = i * actualSegmentSpacing * 0.8
+		local historyPos = self.Position - self.Direction * historyOffset
 		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
 	end
 	
-	-- Make segments visible after a frame
-	task.defer(function()
-		task.wait(0.1)
-		for _, segment in ipairs(self.Segments) do
-			if segment and segment.Parent then
-				segment.Transparency = 0
-			end
-		end
-	end)
+	-- Ensure head is positioned correctly
+	if self.HeadParts and self.HeadParts.head then
+		self.HeadParts.head.CFrame = CFramelookAt(self.Position, self.Position + self.Direction)
+		self.HeadParts.head.Transparency = 1  -- Keep head invisible as intended
+	end
 
 	table.insert(AISnake._activeSnakes, self)
 	self._active = true
