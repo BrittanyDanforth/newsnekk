@@ -7,19 +7,24 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
--- PERFORMANCE SETTINGS - Significantly reduced for better FPS
-local ORB_COUNT = 150 -- Reduced from 400-700
-local RESPAWN_DELAY = 1 -- Slower respawn
+-- PERFORMANCE SETTINGS - Balanced for gameplay and performance
+local ORB_COUNT = 400 -- Increased for better gameplay (was 150)
+local RESPAWN_DELAY = 0.5 -- Faster respawn for active gameplay
 local UPDATE_INTERVAL = 0.3 -- Less frequent updates
 local UPGRADE_ORB_CHANCE = 0.02 -- Rare upgrade orbs
 
--- LOD Settings - Simplified for performance
-local RENDER_DISTANCE = 200 -- Orbs become invisible beyond this
+-- Dynamic orb scaling
+local ORB_BASE_COUNT = 300 -- Base orbs with no players
+local ORB_PER_PLAYER = 50 -- Additional orbs per player
+local MAX_ORB_COUNT = 600 -- Cap to prevent lag
+
+-- LOD Settings - Optimized for performance
+local RENDER_DISTANCE = 300 -- Increased visibility range
 local COLLECTION_RANGE = 15 -- Max collection distance
-local LOD_UPDATE_RATE = 0.5 -- Update visibility twice per second
+local LOD_UPDATE_RATE = 0.3 -- Update visibility 3x per second
 
 -- Spatial grid for efficient collision detection
-local GRID_SIZE = 100 -- Larger cells = fewer checks
+local GRID_SIZE = 80 -- Balanced cell size
 local orbGrid = {}
 
 -- Core helpers
@@ -62,6 +67,25 @@ local poolSize = 0
 
 -- Forward declare
 local attachOrbTouched
+
+---------------------------------------------------------------------
+-- Dynamic orb count calculation
+---------------------------------------------------------------------
+local function getTargetOrbCount()
+	local playerCount = #Players:GetPlayers()
+	local aiCount = 0
+	
+	-- Count AI snakes
+	local ASM = getAISnakeModule()
+	if ASM and ASM._activeSnakes then
+		aiCount = #ASM._activeSnakes
+	end
+	
+	local totalSnakes = playerCount + math.min(aiCount, 5) -- Cap AI contribution
+	local targetCount = ORB_BASE_COUNT + (ORB_PER_PLAYER * totalSnakes)
+	
+	return math.min(targetCount, MAX_ORB_COUNT)
+end
 
 ---------------------------------------------------------------------
 -- Spatial Grid Functions - Optimized
@@ -541,15 +565,16 @@ task.spawn(proximityCollectionLoop)
 -- Orb spawning loop
 ---------------------------------------------------------------------
 local function orbSpawnLoop()
-	-- Initial spawn
-	for i = 1, ORB_COUNT do
+	-- Initial spawn with base count
+	local initialCount = getTargetOrbCount()
+	for i = 1, initialCount do
 		spawnOrb()
-		if i % 10 == 0 then
+		if i % 20 == 0 then
 			task.wait() -- Prevent lag spike
 		end
 	end
 	
-	-- Maintain orb count
+	-- Maintain orb count dynamically
 	while true do
 		task.wait(RESPAWN_DELAY)
 		
@@ -565,10 +590,28 @@ local function orbSpawnLoop()
 			end
 		end
 		
-		-- Spawn new orbs
-		local orbsToSpawn = ORB_COUNT - #orbs
-		for i = 1, math.min(orbsToSpawn, 5) do -- Max 5 per cycle
-			spawnOrb()
+		-- Get current target count
+		local targetCount = getTargetOrbCount()
+		local currentCount = #orbs
+		
+		if currentCount < targetCount then
+			-- Spawn new orbs
+			local orbsToSpawn = targetCount - currentCount
+			for i = 1, math.min(orbsToSpawn, 10) do -- Max 10 per cycle
+				spawnOrb()
+			end
+		elseif currentCount > targetCount + 50 then
+			-- Remove excess orbs if way over target
+			local orbsToRemove = currentCount - targetCount
+			for i = 1, math.min(orbsToRemove, 5) do
+				local orb = orbs[#orbs]
+				if orb and orb.Parent and orb.Name ~= "DeathOrb" then
+					removeOrbFromGrid(orb)
+					visibleOrbs[orb] = nil
+					returnOrbToPool(orb)
+					table.remove(orbs, #orbs)
+				end
+			end
 		end
 	end
 end
