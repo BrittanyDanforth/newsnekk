@@ -2306,8 +2306,13 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 			end
 		end
 
-		for _, orb in OrbUtils.orbs do
-			SpatialGrid.Insert(orb, orb, "ORB")
+		-- Insert orbs into spatial grid if OrbUtils.orbs exists
+		if OrbUtils.orbs and type(OrbUtils.orbs) == "table" then
+			for _, orb in pairs(OrbUtils.orbs) do
+				if orb and orb.Parent then
+					SpatialGrid.Insert(orb, orb, "ORB")
+				end
+			end
 		end
 	end 
 
