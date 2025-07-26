@@ -1417,6 +1417,8 @@ function AISnake.new(startPosition)
 
 	local self = setmetatable({}, AISnake)
 	self.Config = deepCopy(SnakeConfig)
+	self._destroyed = false
+	self._active = false
 	
 	-- Update map bounds if needed (in case map was created after script started)
 	updateMapBounds()
@@ -1543,9 +1545,12 @@ function AISnake.new(startPosition)
 	-- Make segments visible after a frame
 	task.defer(function()
 		task.wait(0.1)
-		for _, segment in ipairs(self.Segments) do
-			if segment and segment.Parent then
-				segment.Transparency = 0
+		-- Check if snake still exists and hasn't been destroyed
+		if not self._destroyed and self.Segments then
+			for _, segment in ipairs(self.Segments) do
+				if segment and segment.Parent then
+					segment.Transparency = 0
+				end
 			end
 		end
 	end)
