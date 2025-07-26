@@ -1523,11 +1523,23 @@ function AISnake.new(startPosition)
 	local segmentSpacingMultiplier = 0.15  -- This matches the spacing used in updateMovement
 	local actualSegmentSpacing = self.Config.SegmentSpacing * segmentSpacingMultiplier
 	
+	-- First, populate history so segments can follow it properly
+	for i = 1, self.MaxHistorySize do
+		local historyOffset = i * actualSegmentSpacing * 0.8
+		local historyPos = self.Position - self.Direction * historyOffset
+		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
+	end
+	
 	-- Create all segments with proper initial positions
 	for i = 1, self.CurrentLength do
-		-- Position segments using the same spacing as updateMovement
-		local segmentOffset = i * actualSegmentSpacing
-		local pos = self.Position - self.Direction * segmentOffset
+		-- Calculate position based on history (like in updateMovement)
+		local delay = mathFloor(i * 1.2)
+		local targetData = self:getFromHistory(delay)
+		local pos = self.Position - self.Direction * (i * actualSegmentSpacing)
+		
+		if targetData then
+			pos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * segmentSpacingMultiplier)
+		end
 		
 		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
 		local color = self.Config.BodyColors[colorIndex]
@@ -1536,16 +1548,10 @@ function AISnake.new(startPosition)
 		
 		-- Segments start visible - no need for delayed visibility
 		segment.Transparency = 0
+		segment.CFrame = CFramenew(pos)
 	end
 	
-	-- Populate position history to match segment positions
-	-- This prevents the initial "pull" effect
-	for i = 1, self.MaxHistorySize do
-		-- Use consistent spacing for smooth following
-		local historyOffset = i * actualSegmentSpacing * 0.8
-		local historyPos = self.Position - self.Direction * historyOffset
-		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
-	end
+	-- History already populated above before segment creation
 	
 	-- Ensure head is positioned correctly
 	if self.HeadParts and self.HeadParts.head then
