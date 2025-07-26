@@ -1499,18 +1499,23 @@ function AISnake.new(startPosition)
 	self.Segments = {}
 	self.CurrentLength = self.Config.InitialLength
 
+	-- FIXED: Proper position history initialization
 	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.2) + 20
 	self.PositionHistory = table.create(self.MaxHistorySize)
 	self.HistoryHead = 1
-	local initialHistoryPoint = { position = self.Position, lookVector = self.Direction }
+
+	-- Initialize history with proper spread to prevent stretching
 	for i = 1, self.MaxHistorySize do
-		self.PositionHistory[i] = initialHistoryPoint
+		local historyOffset = self.Direction * (-i * 0.5)
+		local historyPos = self.Position + historyOffset
+		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
 	end
 
 	function self:addToHistory(data)
 		self.PositionHistory[self.HistoryHead] = data
 		self.HistoryHead = (self.HistoryHead % self.MaxHistorySize) + 1
 	end
+
 	function self:getFromHistory(stepsBack)
 		local index = self.HistoryHead - stepsBack
 		if index < 1 then
@@ -1519,28 +1524,20 @@ function AISnake.new(startPosition)
 		return self.PositionHistory[index]
 	end
 
-	-- Create all segments at spawn position initially (prevents dragging on respawn)
+	-- FIXED: Create segments at proper positions
 	for i = 1, self.CurrentLength do
-		-- Start all segments BEHIND the head position
-		local offset = self.Direction * (-i * self.SegmentSpacing)
-		local pos = self.Position + offset
+		local segmentOffset = self.Direction * (-i * self.SegmentSpacing * 0.15)
+		local pos = self.Position + segmentOffset
 		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
 		local color = self.Config.BodyColors[colorIndex]
 		local segment = createSegment(i, pos, color, self.Config, self.Model, i)
 		self.Segments[i] = segment
-		
-		-- Make segments invisible initially to prevent visual glitch
+
+		-- Start segments invisible
 		segment.Transparency = 1
 	end
-	
-	-- Populate position history with proper spread positions
-	for i = 1, self.MaxHistorySize do
-		local historyOffset = self.Direction * (-i * 0.5) -- Smaller spacing for history
-		local historyPos = self.Position + historyOffset
-		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
-	end
-	
-	-- Make segments visible after a frame
+
+	-- Make segments visible after initialization
 	task.defer(function()
 		task.wait(0.1)
 		for _, segment in ipairs(self.Segments) do
@@ -1552,11 +1549,14 @@ function AISnake.new(startPosition)
 
 	table.insert(AISnake._activeSnakes, self)
 	self._active = true
-	
+
 	-- Stuck detection
 	self._lastPositions = {}
 	self._stuckCheckTime = 0
 	self._lastStuckCheck = tick()
+
+	-- Spawn protection
+	self._spawnProtection = tick() + 3  -- 3 second spawn protection
 
 	return self
 end
@@ -1716,38 +1716,37 @@ function AISnake:Destroy()
 	self.Segments = nil
 end
 
--- === SMOOTHER MOVEMENT ===
+-- === SMOOTHER MOVEMENT (FIXED) ===
 function AISnake:updateMovement(dt)
-	-- Check if destroyed
 	if self._destroyed then return end
-	
+
 	if not self._active or not self.HeadParts or not self.HeadParts.head or not self.HeadParts.head.Parent then
 		if self._active and not self._destroyed then 
 			self:Destroy() 
 		end
 		return
 	end
+
 	local now = tick()
 	local p = self.Personality
 	local state = self.State
 	local steer = self.SteerDirection
 
-	-- BOUNDARY SAFETY CHECK #1: Validate current position
-	-- If somehow out of bounds, teleport to center
-	if self.Position.X < MAP_BOUNDS.minX - 10 or self.Position.X > MAP_BOUNDS.maxX + 10 or
-	   self.Position.Z < MAP_BOUNDS.minZ - 10 or self.Position.Z > MAP_BOUNDS.maxZ + 10 then
-		-- Teleporting out-of-bounds snake to safe position
-		-- Random safe position near center
-		local safeAngle = mathRandom() * 2 * mathPi
-		local safeRadius = mathRandom(50, 150)
-		self.Position = Vector3new(
-			mathCos(safeAngle) * safeRadius,
-			self.Position.Y,
-			mathSin(safeAngle) * safeRadius
-		)
-		self.Direction = Vector3new(mathRandom() - 0.5, 0, mathRandom() - 0.5).Unit
-		self.State = "WANDER"
-		return -- Skip this frame
+	-- SPAWN PROTECTION - Don't check boundaries for first few seconds
+	local isSpawnProtected = now < (self._spawnProtection or 0)
+
+	-- Validate position (unless spawn protected)
+	if not isSpawnProtected then
+		if self.Position.X < MAP_BOUNDS.minX - 10 or self.Position.X > MAP_BOUNDS.maxX + 10 or
+			self.Position.Z < MAP_BOUNDS.minZ - 10 or self.Position.Z > MAP_BOUNDS.maxZ + 10 then
+			-- Gentle repositioning instead of teleporting
+			local safeX = mathClamp(self.Position.X, MAP_BOUNDS.minX + 50, MAP_BOUNDS.maxX - 50)
+			local safeZ = mathClamp(self.Position.Z, MAP_BOUNDS.minZ + 50, MAP_BOUNDS.maxZ - 50)
+			self.Position = Vector3new(safeX, self.Position.Y, safeZ)
+			self.Direction = Vector3new(mathRandom() - 0.5, 0, mathRandom() - 0.5).Unit
+			self.State = "WANDER"
+			return
+		end
 	end
 
 	-- SMOOTHER turning
@@ -1805,46 +1804,56 @@ function AISnake:updateMovement(dt)
 	-- Update direction from yaw
 	self.Direction = Vector3new(mathSin(self.CurrentYaw), 0, mathCos(self.CurrentYaw))
 
-	-- BOUNDARY SAFETY CHECK #2: Predictive boundary avoidance
-	-- Check where we'll be in the next second
-	local lookAheadTime = 1.0
-	local futurePos = self.Position + self.Direction * self.Speed * lookAheadTime
-	
-	-- Strong boundary repulsion
-	local boundaryForce = Vector3new(0, 0, 0)
-	local boundaryStrength = 0
-	
-	-- Check each boundary
-	if futurePos.X > MAP_BOUNDS.maxX - 50 then
-		local dist = MAP_BOUNDS.maxX - futurePos.X
-		boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
-		boundaryForce = boundaryForce + Vector3new(-1, 0, 0)
-	elseif futurePos.X < MAP_BOUNDS.minX + 50 then
-		local dist = futurePos.X - MAP_BOUNDS.minX
-		boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
-		boundaryForce = boundaryForce + Vector3new(1, 0, 0)
+	-- Movement variation
+	if self.State == "WANDER" or self.State == "FLEE" then
+		local wobbleTime = tick() * 2
+		local wobbleAmount = 0.1
+		local wobble = Vector3new(
+			math.sin(wobbleTime) * wobbleAmount,
+			0,
+			math.cos(wobbleTime * 1.3) * wobbleAmount
+		)
+		self.Direction = (self.Direction + wobble).Unit
 	end
-	
-	if futurePos.Z > MAP_BOUNDS.maxZ - 50 then
-		local dist = MAP_BOUNDS.maxZ - futurePos.Z
-		boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
-		boundaryForce = boundaryForce + Vector3new(0, 0, -1)
-	elseif futurePos.Z < MAP_BOUNDS.minZ + 50 then
-		local dist = futurePos.Z - MAP_BOUNDS.minZ
-		boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
-		boundaryForce = boundaryForce + Vector3new(0, 0, 1)
-	end
-	
-	-- Apply boundary force if needed
-	if boundaryStrength > 0.1 then
-		boundaryForce = boundaryForce.Unit
-		-- Blend with current direction
-		self.Direction = (self.Direction * (1 - boundaryStrength) + boundaryForce * boundaryStrength).Unit
-		-- Force state change
-		if boundaryStrength > 0.5 then
-			self.State = "AVOID_BOUNDARY"
-			self.TargetOrb = nil
-			self.TargetSnake = nil
+
+	-- REMOVED: Emergency giant snake escape (causes teleporting)
+
+	-- Boundary force (gentler, only when not spawn protected)
+	if not isSpawnProtected then
+		local lookAheadTime = 1.0
+		local futurePos = self.Position + self.Direction * self.Speed * lookAheadTime
+
+		local boundaryForce = Vector3new(0, 0, 0)
+		local boundaryStrength = 0
+
+		if futurePos.X > MAP_BOUNDS.maxX - 50 then
+			local dist = MAP_BOUNDS.maxX - futurePos.X
+			boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
+			boundaryForce = boundaryForce + Vector3new(-1, 0, 0)
+		elseif futurePos.X < MAP_BOUNDS.minX + 50 then
+			local dist = futurePos.X - MAP_BOUNDS.minX
+			boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
+			boundaryForce = boundaryForce + Vector3new(1, 0, 0)
+		end
+
+		if futurePos.Z > MAP_BOUNDS.maxZ - 50 then
+			local dist = MAP_BOUNDS.maxZ - futurePos.Z
+			boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
+			boundaryForce = boundaryForce + Vector3new(0, 0, -1)
+		elseif futurePos.Z < MAP_BOUNDS.minZ + 50 then
+			local dist = futurePos.Z - MAP_BOUNDS.minZ
+			boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
+			boundaryForce = boundaryForce + Vector3new(0, 0, 1)
+		end
+
+		if boundaryStrength > 0.1 then
+			boundaryForce = boundaryForce.Unit
+			self.Direction = (self.Direction * (1 - boundaryStrength) + boundaryForce * boundaryStrength).Unit
+			if boundaryStrength > 0.5 then
+				self.State = "AVOID_BOUNDARY"
+				self.TargetOrb = nil
+				self.TargetSnake = nil
+			end
 		end
 	end
 
@@ -1898,76 +1907,36 @@ function AISnake:updateMovement(dt)
 		self.Speed = mathMax(self.NormalSpeed, self.NormalSpeed * speedMultiplier)
 	end
 
-	-- BOUNDARY SAFETY CHECK #3: Final position update with clamping
-	-- Move the snake
+	-- Position update (with clamping only when not spawn protected)
 	local moveDistance = self.Speed * dt
 	local newPosition = self.Position + self.Direction * moveDistance
-	
-	-- Soft clamp with margin
-	local margin = 20
-	local clampedX = mathClamp(newPosition.X, MAP_BOUNDS.minX + margin, MAP_BOUNDS.maxX - margin)
-	local clampedZ = mathClamp(newPosition.Z, MAP_BOUNDS.minZ + margin, MAP_BOUNDS.maxZ - margin)
-	
-	-- If clamping occurred, we hit a boundary
-	if clampedX ~= newPosition.X or clampedZ ~= newPosition.Z then
-		-- Force a random turn away from edge
-		local escapeAngle = mathRandom() * mathPi - mathPi/2  -- -90 to +90 degrees
-		local currentAngle = mathAtan2(self.Direction.X, self.Direction.Z)
-		local newAngle = currentAngle + escapeAngle
-		
-		self.Direction = Vector3new(mathSin(newAngle), 0, mathCos(newAngle))
-		self.CurrentYaw = newAngle
-		self.TargetYaw = newAngle
-		
-		-- Clear any targets
-		self.TargetOrb = nil
-		self.TargetSnake = nil
-		self.State = "WANDER"
-		
-		-- Boundary clamped silently
-	end
-	
-	-- Update position
-	self.Position = Vector3new(clampedX, newPosition.Y, clampedZ)
-	
-	-- STUCK DETECTION - Check if snake hasn't moved much
-	if now - self._lastStuckCheck > 2 then  -- Check every 2 seconds
-		self._lastStuckCheck = now
-		
-		-- Add current position to history
-		table.insert(self._lastPositions, 1, self.Position)
-		if #self._lastPositions > 5 then
-			table.remove(self._lastPositions)  -- Keep only last 5 positions
+
+	if not isSpawnProtected then
+		local margin = 20
+		local clampedX = mathClamp(newPosition.X, MAP_BOUNDS.minX + margin, MAP_BOUNDS.maxX - margin)
+		local clampedZ = mathClamp(newPosition.Z, MAP_BOUNDS.minZ + margin, MAP_BOUNDS.maxZ - margin)
+
+		if clampedX ~= newPosition.X or clampedZ ~= newPosition.Z then
+			local escapeAngle = mathRandom() * mathPi - mathPi/2
+			local currentAngle = mathAtan2(self.Direction.X, self.Direction.Z)
+			local newAngle = currentAngle + escapeAngle
+
+			self.Direction = Vector3new(mathSin(newAngle), 0, mathCos(newAngle))
+			self.CurrentYaw = newAngle
+			self.TargetYaw = newAngle
+
+			self.TargetOrb = nil
+			self.TargetSnake = nil
+			self.State = "WANDER"
 		end
-		
-		-- If we have enough history, check if stuck
-		if #self._lastPositions >= 5 then
-			local totalMovement = 0
-			for i = 2, #self._lastPositions do
-				totalMovement = totalMovement + (self._lastPositions[i] - self._lastPositions[i-1]).Magnitude
-			end
-			
-			-- If barely moved in 10 seconds (5 checks * 2 seconds)
-			if totalMovement < 50 then
-				-- Snake appears stuck, teleporting to new position
-				-- Teleport to random safe position
-				local safeAngle = mathRandom() * 2 * mathPi
-				local safeRadius = mathRandom(100, 200)
-				self.Position = Vector3new(
-					mathCos(safeAngle) * safeRadius,
-					self.Position.Y,
-					mathSin(safeAngle) * safeRadius
-				)
-				-- Random new direction
-				self.Direction = Vector3new(mathRandom() - 0.5, 0, mathRandom() - 0.5).Unit
-				self.CurrentYaw = mathAtan2(self.Direction.X, self.Direction.Z)
-				self.TargetYaw = self.CurrentYaw
-				self.State = "WANDER"
-				self._lastPositions = {}  -- Clear history
-			end
-		end
+
+		self.Position = Vector3new(clampedX, newPosition.Y, clampedZ)
+	else
+		self.Position = newPosition
 	end
-	
+
+	-- REMOVED: Stuck detection that causes teleporting
+
 	self.RootPart.Position = self.Position
 
 	local headOffset = self.Direction * 1.5
@@ -2157,8 +2126,11 @@ function AISnake:updateMovement(dt)
 	local myHead = self.HeadParts and self.HeadParts.head
 	if not myHead or not myHead.Parent then return end
 
+	-- Skip collision detection during spawn protection
+	if isSpawnProtected then return end
+
 	self._collisionCheckFrame = (self._collisionCheckFrame or 0) + 1
-	if self._collisionCheckFrame % 4 ~= 0 then return end  -- Check less often
+	if self._collisionCheckFrame % 6 ~= 0 then return end  -- Check even less often
 
 	local searchRadius = 3.5
 	local nearbyEntities = SpatialGrid.QueryRadius(myHead.Position, searchRadius)
@@ -2169,6 +2141,11 @@ function AISnake:updateMovement(dt)
 
 		if isPartsColliding(myHead, otherPart) then
 			local otherOwner = data.owner
+
+			-- Add double-check to prevent false positives
+			if (myHead.Position - otherPart.Position).Magnitude > 5 then
+				continue  -- Skip if distance is too far (false positive)
+			end
 
 			if data.type == "AI_HEAD" then
 				if tostring(self) < tostring(otherOwner) then
