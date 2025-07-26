@@ -846,8 +846,22 @@ function AISnake:findNearbyThreats()
 	if not myHead then return {} end
 	local myPos = myHead.Position
 	local threats = {}
-
-	local threatRadius = 80 -- INCREASED from 60
+	
+	-- SCALE threat radius based on nearby snake sizes
+	local threatRadius = 80
+	local playerSnakes = {}
+	
+	-- Check for large player snakes first
+	for _, player in pairs(game.Players:GetPlayers()) do
+		if player.Character then
+			local playerLength = getPlayerLength(player)
+			if playerLength > 200 then
+				-- Increase threat radius for large snakes
+				threatRadius = math.max(threatRadius, 100 + (playerLength / 10))
+			end
+		end
+	end
+	
 	local nearbyEntities = SpatialGrid.QueryRadius(myPos, threatRadius)
 
 	for _, entity in nearbyEntities do
@@ -914,6 +928,33 @@ function AISnake:startBoost(duration)
 	self.BoostCooldown = self.BoostEndTime + mathRandom(15, 30) / 10 -- INCREASED cooldown
 end
 
+-- Helper: Detect giant snakes
+function AISnake:detectGiantSnakes()
+	local myPos = self.Position
+	local giants = {}
+	
+	-- Check all player snakes
+	for _, player in pairs(game.Players:GetPlayers()) do
+		if player.Character then
+			local length = getPlayerLength(player)
+			if length > 300 then -- Giant snake
+				local head = player.Character:FindFirstChild("HumanoidRootPart")
+				if head then
+					local dist = (head.Position - myPos).Magnitude
+					table.insert(giants, {
+						player = player,
+						length = length,
+						distance = dist,
+						position = head.Position
+					})
+				end
+			end
+		end
+	end
+	
+	return giants
+end
+
 -- FIXED: Much smoother flee logic
 function AISnake:getFleeVector()
 	local myHead = self.HeadParts and self.HeadParts.head
@@ -952,6 +993,18 @@ function AISnake:getFleeVector()
 
 		if totalWeight > 0 then
 			fleeDir = (totalThreatVector / totalWeight).Unit
+			
+			-- Add randomization to prevent predictable fleeing
+			local randomAngle = (math.random() - 0.5) * math.pi / 3 -- ±60 degrees
+			
+			-- Rotate flee direction randomly
+			local cosA = math.cos(randomAngle)
+			local sinA = math.sin(randomAngle)
+			fleeDir = Vector3new(
+				fleeDir.X * cosA - fleeDir.Z * sinA,
+				0,
+				fleeDir.X * sinA + fleeDir.Z * cosA
+			)
 		end
 	end
 
@@ -1123,6 +1176,47 @@ function AISnake:_determineAction()
 	local now = tick()
 	local state = "WANDER"
 	local steer = self.Direction
+	
+	-- Add at the beginning of _determineAction:
+	-- Reset stuck behavior if we've been in the same state too long
+	if self.State == self.LastState then
+		self.StateTimer = (self.StateTimer or 0) + 0.1
+		if self.StateTimer > 5 then -- 5 seconds in same state
+			-- Force a random direction change
+			self.TargetYaw = math.random() * 2 * math.pi
+			self.State = "WANDER"
+			self.StateTimer = 0
+			self.LastPosition = nil
+			self.StuckCounter = 0
+		end
+	else
+		self.StateTimer = 0
+	end
+	self.LastState = self.State
+
+	-- Add position-based stuck detection
+	if self.LastPosition then
+		local moved = (self.Position - self.LastPosition).Magnitude
+		if moved < 5 then -- Barely moved
+			self.StuckCounter = (self.StuckCounter or 0) + 1
+			if self.StuckCounter > 20 then -- Stuck for 2 seconds
+				-- Teleport to random safe position
+				local safeAngle = math.random() * 2 * math.pi
+				local safeRadius = math.random(100, 200)
+				self.Position = Vector3.new(
+					math.cos(safeAngle) * safeRadius,
+					self.Position.Y,
+					math.sin(safeAngle) * safeRadius
+				)
+				self.StuckCounter = 0
+				self.State = "WANDER"
+				return "RESET", self.Direction
+			end
+		else
+			self.StuckCounter = 0
+		end
+	end
+	self.LastPosition = self.Position
 
 	-- Clean up expired states
 	if self.Avoiding and now > self.AvoidExpire then 
@@ -1147,28 +1241,31 @@ function AISnake:_determineAction()
 		self.isAmbushing = false
 	end
 
-	-- Priority 0: BOUNDARY AVOIDANCE (HIGHEST PRIORITY)
+	-- Priority 0: BOUNDARY AVOIDANCE (HIGHEST PRIORITY) with randomization
 	local boundaryBuffer = 80
 	local strongBuffer = 40
 	local edgeSteer = nil
 	
+	-- Add randomization to prevent predictable paths
+	local randomFactor = 0.3 -- 30% randomization
+	
 	-- Check X boundaries
 	if headPos.X > MAP_BOUNDS.maxX - boundaryBuffer then
 		local strength = 1 - (MAP_BOUNDS.maxX - headPos.X) / boundaryBuffer
-		edgeSteer = Vector3new(-1, 0, 0) * strength
+		edgeSteer = Vector3new(-1 + math.random() * randomFactor - randomFactor/2, 0, 0) * strength
 	elseif headPos.X < MAP_BOUNDS.minX + boundaryBuffer then
 		local strength = 1 - (headPos.X - MAP_BOUNDS.minX) / boundaryBuffer
-		edgeSteer = Vector3new(1, 0, 0) * strength
+		edgeSteer = Vector3new(1 + math.random() * randomFactor - randomFactor/2, 0, 0) * strength
 	end
 	
-	-- Check Z boundaries
+	-- Check Z boundaries with randomization
 	if headPos.Z > MAP_BOUNDS.maxZ - boundaryBuffer then
 		local strength = 1 - (MAP_BOUNDS.maxZ - headPos.Z) / boundaryBuffer
-		local zSteer = Vector3new(0, 0, -1) * strength
+		local zSteer = Vector3new(0, 0, -1 + math.random() * randomFactor - randomFactor/2) * strength
 		edgeSteer = edgeSteer and (edgeSteer + zSteer).Unit or zSteer
 	elseif headPos.Z < MAP_BOUNDS.minZ + boundaryBuffer then
 		local strength = 1 - (headPos.Z - MAP_BOUNDS.minZ) / boundaryBuffer
-		local zSteer = Vector3new(0, 0, 1) * strength
+		local zSteer = Vector3new(0, 0, 1 + math.random() * randomFactor - randomFactor/2) * strength
 		edgeSteer = edgeSteer and (edgeSteer + zSteer).Unit or zSteer
 	end
 	
@@ -1270,6 +1367,18 @@ function AISnake:_determineAction()
 	local threats = self:findNearbyThreats()
 	local shouldFlee = false
 	local fleeReason = ""
+	
+	-- Check for giant snakes specifically
+	local giants = self:detectGiantSnakes()
+	if #giants > 0 then
+		for _, giant in ipairs(giants) do
+			if giant.distance < 150 then -- Giant snake nearby
+				shouldFlee = true
+				fleeReason = "giant_snake_detected"
+				break
+			end
+		end
+	end
 
 	if #threats > 0 then
 		local closestThreat = threats[1]
@@ -1290,6 +1399,15 @@ function AISnake:_determineAction()
 		elseif p.Type == "Coward" and closestThreat.lengthDiff > 0 and closestThreat.distance < 35 then
 			shouldFlee = true
 			fleeReason = "coward_instinct"
+		end
+		
+		-- Always flee from extremely large snakes
+		if closestThreat.owner and closestThreat.isPlayer then
+			local playerLength = getPlayerLength(closestThreat.owner)
+			if playerLength > 500 and closestThreat.distance < 200 then
+				shouldFlee = true
+				fleeReason = "massive_player_snake"
+			end
 		end
 
 		-- Even aggressive types flee from much bigger snakes
@@ -1804,6 +1922,42 @@ function AISnake:updateMovement(dt)
 
 	-- Update direction from yaw
 	self.Direction = Vector3new(mathSin(self.CurrentYaw), 0, mathCos(self.CurrentYaw))
+	
+	-- Add movement variation to avoid repetitive patterns
+	if self.State == "WANDER" or self.State == "FLEE" then
+		-- Add slight random wobble to movement
+		local wobbleTime = tick() * 2
+		local wobbleAmount = 0.1
+		local wobble = Vector3new(
+			math.sin(wobbleTime) * wobbleAmount,
+			0,
+			math.cos(wobbleTime * 1.3) * wobbleAmount
+		)
+		self.Direction = (self.Direction + wobble).Unit
+	end
+	
+	-- Emergency escape if surrounded by giant snakes
+	local giants = self:detectGiantSnakes()
+	local dangerCount = 0
+	for _, giant in ipairs(giants) do
+		if giant.distance < 100 then
+			dangerCount = dangerCount + 1
+		end
+	end
+	
+	if dangerCount >= 2 then -- Surrounded!
+		-- Teleport to a random safe spot
+		local escapeAngle = math.random() * 2 * math.pi
+		local escapeRadius = math.random(200, 300)
+		self.Position = Vector3new(
+			math.cos(escapeAngle) * escapeRadius,
+			self.Position.Y,
+			math.sin(escapeAngle) * escapeRadius
+		)
+		self.State = "WANDER"
+		self.TargetOrb = nil
+		self.TargetSnake = nil
+	end
 
 	-- BOUNDARY SAFETY CHECK #2: Predictive boundary avoidance
 	-- Check where we'll be in the next second
