@@ -64,13 +64,13 @@ local spawnProtectedAI = {} -- Track AI spawn protection
 
 -- === WALL COLLISION SYSTEM ===
 local WALL_ORB_DROP_AMOUNT = 3 -- Number of orbs to drop when hitting wall
-local WALL_ORB_DROP_COOLDOWN = 2.0 -- Increased cooldown to prevent exploit
+local WALL_ORB_DROP_COOLDOWN = 8.0 -- Much longer cooldown to prevent spam
 local WALL_DAMAGE_MULTIPLIER = 0.95 -- Lose 5% of length per wall hit
-local WALL_PUSH_TIME = 3.0 -- Time before pushing player away from wall
-local WALL_PUSH_FORCE = 50 -- Force to push player away (gentle)
-local WALL_WARNING_TIME = 2.0 -- Time before warning player
-local WALL_PUSH_IMMUNITY_TIME = 3.0 -- Immunity time after being pushed
-local WALL_CHECK_INTERVAL = 0.1 -- Only check walls every 0.1 seconds per player
+local WALL_PUSH_TIME = 6.0 -- Much longer time before pushing (was 3.0)
+local WALL_PUSH_FORCE = 80 -- Moderate push force
+local WALL_WARNING_TIME = 4.0 -- More warning time (was 2.0)
+local WALL_PUSH_IMMUNITY_TIME = 30.0 -- Much longer immunity after push
+local WALL_CHECK_INTERVAL = 1.0 -- Check much less frequently
 local wallCollisionCooldowns = {} -- Track cooldowns per player/AI
 local wallContactTime = {} -- Track how long player has been near wall
 local wallPushImmunity = {} -- Track push immunity
@@ -149,13 +149,26 @@ local CollisionCache = {
 }
 
 -- === WALL COLLISION FUNCTIONS ===
-local function checkWallCollision(position)
+local function checkWallCollision(position, snakeLength, isHead)
+	-- IMPORTANT: Only check wall collision for the HEAD, not body/tail
+	if not isHead then
+		return false
+	end
+	
 	-- Check if position is near any wall
 	local mapHalf = 400 -- Half of MAP_SIZE from MapBuilder
-	local wallThreshold = mapHalf - 3 -- Only trigger when very close to wall (3 studs)
-
+	local wallThreshold = mapHalf - 10 -- Only trigger if EXTREMELY close to wall (10 studs from edge)
+	
+	-- Extra validation - must be REALLY close to wall to trigger
 	if math.abs(position.X) > wallThreshold or math.abs(position.Z) > wallThreshold then
-		return true
+		-- Double check - make sure we're actually near the wall edge
+		local distToWallX = mapHalf - math.abs(position.X)
+		local distToWallZ = mapHalf - math.abs(position.Z)
+		
+		-- Must be within 10 units of the wall
+		if distToWallX < 10 or distToWallZ < 10 then
+			return true
+		end
 	end
 	return false
 end
@@ -1774,22 +1787,50 @@ RunService.Stepped:Connect(function()
 
 				-- Check wall collision (skip if being pushed or has immunity)
 				local hasImmunity = wallPushImmunity[player] and currentTime - wallPushImmunity[player] < WALL_PUSH_IMMUNITY_TIME
-				if checkWallCollision(headPos) and not player:GetAttribute("BeingPushedFromWall") and not hasImmunity then
+				if checkWallCollision(headPos, playerSnakeLength, true) and not player:GetAttribute("BeingPushedFromWall") and not hasImmunity then
 					handleWallCollision(player, true)
 
 					-- Track wall contact time
 					local key = player
 					if not wallContactTime[key] then
 						wallContactTime[key] = tick()
+						-- Debug: Log when wall contact starts
+						if DEBUG_COLLISIONS then
+							print(string.format("[WALL CONTACT] %s touched wall at position (%.1f, %.1f, %.1f)", 
+								player.Name, headPos.X, headPos.Y, headPos.Z))
+						end
 					end
 
 					local contactDuration = tick() - wallContactTime[key]
 
 					-- Push player away if they've been at wall too long
 					if contactDuration > WALL_PUSH_TIME then
+						-- EXTRA VALIDATION: Make sure player is STILL at the wall before pushing
+						if not checkWallCollision(headPos, playerSnakeLength, true) then
+							-- Player moved away from wall, reset contact time
+							wallContactTime[key] = nil
+							continue
+						end
+						
 						local character = player.Character
 						if character and character:FindFirstChild("HumanoidRootPart") then
 							local root = character.HumanoidRootPart
+							
+							-- FINAL CHECK: Verify head is actually at wall, not just tail
+							local actualHeadPos = root.Position
+							if not checkWallCollision(actualHeadPos, playerSnakeLength, true) then
+								wallContactTime[key] = nil
+								continue
+							end
+							
+							-- Check if player is actually stuck (not moving much)
+							local velocity = root.AssemblyLinearVelocity or Vector3.zero
+							if velocity.Magnitude > 10 then
+								-- Player is moving fine, not stuck - reset timer
+								wallContactTime[key] = tick() - (WALL_PUSH_TIME / 2) -- Give more time
+								continue
+							end
+							
 							local pushDirection = -root.CFrame.LookVector
 
 							-- Determine push direction based on which wall
@@ -1916,7 +1957,16 @@ RunService.Stepped:Connect(function()
 					end
 				else
 					-- Reset wall contact time if not touching wall
-					wallContactTime[player] = nil
+					if wallContactTime[player] then
+						wallContactTime[player] = nil
+						-- Also clear any wall warning attributes
+						if player:GetAttribute("WallWarningShown") then
+							player:SetAttribute("WallWarningShown", false)
+						end
+						if DEBUG_COLLISIONS then
+							print(string.format("[WALL] %s moved away from wall - contact reset", player.Name))
+						end
+					end
 				end
 			end
 
@@ -2051,7 +2101,7 @@ RunService.Stepped:Connect(function()
 			end
 
 			-- Check wall collision for AI
-			if aiSnake and checkWallCollision(aiPos) then
+			if aiSnake and checkWallCollision(aiPos, aiSnakeLength, true) then
 				handleWallCollision(aiSnake, false)
 
 				-- Track wall contact time for AI
