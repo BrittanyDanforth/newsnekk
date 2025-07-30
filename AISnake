@@ -642,14 +642,14 @@ AISnake.PersonalityDefinitions = {
 		AvoidOthers = true,
 		SpeedMultiplier = 1.1,
 		TurnBias = 0.05,
-		BoostChance = 0.04,
+		BoostChance = 0.06,  -- Slightly more boost for orb collection
 		CombatRadius = 25,
 		RandomTurnInterval = 4.0,
-		OrbSeekRadius = 200,  -- Excellent orb vision
+		OrbSeekRadius = 250,  -- Even better orb vision
 		Description = "Peaceful orb collector - avoids all conflict",
 		FleeThreshold = 5,
 		AggressionLevel = 0.0,
-		PatrolRadius = 300,
+		PatrolRadius = 400,  -- Wider patrol for more orbs
 	},
 	Guardian = {
 		Type = "Guardian",
@@ -758,7 +758,9 @@ AISnake.PersonalityDefinitions = {
 
 -- === AI METHODS ===
 function AISnake:findBestOrb()
-	local minDist = self.Personality.OrbSeekRadius or 50
+	-- ENHANCED: Increase orb seek radius based on personality
+	local baseRadius = self.Personality.OrbSeekRadius or 50
+	local minDist = baseRadius * 1.5  -- 50% more range for better orb finding
 	local nearest = nil
 	local headPos = self.HeadParts and self.HeadParts.head and self.HeadParts.head.Position or self.Position
 
@@ -1313,19 +1315,26 @@ function AISnake:_determineAction()
 		return "FLEE", fleeDir
 	end
 
-	-- Priority 4: Smart orb seeking
-	if p.TargetOrbs then
-		-- Find best orb with path checking
-		if not self.TargetOrb or not self:isPathSafe(self.TargetOrb.Position) then
-			local orb, dist = self:findBestOrb()
-
-			-- Only target orb if path is safe
-			if orb and dist < p.OrbSeekRadius * 1.5 and self:isPathSafe(orb.Position) then
-				self.TargetOrb = orb
-				self.TargetOrbExpire = now + mathRandom(50, 80) / 10
-				AISnake._orbTargets[self] = orb
+	-- Priority 3.5: Smart orb seeking (HIGHER PRIORITY)
+	if p.TargetOrbs and not shouldFlee then  -- Don't seek orbs when fleeing
+		-- Always look for better orbs
+		local orb, dist = self:findBestOrb()
+		
+		-- More aggressive orb targeting
+		if orb and dist < p.OrbSeekRadius * 2 then  -- Double radius for targeting
+			-- Switch to closer orb if significantly better
+			if self.TargetOrb and self.TargetOrb.Parent then
+				local currentDist = (self.TargetOrb.Position - headPos).Magnitude
+				if dist < currentDist * 0.7 then  -- Switch if 30% closer
+					self.TargetOrb = orb
+					self.TargetOrbExpire = now + mathRandom(30, 60) / 10
+					AISnake._orbTargets[self] = orb
+				end
 			else
-				self.TargetOrb = nil
+				-- No current target, take this one
+				self.TargetOrb = orb
+				self.TargetOrbExpire = now + mathRandom(30, 60) / 10
+				AISnake._orbTargets[self] = orb
 			end
 		end
 
@@ -1334,18 +1343,12 @@ function AISnake:_determineAction()
 			local toOrb = self.TargetOrb.Position - headPos
 			local orbDist = toOrb.Magnitude
 
-			-- Smart orb approach with collision checking
-			if orbDist < 15 then
+			-- More direct orb approach
+			if orbDist < 50 then  -- Increased from 30
 				steer = toOrb.Unit
-			elseif orbDist < 30 then
-				-- Check for obstacles
-				if not self:isPathSafe(self.TargetOrb.Position, 30) then
-					-- Path blocked, find new orb
-					self.TargetOrb = nil
-					AISnake._orbTargets[self] = nil
-				else
-					local leadFactor = mathMin(orbDist / 30, 0.5)
-					steer = toOrb.Unit
+				-- Boost when close to orb for faster collection
+				if orbDist < 20 and not self.Boosting and mathRandom() < 0.3 then
+					self:startBoost(0.5)  -- Short boost to grab orb
 				end
 			else
 				steer = toOrb.Unit
@@ -1353,6 +1356,9 @@ function AISnake:_determineAction()
 
 			-- Clear any combat targets when seeking orbs
 			self.TargetSnake = nil
+			
+			-- Return early to prioritize orb collection
+			return state, steer
 		end
 	end
 
