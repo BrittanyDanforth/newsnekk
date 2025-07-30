@@ -183,25 +183,31 @@ local isProcessingOrbs = false
 
 local function processOrbBatch()
 	if isProcessingOrbs or #orbSpawnBuffer == 0 then return end
-	
+
 	isProcessingOrbs = true
 	local batch = math.min(ORB_BATCH_SIZE, #orbSpawnBuffer)
-	
+
 	for i = 1, batch do
 		local orbData = table.remove(orbSpawnBuffer, 1)
 		if orbData then
-			pcall(function()
-				OrbUtils.spawnOrbAt(orbData.position, orbData.value)
+			local success, result = pcall(function()
+				return OrbUtils.spawnOrbAt(orbData.position, orbData.value)
 			end)
+			
+			if DEBUG_COLLISIONS and not success then
+				warn("[ORB SPAWN ERROR]", result)
+			end
 		end
 	end
-	
+
 	isProcessingOrbs = false
-	
+
 	-- Schedule next batch
 	if #orbSpawnBuffer > 0 then
-		task.wait(ORB_SPAWN_DELAY)
-		processOrbBatch()
+		task.spawn(function()
+			task.wait(ORB_SPAWN_DELAY)
+			processOrbBatch()
+		end)
 	end
 end
 
@@ -705,32 +711,35 @@ task.spawn(function()
 								-- Use stored positions instead of segment positions
 								local pos = segmentPositions[i]
 								if pos then
+									-- Larger offset for head and tail segments to avoid decay zones
+									local isNearEnd = (i <= 3) or (i >= totalSegments - 3)
+									local offsetMultiplier = isNearEnd and 6 or 3
+									
 									local offset = Vector3.new(
-										(math.random() - 0.5) * 3,
+										(math.random() - 0.5) * offsetMultiplier,
 										0,
-										(math.random() - 0.5) * 3
+										(math.random() - 0.5) * offsetMultiplier
 									)
 
-									-- Use batched spawning
-									spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), baseValue)
+									-- Use batched spawning with extra height for end segments
+									local extraHeight = isNearEnd and 2 or 0
+									spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + extraHeight, 0), baseValue)
 									spawnedOrbs = spawnedOrbs + 1
 								end
 							end
 							
-							-- Ensure minimum orbs at head
-							if spawnedOrbs < 3 and segments[1] then
-								local headSeg = segments[1]
-								if headSeg and headSeg:IsA("BasePart") and headSeg.Parent and headSeg.Position then
-									for j = 1, 3 - spawnedOrbs do
-										local offset = Vector3.new(
-											(math.random() - 0.5) * 5,
-											0,
-											(math.random() - 0.5) * 5
-										)
-										spawnOrbBatched(headSeg.Position + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), baseValue)
-									end
-									spawnedOrbs = math.max(spawnedOrbs, 3)
+							-- Ensure minimum orbs at head position (use stored position)
+							if spawnedOrbs < 3 and segmentPositions[1] then
+								local headPos = segmentPositions[1]
+								for j = 1, 3 - spawnedOrbs do
+									local offset = Vector3.new(
+										(math.random() - 0.5) * 5,
+										0,
+										(math.random() - 0.5) * 5
+									)
+									spawnOrbBatched(headPos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), baseValue)
 								end
+								spawnedOrbs = math.max(spawnedOrbs, 3)
 							end
 							
 							if DEBUG_COLLISIONS then
