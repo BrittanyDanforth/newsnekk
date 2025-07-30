@@ -1635,12 +1635,10 @@ function AISnake.new(startPosition)
 
 	self.HeadParts = createVisualHead(self.Config, self.Model)
 	
-	-- FIXED: Set initial head position and orientation
+	-- FIXED: Set initial head position WITHOUT offset to match segments
 	if self.HeadParts and self.HeadParts.head then
-		local headOffset = self.Direction * 1.5
-		local headPos = self.Position + headOffset
-		self.HeadParts.head.CFrame = CFramelookAt(headPos, headPos + self.Direction)
-		self.HeadParts.head.Position = headPos
+		self.HeadParts.head.Position = self.Position
+		self.HeadParts.head.CFrame = CFramenew(self.Position)
 	end
 
 	self.Segments = {}
@@ -1715,27 +1713,18 @@ function AISnake.new(startPosition)
 		
 		self._spawnActivating = false
 		
-		-- Enable segments with fade-in effect
+		-- Enable segments with simple fade-in (no movement during fade)
 		for i, segment in ipairs(self.Segments) do
 			if segment and segment.Parent then
-				-- Smooth fade-in
+				-- Simple fade-in without movement
 				task.spawn(function()
-					local fadeTime = 0.3  -- Slightly longer fade time
-					local startTime = tick()
+					local fadeTime = 0.2
+					local steps = 10
 					
-					-- During fade, gradually move segments to proper positions
-					while tick() - startTime < fadeTime do
+					for step = 1, steps do
 						if not segment or not segment.Parent then return end
-						local alpha = (tick() - startTime) / fadeTime
-						segment.Transparency = 1 - alpha
-						
-						-- Gradually move segment to its proper trailing position
-						local targetDelay = mathFloor(i * 1.2)  
-						local targetOffset = self.Direction * (-targetDelay * actualSegmentSpacing)
-						local targetPos = self.Position + targetOffset
-						segment.Position = segment.Position:Lerp(targetPos, alpha * 0.5)
-						
-						task.wait()
+						segment.Transparency = 1 - (step / steps)
+						task.wait(fadeTime / steps)
 					end
 					
 					if segment and segment.Parent then
