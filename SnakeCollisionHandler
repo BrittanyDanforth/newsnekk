@@ -38,7 +38,7 @@ local SPAWN_PROTECTION_TIME = 3 -- Reduced from 5 seconds
 local MIN_AI_SPAWN_DISTANCE = 50 -- Minimum distance between AI spawn points
 
 -- === IMMEDIATE ORB SPAWNING ===
-local ORB_SPAWN_HEIGHT = 5 -- Standard orb height
+local ORB_SPAWN_HEIGHT = 3 -- Standard orb height (matching OrbSpawner)
 local GUARANTEED_ORB_COUNT = 3 -- Minimum orbs to spawn
 
 -- === HEAD-TO-HEAD SETTINGS ===
@@ -481,7 +481,7 @@ for _, player in Players:GetPlayers() do
 end
 
 -- === FIXED ORB SPAWNING SYSTEM ===
-local ORB_SPAWN_HEIGHT = 5 -- Match AI snake height for proper collection
+local ORB_SPAWN_HEIGHT = 3 -- Match orb spawner height
 local MIN_ORB_SPACING = 3 -- Minimum distance between spawned orbs
 local GUARANTEED_ORB_COUNT = 5 -- Minimum orbs to spawn on death
 
@@ -722,7 +722,13 @@ local function getPlayerSegments(player)
 	local segmentParts = {}
 	
 	if snakeModel then
-		-- New optimized snake system - get first 50 segments only (matching collision)
+		-- New optimized snake system - get head (Segment0_Head) and first 50 segments
+		local head = snakeModel:FindFirstChild("Segment0_Head")
+		if head and head:IsA("BasePart") and head.Parent then
+			-- Don't include head in body segments
+		end
+		
+		-- Get body segments (Segment1, Segment2, etc.)
 		for i = 1, 50 do
 			local seg = snakeModel:FindFirstChild("Segment" .. i)
 			if seg and seg:IsA("BasePart") and seg.Parent then

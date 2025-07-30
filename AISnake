@@ -2417,14 +2417,8 @@ function AISnake:updateMovement(dt)
 					end
 				end
 			elseif data.type == "PLAYER_SEGMENT" then
-				-- Verify it's a real segment collision
-				if otherPart and otherPart.Parent then
-					local realDist = (myHead.Position - otherPart.Position).Magnitude
-					if realDist < 5 then -- Only count close collisions
-						self:Destroy()
-						return
-					end
-				end
+				-- Player segment collisions are now handled by SnakeCollisionHandler
+				-- This prevents double-processing and inconsistent behavior
 			end
 		end
 	end
