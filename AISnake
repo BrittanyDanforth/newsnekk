@@ -987,12 +987,12 @@ function AISnake:getFleeVector()
 		end
 	end
 
-	-- ADD center bias to ALL flee directions if far from center
+	-- Only add MINIMAL center bias when VERY far from center
 	local mapCenter = Vector3new(0, headPos.Y, 0)
 	local distFromCenter = (mapCenter - headPos).Magnitude
-	if distFromCenter > 180 and fleeDir then
+	if distFromCenter > 400 and fleeDir then  -- Increased from 180
 		local toCenter = (mapCenter - headPos).Unit
-		fleeDir = (fleeDir + toCenter * 0.4).Unit
+		fleeDir = (fleeDir + toCenter * 0.1).Unit  -- Reduced from 0.4
 	end
 
 	return fleeDir
@@ -1356,7 +1356,7 @@ function AISnake:_determineAction()
 		end
 	end
 
-	-- Priority 5: Wandering (SMARTER)
+	-- Priority 5: Wandering (LESS CENTER BIAS)
 	if state == "WANDER" then
 		local mapCenter = Vector3new(0, headPos.Y, 0)
 		local toCenter = mapCenter - headPos
@@ -1385,13 +1385,15 @@ function AISnake:_determineAction()
 			end
 		end
 
-		-- Center bias based on distance
-		if distFromCenter > 250 then
-			steer = toCenter.Unit
-		elseif distFromCenter > 150 then
-			local centerBias = toCenter.Unit * 0.7
+		-- REDUCED center bias - only pull to center when VERY far
+		if distFromCenter > 400 then  -- Increased from 250
+			local centerBias = toCenter.Unit * 0.3  -- Reduced from full center
+			steer = (baseSteer + centerBias).Unit
+		elseif distFromCenter > 350 then  -- Increased from 150
+			local centerBias = toCenter.Unit * 0.15  -- Much less center bias
 			steer = (baseSteer + centerBias).Unit
 		else
+			-- Most of the time, just wander freely
 			steer = baseSteer
 		end
 	end
@@ -1597,6 +1599,12 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		-- Reset movement timers
 		self.LastTurn = tick()
 		self.BoostCooldown = tick() + 2  -- Wait before first boost
+		
+		-- CRITICAL: Initialize brain update time
+		self._lastBrainUpdate = tick()
+		
+		-- Force immediate brain update
+		self:updateBrain()
 		
 		-- Fade in segments
 		for i, segment in ipairs(self.Segments) do
@@ -1825,13 +1833,26 @@ function AISnake:updateMovement(dt)
 	-- Failsafe: Check if brain updates have stopped
 	if self._lastBrainUpdate then
 		local timeSinceLastBrain = now - self._lastBrainUpdate
-		if timeSinceLastBrain > 5.0 then  -- No brain update for 5 seconds
+		if timeSinceLastBrain > 2.0 then  -- Reduced from 5.0 to 2.0 seconds
 			warn("AI Snake brain frozen for", timeSinceLastBrain, "seconds! Forcing update...")
 			self:updateBrain()
+			-- Also ensure it's in the active list
+			local found = false
+			for _, snake in ipairs(AISnake._activeSnakes) do
+				if snake == self then
+					found = true
+					break
+				end
+			end
+			if not found and self._active then
+				table.insert(AISnake._activeSnakes, self)
+				print("🔧 Re-added frozen snake to active list")
+			end
 		end
 	else
 		-- First brain update
 		self:updateBrain()
+		self._lastBrainUpdate = now
 	end
 
 	-- SPAWN PROTECTION - Don't check boundaries for first few seconds
