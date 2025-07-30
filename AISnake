@@ -1569,6 +1569,23 @@ function AISnake.new(startPosition)
 		-- Clear spawn stabilization flag
 		self._spawnStabilizing = nil
 		
+		-- CRITICAL: Reset AI state after spawn
+		self.State = "WANDER"
+		self.TargetOrb = nil
+		self.TargetSnake = nil
+		self.Avoiding = false
+		self.AvoidExpire = 0
+		
+		-- Force a random initial direction
+		local randomTurn = mathRandom() * mathPi * 2
+		self.TargetYaw = randomTurn
+		self.CurrentYaw = randomTurn
+		self.Direction = Vector3new(mathSin(randomTurn), 0, mathCos(randomTurn))
+		
+		-- Reset movement timers
+		self.LastTurn = tick()
+		self.BoostCooldown = tick() + 2  -- Wait before first boost
+		
 		-- Fade in segments
 		for i, segment in ipairs(self.Segments) do
 			if segment and segment.Parent then
@@ -1776,8 +1793,22 @@ function AISnake:updateMovement(dt)
 		return
 	end
 	local p = self.Personality
+	
+	-- Failsafe: Ensure we have a personality
+	if not p then
+		warn("AI Snake lost personality! Reassigning...")
+		local pType = AISnake.PersonalityTypes[mathRandom(1, #AISnake.PersonalityTypes)]
+		self.Personality = deepCopy(AISnake.PersonalityDefinitions[pType])
+		p = self.Personality
+	end
+	
 	local state = self.State
 	local steer = self.SteerDirection
+	
+	-- Failsafe: Ensure we have a valid steer direction
+	if not steer or steer.Magnitude < 0.1 then
+		steer = self.Direction
+	end
 
 	-- SPAWN PROTECTION - Don't check boundaries for first few seconds
 	local isSpawnProtected = now < (self._spawnProtection or 0)
