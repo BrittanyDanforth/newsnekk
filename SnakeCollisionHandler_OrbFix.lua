@@ -720,30 +720,45 @@ task.spawn(function()
 									-- For head/tail segments, spawn with delay and further offset
 									if isNearEnd then
 										task.spawn(function()
-											-- Add delay for head/tail orbs to avoid cleanup
-											task.wait(isHead and 0.1 or 0.05)
+											-- Add MUCH LONGER delay for head orbs to avoid spawn cleanup
+											local waitTime = isHead and 0.5 or 0.05
+											if DEBUG_COLLISIONS and isHead then
+												print(string.format("[ORB DEBUG] Waiting %s seconds before spawning head orb at segment %d", waitTime, i))
+											end
+											task.wait(waitTime) -- Half second delay for head
 											
-											-- Much larger offset for end segments
-											local offsetMultiplier = 8
+											-- MASSIVE offset for head segments to avoid spawn protection radius
+											local offsetMultiplier = isHead and 20 or 8 -- 20 studs for head!
 											local offset = Vector3.new(
 												(math.random() - 0.5) * offsetMultiplier,
 												0,
 												(math.random() - 0.5) * offsetMultiplier
 											)
 											
-											-- For head segments, also offset away from death direction
-											if isHead and character and character:FindFirstChild("HumanoidRootPart") then
-												local rootPart = character.HumanoidRootPart
-												local velocity = rootPart.AssemblyLinearVelocity or rootPart.Velocity
-												if velocity.Magnitude > 0 then
-													-- Spawn orbs behind the movement direction
-													local backwardDir = -velocity.Unit
-													offset = offset + (backwardDir * 5)
+											-- For head segments, offset away from spawn point
+											if isHead then
+												-- Always push head orbs FAR away from death position
+												local spawnPushDirection = Vector3.new(
+													math.random() - 0.5,
+													0,
+													math.random() - 0.5
+												).Unit
+												offset = offset + (spawnPushDirection * 15) -- Extra 15 studs away
+												
+												-- If moving, also consider velocity
+												if character and character:FindFirstChild("HumanoidRootPart") then
+													local rootPart = character.HumanoidRootPart
+													local velocity = rootPart.AssemblyLinearVelocity or rootPart.Velocity
+													if velocity.Magnitude > 0 then
+														-- Spawn orbs behind the movement direction
+														local backwardDir = -velocity.Unit
+														offset = offset + (backwardDir * 10)
+													end
 												end
 											end
 											
 											-- Extra height to avoid ground cleanup
-											local extraHeight = 3
+											local extraHeight = isHead and 5 or 3 -- More height for head orbs
 											spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + extraHeight, 0), baseValue)
 										end)
 									else
@@ -765,30 +780,29 @@ task.spawn(function()
 							-- Ensure minimum orbs at head position (use stored position)
 							if spawnedOrbs < 3 and segmentPositions[1] then
 								task.spawn(function()
-									-- Delay to avoid cleanup at death location
-									task.wait(0.15)
+									-- LONG delay to ensure spawn protection is gone
+									task.wait(0.6) -- Wait over half a second
 									
 									local headPos = segmentPositions[1]
 									for j = 1, 3 - spawnedOrbs do
+										-- HUGE offset to get far from spawn point
+										local angle = (j - 1) * 120 * math.pi / 180 -- Spread in circle
+										local distance = 25 -- 25 studs away!
 										local offset = Vector3.new(
-											(math.random() - 0.5) * 10, -- Much larger spread
+											math.cos(angle) * distance,
 											0,
-											(math.random() - 0.5) * 10
+											math.sin(angle) * distance
 										)
 										
-										-- Try to offset away from death location
-										if character and character:FindFirstChild("HumanoidRootPart") then
-											local rootPart = character.HumanoidRootPart
-											local velocity = rootPart.AssemblyLinearVelocity or rootPart.Velocity
-											if velocity.Magnitude > 0 then
-												-- Spawn orbs behind and to the sides
-												local backwardDir = -velocity.Unit
-												local rightDir = Vector3.new(-backwardDir.Z, 0, backwardDir.X)
-												offset = offset + (backwardDir * 8) + (rightDir * (j - 2) * 3)
-											end
-										end
+										-- Add some randomness
+										offset = offset + Vector3.new(
+											(math.random() - 0.5) * 5,
+											0,
+											(math.random() - 0.5) * 5
+										)
 										
-										spawnOrbBatched(headPos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 3, 0), baseValue)
+										-- Spawn high up to avoid any ground cleanup
+										spawnOrbBatched(headPos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 6, 0), baseValue)
 									end
 								end)
 								spawnedOrbs = math.max(spawnedOrbs, 3)
@@ -1462,13 +1476,14 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - DEATH ORB FIX")
+print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - SPAWN PROTECTION FIX")
 print("🚀 All V7 functionality preserved with performance optimizations")
 print("💎 FIXED: Death orbs now properly spawn along snake segments!")
+print("🛡️ FIXED: Head orbs spawn FAR from death location with 0.5s delay")
+print("📍 Head orbs: 20-35 studs away, 0.5s delay, 5+ studs height")
 print("🔧 Optimizations: Batched orb spawning, aggressive LOD, bounds checking")
 print("📊 Performance: 12Hz checks, 96 chunk size, 1.5s cache")
 print("🐍 Ultra-long snake support: Special handling for 1000+ segments")
-print("🎯 Memory: Fixed collectgarbage error, using gcinfo() instead")
 
 -- Debug command (unchanged from V7)
 local function toggleDebug()
