@@ -201,14 +201,7 @@ local function processOrbBatch()
 		local orbData = table.remove(orbSpawnBuffer, 1)
 		if orbData then
 			local success, result = pcall(function()
-				local orb = OrbUtils.spawnOrbAt(orbData.position, orbData.value)
-				-- Mark death orbs as immune to spawn protection
-				if orb and orbData.isDeathOrb then
-					orb:SetAttribute("DeathOrb", true)
-					orb:SetAttribute("SpawnProtectionImmune", true)
-					orb:SetAttribute("SpawnTime", tick())
-				end
-				return orb
+				return OrbUtils.spawnOrbAt(orbData.position, orbData.value)
 			end)
 
 			if DEBUG_COLLISIONS and not success then
@@ -228,17 +221,26 @@ local function processOrbBatch()
 	end
 end
 
-local function spawnOrbBatched(position, value, isDeathOrb)
+local function spawnOrbBatched(position, value)
 	-- Add to buffer
 	table.insert(orbSpawnBuffer, {
 		position = position,
-		value = value,
-		isDeathOrb = isDeathOrb or false
+		value = value
 	})
 
 	-- Start processing if not already
 	if not isProcessingOrbs then
 		task.spawn(processOrbBatch)
+	end
+end
+
+-- Direct spawn function for immediate orbs
+local function spawnOrbDirect(position, value)
+	local success, err = pcall(function()
+		OrbUtils.spawnOrbAt(position, value)
+	end)
+	if not success then
+		warn("Orb spawn failed:", err)
 	end
 end
 
@@ -782,7 +784,7 @@ task.spawn(function()
 												end
 											end
 
-											spawnOrbBatched(orbPosition, baseValue, true) -- Mark as death orb
+											spawnOrbBatched(orbPosition, baseValue) -- Mark as death orb
 										end)
 									elseif isTail then
 										-- Tail segments with moderate delay
@@ -793,7 +795,7 @@ task.spawn(function()
 												0,
 												(math.random() - 0.5) * 10
 											)
-											spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 3, 0), baseValue, true) -- Death orb
+											spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 3, 0), baseValue) -- Death orb
 										end)
 									else
 										-- Normal middle segments spawn immediately
@@ -803,7 +805,7 @@ task.spawn(function()
 											(math.random() - 0.5) * 3
 										)
 
-										spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), baseValue, true) -- Death orb
+										spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), baseValue) -- Death orb
 									end
 
 									spawnedOrbs = spawnedOrbs + 1
@@ -851,7 +853,7 @@ task.spawn(function()
 												orbPos = basePos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 10, 0)
 											end
 											
-											spawnOrbBatched(orbPos, baseValue, true) -- Death orb
+											spawnOrbBatched(orbPos, baseValue) -- Death orb
 										end
 									end
 								end)
@@ -873,7 +875,7 @@ task.spawn(function()
 										0,
 										(math.random() - 0.5) * 10
 									)
-									spawnOrbBatched(rootPart.Position + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), 1, true) -- Death orb
+									spawnOrbBatched(rootPart.Position + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), 1) -- Death orb
 								end
 							end
 						end
@@ -956,7 +958,7 @@ task.spawn(function()
 											pos.Z + offset.Z
 										)
 
-										spawnOrbBatched(spawnPos, valuePerOrb, true) -- Death orb for AI
+										spawnOrbBatched(spawnPos, valuePerOrb) -- Death orb for AI
 										spawnedOrbs = spawnedOrbs + 1
 									end
 								end
@@ -970,7 +972,7 @@ task.spawn(function()
 											math.max(groundY + ORB_SPAWN_HEIGHT, firstSeg.Position.Y),
 											firstSeg.Position.Z
 										)
-										spawnOrbBatched(spawnPos, valuePerOrb, true) -- Death orb for AI
+										spawnOrbBatched(spawnPos, valuePerOrb) -- Death orb for AI
 									end
 								end
 							end
