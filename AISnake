@@ -60,8 +60,22 @@ local VERY_LONG_SNAKE_THRESHOLD = 300  -- Even more optimization for very long s
 local AI_UPDATE_DISTANCE = 200  -- Only update AI within this distance of players
 local SEGMENT_POOL_MAX = 500  -- Increased pool size for better reuse
 
+-- === EXTREME OPTIMIZATION SETTINGS ===
+local EXTREME_SNAKE_THRESHOLD = 1000  -- Snakes longer than this use extreme optimization
+local ULTRA_SNAKE_THRESHOLD = 5000  -- Ultra optimization for 5K+ snakes
+local MAX_SEGMENTS_TO_UPDATE = 200  -- Maximum segments to update per frame
+local SEGMENT_BATCH_SIZE = 20  -- Update segments in batches
+local POSITION_HISTORY_LIMIT = 500  -- Limit position history for extreme snakes
+
 AISnake._activeSnakes = {}
 AISnake._orbTargets = {}
+
+-- === PERFORMANCE TRACKING ===
+local performanceStats = {
+	frameTime = 0,
+	segmentUpdates = 0,
+	brainUpdates = 0
+}
 
 -- === SPATIAL GRID (unchanged) ===
 local SpatialGrid = {}
@@ -1666,15 +1680,38 @@ function AISnake.new(startPosition)
 	self.HistoryHead = 1
 
 	function self:addToHistory(data)
-		self.PositionHistory[self.HistoryHead] = data
-		self.HistoryHead = (self.HistoryHead % self.MaxHistorySize) + 1
-	end
-	function self:getFromHistory(stepsBack)
-		local index = self.HistoryHead - stepsBack
-		if index < 1 then
-			index = index + self.MaxHistorySize
+		-- Limit history size for extreme snakes to prevent memory issues
+		local maxHistory = self.CurrentLength * 2
+		if self.CurrentLength > ULTRA_SNAKE_THRESHOLD then
+			maxHistory = POSITION_HISTORY_LIMIT -- Cap at 500 for ultra long snakes
+		elseif self.CurrentLength > EXTREME_SNAKE_THRESHOLD then
+			maxHistory = mathMin(self.CurrentLength, 1000) -- Cap at 1000 for extreme snakes
+		elseif self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
+			maxHistory = mathMin(self.CurrentLength * 1.5, 1500) -- Cap at 1500 for very long snakes
 		end
-		return self.PositionHistory[index]
+		
+		table.insert(self.PositionHistory, 1, data)
+		
+		-- Trim excess history
+		while #self.PositionHistory > maxHistory do
+			table.remove(self.PositionHistory)
+		end
+	end
+
+	function self:getFromHistory(index)
+		-- Optimize history access for extreme snakes
+		if self.CurrentLength > EXTREME_SNAKE_THRESHOLD then
+			-- For extreme snakes, use interpolated history to reduce memory access
+			local effectiveIndex = mathMin(index, #self.PositionHistory)
+			if effectiveIndex > #self.PositionHistory * 0.8 then
+				-- For tail segments, use less precise history
+				effectiveIndex = mathFloor(effectiveIndex * 0.8)
+			end
+			return self.PositionHistory[effectiveIndex] or self.PositionHistory[#self.PositionHistory]
+		else
+			-- Normal history access
+			return self.PositionHistory[mathMin(index, #self.PositionHistory)] or self.PositionHistory[#self.PositionHistory]
+		end
 	end
 
 	-- CRITICAL FIX: Use the ACTUAL spacing that matches movement updates
@@ -2282,83 +2319,96 @@ function AISnake:updateMovement(dt)
 	-- Initialize frame counter if needed
 	self._segmentUpdateFrame = (self._segmentUpdateFrame or 0) + 1
 	
-	-- Adaptive segment update skip based on snake length (less aggressive)
-	local segmentSkip = SEGMENT_UPDATE_SKIP
-	if self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
-		segmentSkip = 2  -- Only skip every other segment even for very long snakes
+	-- === EXTREME OPTIMIZATION FOR LONG SNAKES ===
+	local segmentUpdateStrategy = "NORMAL"
+	local segmentsToUpdate = self.CurrentLength
+	local updateInterval = 1
+	local batchSize = SEGMENT_BATCH_SIZE
+	
+	-- Determine update strategy based on length
+	if self.CurrentLength > ULTRA_SNAKE_THRESHOLD then
+		segmentUpdateStrategy = "ULTRA"
+		segmentsToUpdate = mathMin(self.CurrentLength, 100) -- Only update first 100 segments
+		updateInterval = 10 -- Update every 10th segment
+		batchSize = 5 -- Small batches
+	elseif self.CurrentLength > EXTREME_SNAKE_THRESHOLD then
+		segmentUpdateStrategy = "EXTREME"
+		segmentsToUpdate = mathMin(self.CurrentLength, 200) -- Update first 200 segments
+		updateInterval = 5 -- Update every 5th segment
+		batchSize = 10
+	elseif self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
+		segmentUpdateStrategy = "LONG"
+		segmentsToUpdate = mathMin(self.CurrentLength, 300) -- Update first 300 segments
+		updateInterval = 3 -- Update every 3rd segment
+		batchSize = 15
 	elseif self.CurrentLength > LONG_SNAKE_THRESHOLD then
-		segmentSkip = 1  -- No skipping for medium-long snakes
+		segmentUpdateStrategy = "MEDIUM"
+		updateInterval = 2 -- Update every other segment
 	end
 	
-	-- Update different segments on different frames to spread the load
-	local updateOffset = self._segmentUpdateFrame % segmentSkip
+	-- Track performance
+	local updateStartTime = tick()
+	local updatedCount = 0
 	
-	-- Update segments with adaptive skipping
-	for i = 1 + updateOffset, self.CurrentLength, segmentSkip do
+	-- Progressive segment updates with batching
+	local startIdx = ((self._segmentUpdateFrame - 1) % batchSize) * updateInterval + 1
+	
+	for i = startIdx, segmentsToUpdate, batchSize * updateInterval do
 		local segment = self.Segments[i]
 		if segment and segment.Parent then
 			local delay = mathFloor(i * 1.2)
-			local targetData = self:getFromHistory(delay)
-			if targetData then
-				-- Use EXACT same spacing as CharacterSetup
-				local spacingMultiplier = 0.15  -- Base spacing from CharacterSetup
-				if self.CurrentLength > 1500 then
-					spacingMultiplier = 0.2  -- More spacing to show pattern
-				end
-				local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
-				local currentSegmentPos = segment.Position
+			local targetHistory = self:getFromHistory(delay)
+			
+			if targetHistory then
+				local targetPos = targetHistory.position
+				local currentPos = segment.Position
+				local distance = (targetPos - currentPos).Magnitude
 				
-				-- Anti-gap check (from CharacterSetup)
-				if i > 1 then
-					local prevSegment = self.Segments[i - 1]
-					if prevSegment and prevSegment.Parent then
-						local gap = (currentSegmentPos - prevSegment.Position).Magnitude
-						if gap > self.Config.SegmentSpacing * 1.5 then
-							-- Too far, pull it closer
-							local dir = (prevSegment.Position - currentSegmentPos).Unit
-							segmentPos = prevSegment.Position - dir * self.Config.SegmentSpacing
-						end
+				-- Adaptive follow speed based on distance and snake length
+				local adaptiveFollowSpeed = followSpeed
+				if self.CurrentLength > EXTREME_SNAKE_THRESHOLD then
+					-- Faster catch-up for extreme length snakes
+					adaptiveFollowSpeed = followSpeed * mathMin(2, 1 + distance / 50)
+				end
+				
+				-- Only update if segment has moved significantly
+				if distance > 0.5 then
+					segment.CFrame = segment.CFrame:Lerp(
+						CFramelookAt(targetPos, targetPos + targetHistory.lookVector),
+						adaptiveFollowSpeed * dt
+					)
+					updatedCount = updatedCount + 1
+				end
+				
+				-- Optimize very distant segments (tail optimization)
+				if i > segmentsToUpdate * 0.8 then
+					-- Tail segments update less frequently and with lower precision
+					if self._segmentUpdateFrame % 3 == 0 then
+						segment.Position = targetPos
 					end
 				end
-				
-				local newPos = currentSegmentPos:Lerp(segmentPos, followSpeed)
-				segment.CFrame = CFramenew(newPos)
 			end
+		end
+		
+		-- Prevent frame drops
+		if updatedCount > MAX_SEGMENTS_TO_UPDATE then
+			break
 		end
 	end
 	
-	-- For very long snakes, use even more aggressive optimization
-	if self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
-		-- Only update tail segments every 10 frames
+	-- Update performance stats
+	performanceStats.segmentUpdates = updatedCount
+	performanceStats.frameTime = tick() - updateStartTime
+	
+	-- Optimize color updates for long snakes
+	if self.CurrentLength > LONG_SNAKE_THRESHOLD then
+		-- Only update colors every few frames
 		if self._segmentUpdateFrame % 10 == 0 then
-			local tailStart = mathFloor(self.CurrentLength * 0.7)  -- Last 30% is tail
-			for i = tailStart, self.CurrentLength, 10 do
+			for i = 1, mathMin(self.CurrentLength, 50) do
 				local segment = self.Segments[i]
 				if segment and segment.Parent then
-					local delay = mathFloor(i * 1.2)
-					local targetData = self:getFromHistory(delay)
-					if targetData then
-						-- Same spacing as main segments
-						local spacingMultiplier = 0.15
-						if self.CurrentLength > 1500 then
-							spacingMultiplier = 0.2
-						end
-						local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
-						
-						-- Anti-gap for tail too
-						if i > 300 then
-							local prevSegment = self.Segments[i - 1]
-							if prevSegment and prevSegment.Parent then
-								local gap = (segment.Position - prevSegment.Position).Magnitude
-								if gap > self.Config.SegmentSpacing * 1.5 then
-									local dir = (prevSegment.Position - segment.Position).Unit
-									segmentPos = prevSegment.Position - dir * self.Config.SegmentSpacing
-								end
-							end
-						end
-						
-						segment.Position = segmentPos  -- Direct position set for tail
-					end
+					local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
+					segment.Color = self.Config.BodyColors[colorIndex]
 				end
 			end
 		end
@@ -2493,19 +2543,37 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 
 		SpatialGrid.Clear()
 
+		-- Track total segment count for performance tuning
+		local totalSegments = 0
+		local longSnakeCount = 0
+
 		for _, snake in AISnake._activeSnakes do
 			if snake._active and snake.HeadParts and snake.HeadParts.head then
 				SpatialGrid.Insert(snake.HeadParts.head, snake, "AI_HEAD")
 
-				for i = 1, #snake.Segments, 4 do
+				-- Adaptive segment insertion based on snake length
+				local insertInterval = 4
+				if snake.CurrentLength > EXTREME_SNAKE_THRESHOLD then
+					insertInterval = 20 -- Very sparse for extreme snakes
+					longSnakeCount = longSnakeCount + 1
+				elseif snake.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
+					insertInterval = 10
+					longSnakeCount = longSnakeCount + 1
+				elseif snake.CurrentLength > LONG_SNAKE_THRESHOLD then
+					insertInterval = 6
+				end
+
+				for i = 1, mathMin(snake.CurrentLength, 200), insertInterval do
 					local segment = snake.Segments[i]
 					if segment then
 						SpatialGrid.Insert(segment, snake, "AI_SEGMENT")
+						totalSegments = totalSegments + 1
 					end
 				end
 			end
 		end
 
+		-- Adaptive player segment scanning
 		for _, player in Players:GetPlayers() do
 			if player.Character then
 				local head = player.Character:FindFirstChild("HumanoidRootPart")
@@ -2516,15 +2584,18 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 				-- Look for the optimized snake system
 				local snakeModel = Workspace:FindFirstChild("Snake_" .. player.Name)
 				if snakeModel then
-					-- Only add first 50 segments for collision (matching your system)
+					-- Adaptive segment checking based on total AI load
+					local segmentCheckInterval = 4
+					if longSnakeCount > 3 then
+						segmentCheckInterval = 8 -- Less frequent when many long AI snakes
+					end
+					
 					local segmentCount = 0
-					for i = 1, 50 do
+					for i = 1, 50, segmentCheckInterval do
 						local segment = snakeModel:FindFirstChild("Segment" .. i)
 						if segment and segment:IsA("BasePart") then
 							segmentCount = segmentCount + 1
-							if segmentCount % 4 == 1 then
-								SpatialGrid.Insert(segment, player, "PLAYER_SEGMENT")
-							end
+							SpatialGrid.Insert(segment, player, "PLAYER_SEGMENT")
 						end
 					end
 				else
@@ -2542,27 +2613,46 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 			end
 		end
 
+		-- Only insert nearby orbs to reduce grid size
+		local playerPositions = {}
+		for _, player in Players:GetPlayers() do
+			if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+				table.insert(playerPositions, player.Character.HumanoidRootPart.Position)
+			end
+		end
+
 		for _, orb in OrbUtils.orbs do
-			SpatialGrid.Insert(orb, orb, "ORB")
+			-- Only add orbs near players or AI
+			local nearSomething = false
+			for _, pos in ipairs(playerPositions) do
+				if (orb.Position - pos).Magnitude < 100 then
+					nearSomething = true
+					break
+				end
+			end
+			
+			if nearSomething then
+				SpatialGrid.Insert(orb, orb, "ORB")
+			end
 		end
 	end 
 
 	local snakes = AISnake._activeSnakes
 	if #snakes == 0 then return end
 
-	-- Get nearest player position for LOD
-	local nearestPlayerPos = nil
-	local nearestDist = math.huge
-	for _, player in Players:GetPlayers() do
-		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-			local pos = player.Character.HumanoidRootPart.Position
-			if nearestPlayerPos == nil then
-				nearestPlayerPos = pos
-			end
-		end
+	-- Adaptive brain updates based on snake count and performance
+	local brainUpdatesThisFrame = BRAIN_UPDATES_PER_FRAME
+	if #snakes > 8 or performanceStats.frameTime > 0.01 then
+		brainUpdatesThisFrame = 1 -- Reduce updates if many snakes or poor performance
+	elseif #snakes < 4 and performanceStats.frameTime < 0.005 then
+		brainUpdatesThisFrame = 2 -- More updates if few snakes and good performance
 	end
 
-	for i = 1, BRAIN_UPDATES_PER_FRAME do
+	-- Track brain update performance
+	local brainUpdateStart = tick()
+	performanceStats.brainUpdates = 0
+
+	for i = 1, brainUpdatesThisFrame do
 		if AISnake._brainUpdateIndex > #snakes then
 			AISnake._brainUpdateIndex = 1
 		end
@@ -2571,9 +2661,34 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 		if snake and snake._active then
 			-- ALWAYS update AI brains to prevent them from breaking
 			snake:updateBrain()
+			performanceStats.brainUpdates = performanceStats.brainUpdates + 1
 		end
 
 		AISnake._brainUpdateIndex = AISnake._brainUpdateIndex + 1
+	end
+
+	-- Update performance tracking
+	performanceStats.frameTime = tick() - brainUpdateStart
+end)
+
+-- Performance monitoring
+task.spawn(function()
+	while true do
+		task.wait(10)
+		if performanceStats.frameTime > 0.016 then -- More than 16ms
+			warn("⚠️ AISnake performance warning:")
+			warn("  Brain update time:", math.floor(performanceStats.frameTime * 1000), "ms")
+			warn("  Segment updates:", performanceStats.segmentUpdates)
+			warn("  Brain updates:", performanceStats.brainUpdates)
+			warn("  Active snakes:", #AISnake._activeSnakes)
+			
+			-- Log snake lengths
+			local lengths = {}
+			for _, snake in ipairs(AISnake._activeSnakes) do
+				table.insert(lengths, snake.CurrentLength or 0)
+			end
+			warn("  Snake lengths:", table.concat(lengths, ", "))
+		end
 	end
 end)
 
