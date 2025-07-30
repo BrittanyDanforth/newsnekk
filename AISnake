@@ -1365,29 +1365,84 @@ function AISnake:_determineAction()
 		end
 
 		if self.TargetOrb and self.TargetOrb.Parent then
-			state = "SEEK_ORB"
-			local toOrb = self.TargetOrb.Position - headPos
-			local orbDist = toOrb.Magnitude
-
-			-- More direct orb approach
-			if orbDist < 50 then  -- Increased from 30
-				steer = toOrb.Unit
-				-- Boost when close to orb for faster collection
-				if orbDist < 20 and not self.Boosting and mathRandom() < 0.3 then
-					self:startBoost(0.5)  -- Short boost to grab orb
+			-- Check risk of grabbing this orb
+			local orbDanger = 0
+			local nearbyThreats = SpatialGrid.QueryRadius(self.TargetOrb.Position, 50)
+			for _, entity in nearbyThreats do
+				if entity.type:match("HEAD") and entity.owner ~= self then
+					orbDanger = orbDanger + 1
 				end
-			else
-				steer = toOrb.Unit
 			end
-
-			-- Clear any combat targets when seeking orbs
-			self.TargetSnake = nil
 			
-			-- Return early to prioritize orb collection
-			return state, steer
+			if self:evaluateRisk("GRAB_ORB_NEAR_ENEMY", orbDanger * 15) then
+				state = "SEEK_ORB"
+				local toOrb = self.TargetOrb.Position - headPos
+				local orbDist = toOrb.Magnitude
+
+				-- More direct orb approach
+				if orbDist < 50 then  -- Increased from 30
+					steer = toOrb.Unit
+					-- Boost when close to orb for faster collection
+					if orbDist < 20 and not self.Boosting and mathRandom() < 0.3 then
+						self:startBoost(0.5)  -- Short boost to grab orb
+					end
+				else
+					steer = toOrb.Unit
+				end
+
+				-- Clear any combat targets when seeking orbs
+				self.TargetSnake = nil
+				
+				-- Return early to prioritize orb collection
+				return state, steer
+			else
+				-- Too risky, clear this orb target
+				self.TargetOrb = nil
+				AISnake._orbTargets[self] = nil
+			end
 		end
 	end
 
+	-- Priority 4: Hunting (for aggressive personalities)
+	if p.TargetPlayers and p.AggressionLevel > 0.5 and state ~= "FLEE" then
+		local target, targetDist = self:findNearestSnakeHead()
+		
+		if target and targetDist < p.CombatRadius then
+			-- Check if we should hunt this target
+			local myLength = self.CurrentLength
+			local enemyLength = 10  -- Default
+			
+			if target.isPlayer then
+				local playerSnake = _G.PlayerSnakes and _G.PlayerSnakes[target.player]
+				enemyLength = playerSnake and #playerSnake.segments or 10
+			else
+				enemyLength = target.snake and target.snake.CurrentLength or 10
+			end
+			
+			-- Only hunt if we're bigger or similar size
+			if myLength >= enemyLength - 5 then
+				self.TargetSnake = target
+				
+				-- Track chase time
+				if not self._chaseStartTime then
+					self._chaseStartTime = tick()
+				end
+				
+				-- Use personality traits to decide if we should continue
+				if self:shouldContinueChase(target, self._chaseStartTime) then
+					state = "HUNT"
+					-- Use combat tactics!
+					steer = self:getCombatTactic(target, targetDist)
+					return state, steer
+				else
+					-- Give up chase
+					self.TargetSnake = nil
+					self._chaseStartTime = nil
+				end
+			end
+		end
+	end
+	
 	-- Priority 5: Advanced Movement Patterns (ONLY IN WANDER STATE!)
 	if state == "WANDER" then
 		-- Initialize movement tracking
@@ -1533,6 +1588,99 @@ function AISnake:_determineAction()
 	return state, steer
 end
 
+function AISnake:getCombatTactic(target, targetDist)
+	local myLength = self.CurrentLength
+	local enemyLength
+	
+	if target.isPlayer then
+		-- Get player length
+		local playerSnake = _G.PlayerSnakes and _G.PlayerSnakes[target.player]
+		enemyLength = playerSnake and #playerSnake.segments or 10
+	else
+		enemyLength = target.snake and target.snake.CurrentLength or 10
+	end
+	
+	-- Only use tactics if we're bigger
+	if myLength <= enemyLength + 10 then
+		return (target.part.Position - self.Position).Unit  -- Direct approach
+	end
+	
+	-- Circle trap (like real slither.io pros do)
+	if targetDist < 30 then
+		local toTarget = (target.part.Position - self.Position).Unit
+		local perpendicular = Vector3new(-toTarget.Z, 0, toTarget.X)
+		
+		-- Switch direction occasionally to tighten the trap
+		self._circleTime = (self._circleTime or 0) + 0.1
+		local direction = mathSin(self._circleTime) > 0 and 1 or -1
+		
+		return (toTarget * 0.3 + perpendicular * direction * 0.7).Unit
+	end
+	
+	-- Cut-off maneuver
+	local targetVel = target.part.AssemblyLinearVelocity or Vector3new(0, 0, 0)
+	if targetVel.Magnitude > 5 and targetDist < 60 then
+		-- Lead the target
+		local leadTime = targetDist / (self.Speed * 1.2)
+		local futurePos = target.part.Position + targetVel * leadTime
+		return (futurePos - self.Position).Unit
+	end
+	
+	return (target.part.Position - self.Position).Unit
+end
+
+function AISnake:shouldContinueChase(target, chaseStartTime)
+	if not self.Personality.Traits then return true end
+	
+	local patience = self.Personality.Traits.Patience or 0.5
+	local maxChaseTime = 3 + (patience * 7)  -- 3-10 seconds
+	
+	if tick() - chaseStartTime > maxChaseTime then
+		return false
+	end
+	return true
+end
+
+function AISnake:evaluateRisk(action, danger)
+	if not self.Personality.Traits then return true end
+	
+	local riskTolerance = self.Personality.Traits.RiskTolerance or 0.5
+	
+	-- Higher risk tolerance = willing to take more dangerous actions
+	if action == "CHASE_INTO_CROWD" then
+		return danger < riskTolerance * 3  -- 0-3 nearby enemies
+	elseif action == "GRAB_ORB_NEAR_ENEMY" then
+		return danger < riskTolerance * 50  -- 0-50 studs from enemy
+	end
+	
+	return true
+end
+
+function AISnake:getDetailLevel()
+	-- Check distance to nearest player
+	local nearestDist = math.huge
+	local playerPos = nil
+	
+	for _, player in Players:GetPlayers() do
+		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local dist = (player.Character.HumanoidRootPart.Position - self.Position).Magnitude
+			if dist < nearestDist then
+				nearestDist = dist
+				playerPos = player.Character.HumanoidRootPart.Position
+			end
+		end
+	end
+	
+	-- Return detail level
+	if nearestDist > 250 then
+		return "LOW", nearestDist
+	elseif nearestDist > 100 then
+		return "MEDIUM", nearestDist
+	else
+		return "HIGH", nearestDist
+	end
+end
+
 function AISnake:updateBrain()
 	if not self._active or not self.HeadParts or not self.HeadParts.head or not self.HeadParts.head.Parent then
 		return
@@ -1610,6 +1758,10 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self.circleAngle = mathRandom() * 2 * mathPi
 	self.killCount = 0
 	self.lastKillTime = 0
+	
+	-- Combat tracking
+	self._circleTime = 0
+	self._chaseStartTime = nil
 
 	-- Use preserved personality or assign random one
 	local pType
@@ -1999,6 +2151,45 @@ function AISnake:updateMovement(dt)
 		self:updateBrain()
 		self._lastBrainUpdate = now
 	end
+	
+	-- Performance LOD system
+	local detailLevel, playerDist = self:getDetailLevel()
+	
+	-- LOW detail - minimal updates
+	if detailLevel == "LOW" then
+		-- Only update position, skip combat/orb checks
+		self.Position = self.Position + self.Direction * self.Speed * dt
+		self.RootPart.Position = self.Position
+		self.HeadParts.head.CFrame = CFramelookAt(self.Position, self.Position + self.Direction)
+		
+		-- Very basic segment following
+		if self._lowDetailFrame == nil then self._lowDetailFrame = 0 end
+		self._lowDetailFrame = self._lowDetailFrame + 1
+		
+		if self._lowDetailFrame % 10 == 0 then  -- Update segments every 10 frames
+			for i = 1, self.CurrentLength, 5 do  -- Only every 5th segment
+				local segment = self.Segments[i]
+				if segment then
+					local delay = mathFloor(i * 1.2)
+					local targetData = self:getFromHistory(delay)
+					if targetData then
+						segment.Position = targetData.position
+					end
+				end
+			end
+		end
+		
+		return  -- Skip everything else
+	end
+	
+	-- MEDIUM detail - reduced frequency
+	if detailLevel == "MEDIUM" then
+		self._mediumSkip = (self._mediumSkip or 0) + 1
+		if self._mediumSkip % 2 ~= 0 then
+			-- Skip every other frame for medium distance
+			return
+		end
+	end
 
 	-- SPAWN PROTECTION - Don't check boundaries for first few seconds
 	local isSpawnProtected = now < (self._spawnProtection or 0)
@@ -2308,12 +2499,12 @@ function AISnake:updateMovement(dt)
 	-- Initialize frame counter if needed
 	self._segmentUpdateFrame = (self._segmentUpdateFrame or 0) + 1
 
-	-- Adaptive segment update skip based on snake length (less aggressive)
-	local segmentSkip = SEGMENT_UPDATE_SKIP
-	if self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
-		segmentSkip = 2  -- Only skip every other segment even for very long snakes
-	elseif self.CurrentLength > LONG_SNAKE_THRESHOLD then
-		segmentSkip = 1  -- No skipping for medium-long snakes
+	-- Optimize segment updates based on snake length
+	local segmentSkip = 1
+	if self.CurrentLength > 300 then
+		segmentSkip = 3
+	elseif self.CurrentLength > 150 then
+		segmentSkip = 2
 	end
 
 	-- Update different segments on different frames to spread the load
@@ -2640,7 +2831,221 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 	end
 end)
 
+-- === PERSONALITY DEFINITIONS ===
+AISnake.PersonalityDefinitions = {
+	Collector = {
+		Type = "Collector",
+		TargetPlayers = false,
+		TargetOrbs = true,
+		AvoidOthers = true,
+		SpeedMultiplier = 1.1,
+		TurnBias = 0.01,
+		BoostChance = 0.03,
+		CombatRadius = 20,
+		RandomTurnInterval = 8.0,
+		OrbSeekRadius = 300,  -- Very large orb seek radius
+		Description = "Focused on collecting orbs, avoids conflict",
+		FleeThreshold = 20,
+		AggressionLevel = 0.1,
+		PatrolRadius = 400,  -- Wide patrol to find orbs
+		MovementPattern = "spiral",  -- Spiral outward to cover area
+		MinStraightDistance = 60,  -- Move at least 60 studs before turning
+		-- Traits will be assigned after PersonalityTraits is defined
+	},
+	Explorer = {
+		Type = "Explorer",
+		TargetPlayers = false,
+		TargetOrbs = true,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.15,
+		TurnBias = 0.02,
+		BoostChance = 0.05,
+		CombatRadius = 30,
+		RandomTurnInterval = 12.0,  -- Very long paths
+		OrbSeekRadius = 200,
+		Description = "Map explorer - covers maximum ground",
+		FleeThreshold = 15,
+		AggressionLevel = 0.1,
+		PatrolRadius = 600,  -- Full map coverage
+		MovementPattern = "zigzag",  -- Zigzag across map
+		ExplorationSectors = 8,  -- Divides map into sectors
+		CurrentSector = 1,
+		MinStraightDistance = 80,
+		-- Traits will be assigned after PersonalityTraits is defined
+	},
+	Predator = {
+		Type = "Predator",
+		TargetPlayers = true,
+		TargetOrbs = false,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.25,
+		TurnBias = 0.04,
+		BoostChance = 0.1,
+		CombatRadius = 80,
+		RandomTurnInterval = 4.0,
+		OrbSeekRadius = 100,
+		Description = "Aggressive hunter - targets smaller snakes",
+		FleeThreshold = 10,
+		AggressionLevel = 0.9,
+		PatrolRadius = 300,
+		MovementPattern = "intercept",  -- Tries to cut off prey
+		MinStraightDistance = 50,
+		-- Traits will be assigned after PersonalityTraits is defined
+	},
+	Opportunist = {
+		Type = "Opportunist",
+		TargetPlayers = true,
+		TargetOrbs = true,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.18,
+		TurnBias = 0.03,
+		BoostChance = 0.07,
+		CombatRadius = 50,
+		RandomTurnInterval = 7.0,
+		OrbSeekRadius = 180,
+		Description = "Adaptive - switches between hunting and collecting",
+		FleeThreshold = 15,
+		AggressionLevel = 0.6,
+		PatrolRadius = 350,
+		MovementPattern = "adaptive",  -- Changes based on situation
+		OpportunityRadius = 100,  -- Looks for opportunities
+		MinStraightDistance = 60,
+		-- Traits will be assigned after PersonalityTraits is defined
+	},
+	Farmer = {
+		Type = "Farmer",
+		TargetPlayers = false,
+		TargetOrbs = true,
+		AvoidOthers = true,
+		SpeedMultiplier = 1.0,  -- Slow and steady
+		TurnBias = 0.01,  -- Very smooth
+		BoostChance = 0.02,  -- Rarely boosts
+		CombatRadius = 15,
+		RandomTurnInterval = 10.0,
+		OrbSeekRadius = 250,
+		Description = "Peaceful farmer - avoids all conflict",
+		FleeThreshold = 25,
+		AggressionLevel = 0.0,
+		PatrolRadius = 300,
+		MovementPattern = "grid",  -- Systematic grid pattern
+		GridSize = 100,  -- Grid square size
+		MinStraightDistance = 100,
+		-- Traits will be assigned after PersonalityTraits is defined
+	},
+	Raider = {
+		Type = "Raider",
+		TargetPlayers = true,
+		TargetOrbs = true,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.3,  -- Very fast
+		TurnBias = 0.05,
+		BoostChance = 0.12,  -- Boosts often
+		CombatRadius = 60,
+		RandomTurnInterval = 5.0,
+		OrbSeekRadius = 150,
+		Description = "Fast and aggressive - high risk high reward",
+		FleeThreshold = 8,
+		AggressionLevel = 0.8,
+		PatrolRadius = 400,
+		MovementPattern = "hitandrun",  -- Hit and run tactics
+		MinStraightDistance = 40,
+		-- Traits will be assigned after PersonalityTraits is defined
+	},
+	Guardian = {
+		Type = "Guardian",
+		TargetPlayers = true,
+		TargetOrbs = true,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.08,
+		TurnBias = 0.02,
+		BoostChance = 0.05,
+		CombatRadius = 40,
+		RandomTurnInterval = 8.0,
+		OrbSeekRadius = 180,
+		Description = "Territory defender - patrols specific area",
+		FleeThreshold = 12,
+		AggressionLevel = 0.7,
+		PatrolRadius = 200,  -- Smaller patrol area
+		MovementPattern = "circular",  -- Circular patrol
+		TerritoryCenter = Vector3.new(0, 0, 0),  -- Will be set randomly
+		TerritoryRadius = 150,
+		PatrolAngle = 0,
+		MinStraightDistance = 40,
+		-- Traits will be assigned after PersonalityTraits is defined
+	},
+	Nomad = {
+		Type = "Nomad",
+		TargetPlayers = false,
+		TargetOrbs = true,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.12,
+		TurnBias = 0.03,
+		BoostChance = 0.06,
+		CombatRadius = 35,
+		RandomTurnInterval = 15.0,  -- Very long wandering
+		OrbSeekRadius = 220,
+		Description = "Long distance traveler - covers entire map",
+		FleeThreshold = 18,
+		AggressionLevel = 0.3,
+		PatrolRadius = 800,  -- Massive patrol area
+		MovementPattern = "wander",  -- True random wandering
+		MinStraightDistance = 120,
+		-- Traits will be assigned after PersonalityTraits is defined
+	}
+}
 
+-- Personality type list
+AISnake.PersonalityTypes = {"Collector", "Explorer", "Predator", "Opportunist", "Farmer", "Raider", "Guardian", "Nomad"}
 
+-- === PERSONALITY TRAITS ===
+AISnake.PersonalityTraits = {
+	Collector = {
+		Patience = 0.8,      -- Chases orbs persistently
+		RiskTolerance = 0.2, -- Very risk averse
+		Adaptability = 0.4,  -- Sticks to orb collection
+	},
+	Explorer = {
+		Patience = 0.5,      -- Moderate attention span
+		RiskTolerance = 0.4, -- Some risks for new areas
+		Adaptability = 0.7,  -- Adapts to map layout
+	},
+	Predator = {
+		Patience = 0.9,      -- Very patient hunter
+		RiskTolerance = 0.8, -- Takes big risks
+		Adaptability = 0.6,  -- Focused on hunting
+	},
+	Opportunist = {
+		Patience = 0.6,      -- Moderate patience
+		RiskTolerance = 0.5, -- Balanced risk
+		Adaptability = 0.9,  -- Very adaptive
+	},
+	Farmer = {
+		Patience = 0.7,      -- Patient orb collector
+		RiskTolerance = 0.1, -- Extremely risk averse
+		Adaptability = 0.3,  -- Sticks to safe patterns
+	},
+	Raider = {
+		Patience = 0.3,      -- Short attention span
+		RiskTolerance = 0.9, -- Maximum risk tolerance
+		Adaptability = 0.7,  -- Changes tactics often
+	},
+	Guardian = {
+		Patience = 0.8,      -- Guards territory patiently
+		RiskTolerance = 0.6, -- Takes risks to defend
+		Adaptability = 0.5,  -- Sticks to territory
+	},
+	Nomad = {
+		Patience = 0.4,      -- Moves on quickly
+		RiskTolerance = 0.3, -- Avoids unnecessary risks
+		Adaptability = 0.8,  -- Very adaptive to terrain
+	}
+}
+
+-- Assign traits to personalities now that they're defined
+for personalityType, traits in pairs(AISnake.PersonalityTraits) do
+	if AISnake.PersonalityDefinitions[personalityType] then
+		AISnake.PersonalityDefinitions[personalityType].Traits = traits
+	end
+end
 
 return AISnake
