@@ -637,7 +637,7 @@ AISnake.PersonalityDefinitions = {
 		PatrolRadius = 500,  -- Uses entire map
 		MovementPattern = "spiral",  -- New: Spiral outward pattern
 		PreferEdgeOrbs = true,  -- Collects orbs near edges
-		MinStraightDistance = 100,  -- Move at least 100 studs before turning
+		MinStraightDistance = 60,  -- Reasonable distance before turning
 	},
 	Explorer = {
 		Type = "Explorer",
@@ -657,7 +657,7 @@ AISnake.PersonalityDefinitions = {
 		MovementPattern = "zigzag",  -- Zigzag across map
 		ExplorationSectors = 8,  -- Divides map into sectors
 		CurrentSector = 1,
-		MinStraightDistance = 150,
+		MinStraightDistance = 80,
 	},
 	Predator = {
 		Type = "Predator",
@@ -677,7 +677,7 @@ AISnake.PersonalityDefinitions = {
 		MovementPattern = "patrol",  -- Patrols hunting grounds
 		AmbushPoints = {},  -- Will be populated with good ambush spots
 		PreferCenterHunting = true,
-		MinStraightDistance = 80,
+		MinStraightDistance = 50,
 	},
 	Opportunist = {
 		Type = "Opportunist",
@@ -696,7 +696,7 @@ AISnake.PersonalityDefinitions = {
 		PatrolRadius = 350,
 		MovementPattern = "adaptive",  -- Changes based on situation
 		OpportunityRadius = 100,  -- Looks for opportunities
-		MinStraightDistance = 90,
+		MinStraightDistance = 55,
 	},
 	Farmer = {
 		Type = "Farmer",
@@ -714,10 +714,10 @@ AISnake.PersonalityDefinitions = {
 		AggressionLevel = 0.0,
 		PatrolRadius = 250,
 		MovementPattern = "grid",  -- Moves in grid pattern
-		GridSize = 100,  -- Grid square size
+		GridSize = 80,  -- Grid square size (reduced from 100)
 		CurrentGridX = 0,
 		CurrentGridZ = 0,
-		MinStraightDistance = 120,
+		MinStraightDistance = 70,
 	},
 	Raider = {
 		Type = "Raider",
@@ -737,7 +737,7 @@ AISnake.PersonalityDefinitions = {
 		MovementPattern = "hitandrun",  -- Attack then retreat
 		RaidCooldown = 10,  -- Seconds between raids
 		LastRaidTime = 0,
-		MinStraightDistance = 70,
+		MinStraightDistance = 40,
 	},
 	Guardian = {
 		Type = "Guardian",
@@ -758,7 +758,7 @@ AISnake.PersonalityDefinitions = {
 		TerritoryCenter = Vector3.new(0, 0, 0),
 		TerritoryRadius = 150,
 		PatrolAngle = 0,
-		MinStraightDistance = 60,
+		MinStraightDistance = 40,
 	},
 	Nomad = {
 		Type = "Nomad",
@@ -778,7 +778,7 @@ AISnake.PersonalityDefinitions = {
 		MovementPattern = "wander",  -- True random wandering
 		WanderTargets = {},  -- Random points to visit
 		CurrentWanderTarget = 1,
-		MinStraightDistance = 200,  -- Long straight paths
+		MinStraightDistance = 100,  -- Still long but reasonable
 	},
 }
 
@@ -1388,7 +1388,7 @@ function AISnake:_determineAction()
 		end
 	end
 
-	-- Priority 5: Advanced Movement Patterns
+	-- Priority 5: Advanced Movement Patterns (ONLY IN WANDER STATE!)
 	if state == "WANDER" then
 		-- Initialize movement tracking
 		if not self._lastStraightDistance then
@@ -1399,8 +1399,28 @@ function AISnake:_determineAction()
 		-- Calculate distance traveled since last turn
 		local distanceSinceTurn = (headPos - self._lastTurnPosition).Magnitude
 		
-		-- Check minimum straight distance requirement
-		local minStraight = p.MinStraightDistance or 100
+		-- SMART minimum straight distance - reduce it based on situation
+		local baseMinStraight = p.MinStraightDistance or 100
+		local minStraight = baseMinStraight
+		
+		-- COMMON SENSE: Reduce minimum if there are threats nearby
+		local threats = self:findNearbyThreats()
+		if #threats > 0 then
+			-- Danger! Allow turning sooner
+			minStraight = mathMax(20, baseMinStraight * 0.2)  -- Only 20% of normal
+		end
+		
+		-- Check for nearby orbs - allow turning to get them
+		local nearbyOrb, orbDist = self:findBestOrb()
+		if nearbyOrb and orbDist < 50 then
+			minStraight = mathMax(15, baseMinStraight * 0.3)  -- Turn quicker for close orbs
+		end
+		
+		-- Check for walls/boundaries
+		local wallVec, wallStrength = getWallAvoidanceVector(headPos)
+		if wallVec and wallStrength > 0.3 then
+			minStraight = 10  -- Turn immediately for walls!
+		end
 		
 		-- Movement pattern based on personality
 		local movementPattern = p.MovementPattern or "wander"
@@ -1522,6 +1542,13 @@ function AISnake:updateBrain()
 	self._lastBrainUpdate = tick()
 	
 	local state, steer = self:_determineAction()
+	
+	-- Reset turn tracking when state changes (COMMON SENSE!)
+	if self.State ~= state then
+		self._lastTurnPosition = self.HeadParts.head.Position
+		self._lastStraightDistance = 0
+	end
+	
 	self.State = state
 	self.SteerDirection = steer
 end
@@ -1716,6 +1743,10 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		
 		-- CRITICAL: Initialize brain update time
 		self._lastBrainUpdate = tick()
+		
+		-- Reset movement pattern tracking
+		self._lastTurnPosition = self.Position
+		self._lastStraightDistance = 0
 		
 		-- Force immediate brain update
 		self:updateBrain()
