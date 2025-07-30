@@ -778,7 +778,7 @@ function AISnake:findBestOrb()
 
 	-- First check spatial grid for regular orbs
 	local nearbyEntities = SpatialGrid.QueryRadius(headPos, minDist)
-	
+
 	-- Prioritize untargeted orbs
 	local targetedOrbs = {}
 	for ai, orb in AISnake._orbTargets do
@@ -787,41 +787,48 @@ function AISnake:findBestOrb()
 		end
 	end
 
-	-- PRIORITIZE UPGRADE ORBS (check OrbFolder directly)
-	local orbFolder = Workspace:FindFirstChild("OrbFolder")
+	-- ALWAYS check workspace for orbs directly as backup
+	local orbsFound = 0
+	
+	-- Check OrbFolder
+	local orbFolder = Workspace:FindFirstChild("OrbFolder") or Workspace:FindFirstChild("Orbs")
 	if orbFolder then
 		for _, orb in pairs(orbFolder:GetChildren()) do
-			if orb:IsA("BasePart") and orb.Name == "UpgradeOrb" and not targetedOrbs[orb] then
+			if orb:IsA("BasePart") and not targetedOrbs[orb] then
 				local dist = (orb.Position - headPos).Magnitude
-				if dist < minDist then
-					minDist = dist
-					nearest = orb
+				if dist < minDist * 1.5 then -- Slightly larger radius for backup check
+					orbsFound = orbsFound + 1
+					if dist < minDist then
+						minDist = dist
+						nearest = orb
+					end
 				end
 			end
 		end
 	end
 	
-	-- If no upgrade orbs, check regular orbs from spatial grid
+	-- Also check workspace directly for any loose orbs
+	for _, obj in pairs(Workspace:GetChildren()) do
+		if obj:IsA("BasePart") and (obj.Name == "Orb" or obj.Name == "UpgradeOrb" or obj.Name == "DeathOrb") and not targetedOrbs[obj] then
+			local dist = (obj.Position - headPos).Magnitude
+			if dist < minDist * 1.5 then
+				orbsFound = orbsFound + 1
+				if dist < minDist then
+					minDist = dist
+					nearest = obj
+				end
+			end
+		end
+	end
+
+	-- If no orbs from direct search, check spatial grid
 	if not nearest and #nearbyEntities > 0 then
 		for _, entity in nearbyEntities do
-			if entity.type == "ORB" and not targetedOrbs[entity.part] then
+			if entity.type == "ORB" and entity.part and entity.part.Parent then
 				local dist = (entity.part.Position - headPos).Magnitude
 				if dist < minDist then
 					minDist = dist
 					nearest = entity.part
-				end
-			end
-		end
-
-		-- If no untargeted orbs, allow targeting of any orb
-		if not nearest then
-			for _, entity in nearbyEntities do
-				if entity.type == "ORB" then
-					local dist = (entity.part.Position - headPos).Magnitude
-					if dist < minDist then
-						minDist = dist
-						nearest = entity.part
-					end
 				end
 			end
 		end
@@ -1141,11 +1148,35 @@ end
 
 -- === MUCH SMARTER AI BRAIN ===
 function AISnake:_determineAction()
+	-- Safety check
+	if not self.HeadParts or not self.HeadParts.head or not self.HeadParts.head.Parent then
+		return "WANDER", self.Direction or Vector3new(0, 0, 1)
+	end
+	
 	local headPos = self.HeadParts.head.Position
 	local p = self.Personality
 	local now = tick()
 	local state = "WANDER"
-	local steer = self.Direction
+	local steer = self.Direction or Vector3new(0, 0, 1)
+	
+	-- Failsafe: If we haven't moved in a while, force random movement
+	if not self._lastPositionCheck then
+		self._lastPositionCheck = now
+		self._lastCheckedPosition = headPos
+	elseif now - self._lastPositionCheck > 5 then
+		local movement = (headPos - self._lastCheckedPosition).Magnitude
+		if movement < 10 then
+			-- We're stuck! Force a random direction
+			local randomAngle = mathRandom() * 2 * mathPi
+			steer = Vector3new(mathSin(randomAngle), 0, mathCos(randomAngle))
+			self.TargetYaw = randomAngle
+			self.State = "UNSTUCK"
+			self.TargetOrb = nil
+			self.TargetSnake = nil
+		end
+		self._lastPositionCheck = now
+		self._lastCheckedPosition = headPos
+	end
 
 	-- Clean up expired states
 	if self.Avoiding and now > self.AvoidExpire then 
@@ -1502,6 +1533,20 @@ function AISnake:_determineAction()
 		end
 	end
 
+	-- ULTIMATE FAILSAFE: If still no valid steering, use random movement
+	if not steer or steer.Magnitude < 0.1 or steer ~= steer then -- NaN check
+		local fallbackAngle = mathRandom() * 2 * mathPi
+		steer = Vector3new(mathSin(fallbackAngle), 0, mathCos(fallbackAngle))
+		state = "FAILSAFE"
+	end
+	
+	-- Ensure steer is normalized
+	if steer.Magnitude > 0 then
+		steer = steer.Unit
+	else
+		steer = Vector3new(0, 0, 1)
+	end
+	
 	return state, steer
 end
 
@@ -2428,18 +2473,17 @@ if AISnake._movementConnection then AISnake._movementConnection:Disconnect() end
 if AISnake._brainConnection then AISnake._brainConnection:Disconnect() end
 
 AISnake._movementConnection = RunService.Heartbeat:Connect(function(dt)
-	local snakesToUpdate = {}
+	-- Update all active snakes without distance checks
 	for i = 1, #AISnake._activeSnakes do
 		local snake = AISnake._activeSnakes[i]
-		if snake and snake._active then
-			table.insert(snakesToUpdate, snake)
-		end
-	end
-
-	for i = 1, #snakesToUpdate do
-		local snake = snakesToUpdate[i]
-		if snake and snake._active then
-			snake:updateMovement(dt)
+		if snake and snake._active and not snake._destroyed then
+			-- Safety check for valid snake
+			if snake.HeadParts and snake.HeadParts.head and snake.HeadParts.head.Parent then
+				snake:updateMovement(dt)
+			else
+				-- Snake is broken, destroy it
+				snake:Destroy()
+			end
 		end
 	end
 end)
@@ -2531,22 +2575,8 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 
 		local snake = snakes[AISnake._brainUpdateIndex]
 		if snake and snake._active then
-			-- Only update AI snakes near players
-			local shouldUpdate = true
-			if nearestPlayerPos and snake.Position then
-				local dist = (snake.Position - nearestPlayerPos).Magnitude
-				if dist > AI_UPDATE_DISTANCE then
-					shouldUpdate = false
-					-- Still do minimal position update for far snakes
-					if snake.HeadParts and snake.HeadParts.head then
-						snake.HeadParts.head.CFrame = CFrame.new(snake.Position)
-					end
-				end
-			end
-			
-			if shouldUpdate then
-				snake:updateBrain()
-			end
+			-- ALWAYS update AI brains to prevent them from breaking
+			snake:updateBrain()
 		end
 
 		AISnake._brainUpdateIndex = AISnake._brainUpdateIndex + 1
