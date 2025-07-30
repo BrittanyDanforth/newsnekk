@@ -964,35 +964,31 @@ function AISnake:getFleeVector()
 		end
 	end
 
-	-- Default behavior - prefer center when fleeing
+	-- Default behavior - random flee direction with minimal center bias
 	if not fleeDir then
 		local mapCenter = Vector3new(0, headPos.Y, 0)
 		local toCenter = (mapCenter - headPos)
 		local distFromCenter = toCenter.Magnitude
 
-		if distFromCenter > 150 then
-			-- Too far - flee toward center
-			fleeDir = toCenter.Unit
+		-- Random flee direction
+		local randomAngle = mathRandom() * 2 * mathPi
+		local randomDir = Vector3new(mathSin(randomAngle), 0, mathCos(randomAngle))
+		
+		if distFromCenter > 300 then
+			-- Very far from center - slight bias toward center for safety
+			fleeDir = (randomDir * 0.7 + toCenter.Unit * 0.3).Unit
 		else
-			-- Random direction with MORE center bias
-			local randomAngle = mathRandom() * 2 * mathPi
-			local randomDir = Vector3new(mathSin(randomAngle), 0, mathCos(randomAngle))
-			if distFromCenter > 100 then
-				fleeDir = (randomDir + toCenter.Unit * 0.5).Unit
-			elseif distFromCenter > 60 then
-				fleeDir = (randomDir + toCenter.Unit * 0.3).Unit
-			else
-				fleeDir = randomDir
-			end
+			-- Normal distance - pure random fleeing
+			fleeDir = randomDir
 		end
 	end
 	
-	-- ADD center bias to ALL flee directions if far from center
+	-- REDUCED center bias - only apply when VERY far from center
 	local mapCenter = Vector3new(0, headPos.Y, 0)
 	local distFromCenter = (mapCenter - headPos).Magnitude
-	if distFromCenter > 180 and fleeDir then
+	if distFromCenter > 300 and fleeDir then  -- Increased threshold
 		local toCenter = (mapCenter - headPos).Unit
-		fleeDir = (fleeDir + toCenter * 0.4).Unit
+		fleeDir = (fleeDir * 0.8 + toCenter * 0.2).Unit  -- Reduced bias
 	end
 
 	return fleeDir
@@ -1385,14 +1381,39 @@ function AISnake:_determineAction()
 			end
 		end
 
-		-- Center bias based on distance
-		if distFromCenter > 250 then
-			steer = toCenter.Unit
-		elseif distFromCenter > 150 then
-			local centerBias = toCenter.Unit * 0.7
-			steer = (baseSteer + centerBias).Unit
+		-- REDUCED center bias - only apply when VERY far from center
+		if distFromCenter > 350 then  -- Increased from 250
+			-- Very far - gentle pull toward center
+			local centerPull = toCenter.Unit * 0.3  -- Reduced from direct center steering
+			steer = (baseSteer * 0.7 + centerPull * 0.3).Unit
+		elseif distFromCenter > 200 then  -- Increased from 150
+			-- Far - very slight center bias
+			local centerBias = toCenter.Unit * 0.1  -- Reduced from 0.7
+			steer = (baseSteer * 0.9 + centerBias * 0.1).Unit
 		else
+			-- Near center - pure random wandering
 			steer = baseSteer
+		end
+		
+		-- Add personality-based wandering patterns
+		if p.Type == "Guardian" and p.TerritoryCenter then
+			-- Guardians patrol their territory
+			local toTerritory = p.TerritoryCenter - headPos
+			local territoryDist = toTerritory.Magnitude
+			if territoryDist > p.PatrolRadius then
+				-- Too far from territory, head back
+				steer = toTerritory.Unit
+			elseif territoryDist > p.PatrolRadius * 0.7 then
+				-- Near edge of territory, bias toward center
+				steer = (baseSteer * 0.5 + toTerritory.Unit * 0.5).Unit
+			end
+		elseif p.Type == "Nomad" then
+			-- Nomads explore edges more
+			if distFromCenter < 150 then
+				-- Too close to center, head outward
+				local awayFromCenter = -toCenter.Unit
+				steer = (baseSteer * 0.6 + awayFromCenter * 0.4).Unit
+			end
 		end
 	end
 
@@ -1470,14 +1491,16 @@ function AISnake.new(startPosition)
 	
 	-- Set up Guardian territory if needed
 	if self.Personality.Type == "Guardian" then
-		-- Random territory center within map
+		-- Give Guardians territories distributed around the map, not just center
 		local territoryAngle = mathRandom() * 2 * mathPi
-		local territoryRadius = mathRandom(100, 200)
+		local territoryRadius = mathRandom(150, 300)  -- Further from center
 		self.Personality.TerritoryCenter = Vector3new(
 			mathCos(territoryAngle) * territoryRadius,
 			0,
 			mathSin(territoryAngle) * territoryRadius
 		)
+		-- Adjust patrol radius based on territory distance
+		self.Personality.PatrolRadius = mathRandom(100, 180)
 	end
 
 	self.Model = getOrCreateSnakeModel(tostring(self) .. "_" .. mathRandom(100000,999999))
