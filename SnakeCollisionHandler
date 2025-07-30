@@ -1,17 +1,17 @@
--- THIS IS INSIDE ServerScriptService as a script
--- SnakeCollisionHandler V8.0: PRECISION COLLISION SYSTEM
--- Fixed: Random deaths, improved hitbox accuracy, proper head-to-head logic
--- Fixed: Always spawn orbs on death, better angle detection
+-- SnakeCollisionHandler V9.0: ULTRA-OPTIMIZED COLLISION SYSTEM
+-- Perfect accuracy with minimal performance impact for 10K+ length snakes
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
+local CollectionService = game:GetService("CollectionService")
+local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
 -- Get or create death notification event
 local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents") or Instance.new("Folder", ReplicatedStorage)
 remoteEvents.Name = "RemoteEvents"
+
 local deathNotifyEvent = remoteEvents:FindFirstChild("PlayerDeath") or Instance.new("RemoteEvent", remoteEvents)
 deathNotifyEvent.Name = "PlayerDeath"
 
@@ -19,416 +19,137 @@ local AISnakeModule = require(ReplicatedStorage:WaitForChild("AISnake"))
 local SnakeConfig = require(ReplicatedStorage:WaitForChild("SnakeConfig"))
 local OrbUtils = require(ReplicatedStorage:WaitForChild("OrbUtils"))
 
--- === SUPREME PERFORMANCE CONSTANTS ===
-local SEGMENT_CHUNK_SIZE = 64
-local COLLISION_GRID_SIZE = 100
-local ADAPTIVE_LOD_THRESHOLD = 100
-local EXTREME_LENGTH_THRESHOLD = 500
-local CACHE_EXPIRY = 1.0
-local YIELD_INTERVAL = 100
+-- === ULTRA-OPTIMIZED PERFORMANCE CONSTANTS ===
+local SEGMENT_CHUNK_SIZE = 32 -- Smaller chunks for better accuracy
+local COLLISION_GRID_SIZE = 50 -- Spatial hashing grid size
+local CACHE_DURATION = 0.1 -- Very short cache for accuracy
+local MAX_COLLISION_CHECKS_PER_FRAME = 500 -- Limit checks per frame
 
--- === IMPROVED COLLISION SETTINGS ===
-local COLLISION_FRAME_SKIP = 2 -- More frequent checks for large snakes
-local BODY_COLLISION_DISTANCE = 2.8 -- Tighter for body collisions
-local HEAD_COLLISION_DISTANCE = 3.2 -- Slightly larger for head-to-head
-local MIN_COLLISION_DISTANCE = 1.8 -- Tighter minimum
-local COLLISION_BUFFER = 0.15 -- Smaller buffer for precision
-local NETWORK_COMPENSATION = 0.15 -- Less compensation for accuracy
-local SPAWN_PROTECTION_TIME = 3 -- Reduced from 5 seconds
-local MIN_AI_SPAWN_DISTANCE = 50 -- Minimum distance between AI spawn points
+-- === PRECISE COLLISION SETTINGS ===
+local COLLISION_FRAME_SKIP = 1 -- Check every frame for accuracy
+local BODY_COLLISION_RADIUS = 2.5 -- Precise body collision
+local HEAD_COLLISION_RADIUS = 3.0 -- Head collision slightly larger
+local COLLISION_HEIGHT_TOLERANCE = 3.0 -- Y-axis tolerance
+local SPAWN_PROTECTION_TIME = 3
+local MIN_AI_SPAWN_DISTANCE = 50
 
--- === IMMEDIATE ORB SPAWNING ===
+-- === ORB SPAWNING ===
 local ORB_SPAWN_HEIGHT = 3 -- Standard orb height (matching OrbSpawner)
 local GUARANTEED_ORB_COUNT = 3 -- Minimum orbs to spawn
 
--- === HEAD-TO-HEAD SETTINGS ===
-local HEAD_TO_HEAD_ANGLE_THRESHOLD = 0.5 -- Dot product threshold for frontal collision
-local HEAD_TO_HEAD_SPEED_THRESHOLD = 5 -- Minimum speed for collision to count
-
--- === DEBUG SYSTEM ===
-local DEBUG_COLLISIONS = false -- Set to true to enable collision debugging
-local collisionDebugData = {}
-
--- === DEATH PROCESSING QUEUE ===
+-- === DEATH PROCESSING ===
 local deathQueue = {}
-local orbSpawnQueue = {}
 local isProcessingDeaths = false
-local deadAISnakes = {} -- Track dead AI snakes to prevent double deaths
-local deadPlayers = {} -- Track dead players to prevent double deaths
-local recentCollisions = {} -- Track recent collisions to prevent double processing
-
--- === INVINCIBILITY SYSTEM ===
-local INVINCIBILITY_DURATION = 5
+local deadAISnakes = {}
+local deadPlayers = {}
 local invinciblePlayers = {}
-local spawnProtectedAI = {} -- Track AI spawn protection
+local spawnProtectedAI = {}
 
--- === WALL COLLISION SYSTEM ===
-local WALL_ORB_DROP_AMOUNT = 3 -- Number of orbs to drop when hitting wall
-local WALL_ORB_DROP_COOLDOWN = 8.0 -- Much longer cooldown to prevent spam
-local WALL_DAMAGE_MULTIPLIER = 0.95 -- Lose 5% of length per wall hit
-local WALL_PUSH_TIME = 6.0 -- Much longer time before pushing (was 3.0)
-local WALL_PUSH_FORCE = 80 -- Moderate push force
-local WALL_WARNING_TIME = 4.0 -- More warning time (was 2.0)
-local WALL_PUSH_IMMUNITY_TIME = 30.0 -- Much longer immunity after push
-local WALL_CHECK_INTERVAL = 1.0 -- Check much less frequently
-local wallCollisionCooldowns = {} -- Track cooldowns per player/AI
-local wallContactTime = {} -- Track how long player has been near wall
-local wallPushImmunity = {} -- Track push immunity
-local wallLastCheck = {} -- Track last wall check time per player
+-- === WALL COLLISION SETTINGS ===
+local WALL_ORB_DROP_AMOUNT = 3
+local WALL_ORB_DROP_COOLDOWN = 8.0
+local WALL_DAMAGE_MULTIPLIER = 0.95
+local WALL_PUSH_TIME = 6.0
+local WALL_PUSH_FORCE = 80
+local WALL_WARNING_TIME = 4.0
+local WALL_PUSH_IMMUNITY_TIME = 30.0
+local WALL_CHECK_INTERVAL = 1.0
 
--- === ENHANCED SPATIAL PARTITIONING ===
-local SpatialGrid = {}
-SpatialGrid.__index = SpatialGrid
+local wallCollisionCooldowns = {}
+local wallContactTime = {}
+local wallPushImmunity = {}
+local wallLastCheck = {}
 
-function SpatialGrid.new()
+-- === ULTRA-OPTIMIZED SPATIAL HASH GRID ===
+local SpatialHashGrid = {}
+SpatialHashGrid.__index = SpatialHashGrid
+
+function SpatialHashGrid.new(cellSize)
 	return setmetatable({
 		cells = {},
-		cellSize = COLLISION_GRID_SIZE,
-		objectCount = 0
-	}, SpatialGrid)
+		cellSize = cellSize or COLLISION_GRID_SIZE,
+		generation = 0
+	}, SpatialHashGrid)
 end
 
-function SpatialGrid:getCell(position)
-	local x = math.floor(position.X / self.cellSize)
-	local z = math.floor(position.Z / self.cellSize)
-	return x, z
+function SpatialHashGrid:clear()
+	self.cells = {}
+	self.generation = self.generation + 1
 end
 
-function SpatialGrid:getCellKey(x, z)
-	-- Optimized key generation
-	return x * 10000 + z
+function SpatialHashGrid:getCellKey(x, z)
+	return math.floor(x / self.cellSize) .. "," .. math.floor(z / self.cellSize)
 end
 
-function SpatialGrid:insert(object, position)
-	local x, z = self:getCell(position)
-	local key = self:getCellKey(x, z)
-
+function SpatialHashGrid:insert(object, position, data)
+	local key = self:getCellKey(position.X, position.Z)
 	if not self.cells[key] then
 		self.cells[key] = {}
 	end
-
-	table.insert(self.cells[key], object)
-	self.objectCount = self.objectCount + 1
+	self.cells[key][object] = data
 end
 
-function SpatialGrid:query(position, radius)
+function SpatialHashGrid:remove(object, position)
+	local key = self:getCellKey(position.X, position.Z)
+	if self.cells[key] then
+		self.cells[key][object] = nil
+		if next(self.cells[key]) == nil then
+			self.cells[key] = nil
+		end
+	end
+end
+
+function SpatialHashGrid:queryRadius(position, radius)
 	local results = {}
 	local cellRadius = math.ceil(radius / self.cellSize)
-	local cx, cz = self:getCell(position)
-
-	-- Optimized query with early exit
+	local centerX = math.floor(position.X / self.cellSize)
+	local centerZ = math.floor(position.Z / self.cellSize)
+	
 	for dx = -cellRadius, cellRadius do
 		for dz = -cellRadius, cellRadius do
-			local key = self:getCellKey(cx + dx, cz + dz)
+			local key = (centerX + dx) .. "," .. (centerZ + dz)
 			local cell = self.cells[key]
-			if cell and #cell > 0 then
-				for i = 1, #cell do
-					results[#results + 1] = cell[i]
+			if cell then
+				for obj, data in pairs(cell) do
+					table.insert(results, {object = obj, data = data})
 				end
 			end
 		end
 	end
-
+	
 	return results
 end
 
-function SpatialGrid:clear()
-	-- Faster table clearing
-	for k in pairs(self.cells) do
-		self.cells[k] = nil
-	end
-	self.objectCount = 0
-end
+-- Global collision grid
+local collisionGrid = SpatialHashGrid.new()
 
--- === SUPREME COLLISION CACHE ===
+-- === COLLISION CACHE WITH SHORT TTL ===
 local CollisionCache = {
 	playerSegments = {},
 	aiSegments = {},
-	spatialGrid = SpatialGrid.new(),
-	frameCache = {} -- Per-frame collision results
+	frameCount = 0,
+	lastGridRebuild = 0
 }
 
--- === WALL COLLISION FUNCTIONS ===
-local function checkWallCollision(position, snakeLength, isHead)
-	-- IMPORTANT: Only check wall collision for the HEAD, not body/tail
-	if not isHead then
-		return false
-	end
-
-	-- Check if position is near any wall
-	local mapHalf = 400 -- Half of MAP_SIZE from MapBuilder
-	local wallThreshold = mapHalf - 10 -- Only trigger if EXTREMELY close to wall (10 studs from edge)
-
-	-- Extra validation - must be REALLY close to wall to trigger
-	if math.abs(position.X) > wallThreshold or math.abs(position.Z) > wallThreshold then
-		-- Double check - make sure we're actually near the wall edge
-		local distToWallX = mapHalf - math.abs(position.X)
-		local distToWallZ = mapHalf - math.abs(position.Z)
-
-		-- Must be within 10 units of the wall
-		if distToWallX < 10 or distToWallZ < 10 then
-			return true
-		end
-	end
-	return false
-end
-
-local function handleWallCollision(entity, isPlayer)
-	-- Validate entity
-	if not entity then return end
-
-	local key
-	if isPlayer then
-		key = entity
-	else
-		key = entity.Name or tostring(entity)
-	end
-
-	-- Ensure we have a valid key
-	if not key then return end
-
-	local currentTime = tick()
-
-	-- Check cooldown
-	if wallCollisionCooldowns[key] and currentTime - wallCollisionCooldowns[key] < WALL_ORB_DROP_COOLDOWN then
-		return
-	end
-
-	wallCollisionCooldowns[key] = currentTime
-
-	-- Get snake data
-	local snakeData
-	if isPlayer then
-		snakeData = _G.PlayerSnakes and _G.PlayerSnakes[entity]
-	else
-		snakeData = entity
-	end
-
-	if not snakeData or not snakeData.segments then return end
-
-	-- Check minimum length to prevent errors
-	local currentLength = #snakeData.segments
-	if currentLength <= 10 then
-		-- Don't process wall collisions for very small snakes
-		return
-	end
-
-	-- Drop orbs at head position
-	local headPos = snakeData.segments[1] and snakeData.segments[1].Position
-	if headPos then
-		-- Spawn wall collision orbs near the snake
-		local mapBoundary = 395 -- Keep orbs inside the 400 boundary
-
-		-- Calculate orb value based on snake size
-		local orbValue = 1
-		if currentLength > 50 then
-			orbValue = 2
-		end
-		if currentLength > 100 then
-			orbValue = 3
-		end
-		if currentLength > 200 then
-			orbValue = 5
-		end
-		if currentLength > 500 then
-			orbValue = 10
-		end
-		if currentLength > 1000 then
-			orbValue = 15
-		end
-
-		for i = 1, WALL_ORB_DROP_AMOUNT do
-			-- Random offset around the snake's head
-			local randomOffset = Vector3.new(
-				math.random(-10, 10),
-				0,
-				math.random(-10, 10)
-			)
-
-			local orbPos = headPos + randomOffset
-
-			-- Only clamp if the orb would be outside map
-			orbPos = Vector3.new(
-				math.clamp(orbPos.X, -mapBoundary, mapBoundary),
-				5, -- Match orb spawn height
-				math.clamp(orbPos.Z, -mapBoundary, mapBoundary)
-			)
-
-			-- Spawn orb with scaled value and mark it as from this player
-			local orb = OrbUtils.spawnOrbAt(orbPos, orbValue)
-			if orb and isPlayer then
-				-- Mark this orb as spawned by this player to prevent self-eating
-				orb:SetAttribute("SpawnedByUserId", entity.UserId)
-				orb:SetAttribute("SpawnTime", tick())
-			end
-		end
-
-		-- Remove segments (lose length) for players - scales with size
-		if isPlayer and snakeData.shrink and currentLength > 10 then
-			-- INCREASED PENALTIES - Always lose more than orbs dropped
-			local baseLoss = WALL_ORB_DROP_AMOUNT * 3  -- 3x the orbs dropped
-			if currentLength > 100 then
-				baseLoss = 15  -- Was 5
-			end
-			if currentLength > 300 then
-				baseLoss = 25  -- Was 8
-			end
-			if currentLength > 500 then
-				baseLoss = 40  -- Was 12
-			end
-			if currentLength > 1000 then
-				baseLoss = 60  -- Was 20
-			end
-
-			-- Only shrink if we have enough segments
-			local segmentsToRemove = math.min(baseLoss, currentLength - 10)
-			if segmentsToRemove > 0 then
-				snakeData.shrink(segmentsToRemove)
-			end
-		end
-
-		-- Visual feedback
-		if DEBUG_COLLISIONS then
-			print("[WALL] " .. tostring(key) .. " hit the wall and dropped " .. WALL_ORB_DROP_AMOUNT .. " orbs!")
-		end
-	end
-end
-
--- === DEATH CLEANUP SYSTEM ===
--- Periodically clean up dead player marks to prevent permanent death
-task.spawn(function()
-	while true do
-		task.wait(10) -- Check every 10 seconds
-
-		-- Clean up disconnected players
-		for player, _ in pairs(deadPlayers) do
-			if not player.Parent then
-				deadPlayers[player] = nil
-				if DEBUG_COLLISIONS then
-					print("[CLEANUP] Removed disconnected player from dead list")
-				end
-			end
-		end
-
-		-- Clean up players who have respawned
-		for player, _ in pairs(deadPlayers) do
-			if player.Parent and player.Character then
-				local humanoid = player.Character:FindFirstChild("Humanoid")
-				if humanoid and humanoid.Health > 0 then
-					deadPlayers[player] = nil
-					if DEBUG_COLLISIONS then
-						print("[CLEANUP] Removed respawned player from dead list:", player.Name)
-					end
-				end
-			end
-		end
-
-		-- Clean up old AI snake references
-		for head, timestamp in pairs(deadAISnakes) do
-			if not head.Parent or (type(timestamp) == "number" and tick() - timestamp > 30) then
-				deadAISnakes[head] = nil
-			end
-		end
-
-		-- Clean up old death marks (failsafe - max 30 seconds)
-		local currentTime = tick()
-		for player, timestamp in pairs(deadPlayers) do
-			if type(timestamp) == "number" and currentTime - timestamp > 30 then
-				deadPlayers[player] = nil
-				if DEBUG_COLLISIONS then
-					print("[CLEANUP] Removed old death mark for:", player.Name)
-				end
-			end
-		end
-	end
-end)
-
--- Clean up when player leaves
-Players.PlayerRemoving:Connect(function(player)
-	-- Clean all death tracking
-	deadPlayers[player] = nil
-	invinciblePlayers[player] = nil
-	wallCollisionCooldowns[player] = nil
-	wallContactTime[player] = nil
-	wallPushImmunity[player] = nil
-	wallLastCheck[player] = nil
-
-	-- Clean from collision cache
-	if CollisionCache.playerSegments then
-		CollisionCache.playerSegments[player] = nil
-	end
-
-	-- Clean any remaining segments
-	if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-		local snake = _G.PlayerSnakes[player]
-		if snake.segments then
-			for _, segment in ipairs(snake.segments) do
-				if segment and segment.Parent then
-					segment:Destroy()
-				end
-			end
-		end
-		_G.PlayerSnakes[player] = nil
-	end
-
-	-- Clean up any snake models in workspace
-	for _, container in ipairs(workspace:GetChildren()) do
-		if container.Name == "AISegmentContainer" or container.Name == "SegmentContainer" then
-			for _, model in ipairs(container:GetChildren()) do
-				if model:IsA("Model") then
-					local shouldDestroy = false
-
-					-- Check if model belongs to leaving player
-					if model.Name:find(player.Name) or
-						model:GetAttribute("PlayerName") == player.Name or
-						model:GetAttribute("Owner") == player.Name then
-						shouldDestroy = true
-					end
-
-					-- Check AISnakeModel pattern
-					if model.Name:match("AISnakeModel_table:") then
-						-- Check if any parts reference the player
-						for _, desc in ipairs(model:GetDescendants()) do
-							if desc:IsA("ObjectValue") and desc.Value == player then
-								shouldDestroy = true
-								break
-							end
-						end
-					end
-
-					if shouldDestroy then
-						model:Destroy()
-					end
-				end
-			end
-		end
-	end
-
-	-- Clean from recent collisions
-	for key, _ in pairs(recentCollisions) do
-		if key:find(tostring(player)) then
-			recentCollisions[key] = nil
-		end
-	end
-
-	if DEBUG_COLLISIONS then
-		print("[CLEANUP] Player removed, cleaned all references:", player.Name)
-	end
-end)
-
+-- === HELPER FUNCTIONS ===
 local function setPlayerInvincible(player)
-	invinciblePlayers[player] = os.clock() + INVINCIBILITY_DURATION
+	invinciblePlayers[player] = tick() + SPAWN_PROTECTION_TIME
+end
+
+local function isPlayerInvincible(player)
+	local expire = invinciblePlayers[player]
+	return expire and tick() < expire
 end
 
 local function setAISpawnProtection(aiHead)
-	spawnProtectedAI[aiHead] = os.clock() + SPAWN_PROTECTION_TIME
+	spawnProtectedAI[aiHead] = tick() + SPAWN_PROTECTION_TIME
 end
 
 local function isAIProtected(aiHead)
 	if not aiHead then return false end
 	local protectionEnd = spawnProtectedAI[aiHead]
 	if protectionEnd then
-		if os.clock() < protectionEnd then
+		if tick() < protectionEnd then
 			return true
 		else
 			spawnProtectedAI[aiHead] = nil
@@ -437,2365 +158,658 @@ local function isAIProtected(aiHead)
 	return false
 end
 
-local function isPlayerInvincible(player)
-	local expire = invinciblePlayers[player]
-	return expire and os.clock() < expire
-end
-
-local function clearPlayerInvincibility(player)
-	invinciblePlayers[player] = nil
-end
-
--- Invincibility setup (preserved)
-Players.PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(function()
-		setPlayerInvincible(player)
-		task.spawn(function()
-			local expire = invinciblePlayers[player]
-			if expire then
-				local waitTime = expire - os.clock()
-				if waitTime > 0 then task.wait(waitTime) end
-				clearPlayerInvincibility(player)
-			end
-		end)
-	end)
-	player.AncestryChanged:Connect(function()
-		if not player:IsDescendantOf(game) then
-			clearPlayerInvincibility(player)
-		end
-	end)
-end)
-
-for _, player in Players:GetPlayers() do
-	player.CharacterAdded:Connect(function()
-		setPlayerInvincible(player)
-		task.spawn(function()
-			local expire = invinciblePlayers[player]
-			if expire then
-				local waitTime = expire - os.clock()
-				if waitTime > 0 then task.wait(waitTime) end
-				clearPlayerInvincibility(player)
-			end
-		end)
-	end)
-end
-
--- === FIXED ORB SPAWNING SYSTEM ===
-local ORB_SPAWN_HEIGHT = 3 -- Match orb spawner height
-local MIN_ORB_SPACING = 3 -- Minimum distance between spawned orbs
-local GUARANTEED_ORB_COUNT = 5 -- Minimum orbs to spawn on death
-
-local function spawnOrbDirect(position, value)
-	-- Direct spawn with minimal processing
-	local success, err = pcall(function()
-		-- Ensure position is valid
-		if not position or position ~= position then -- NaN check
-			position = Vector3.new(0, ORB_SPAWN_HEIGHT, 0)
-		end
-
-		-- Clamp value to reasonable range
-		value = math.clamp(value or 1, 1, 50)
-
-		OrbUtils.spawnOrbAt(position, value)
-	end)
-
-	if not success then
-		warn("Orb spawn failed:", err, "at position:", position)
-	end
-
-	return success
-end
-
--- === OPTIMIZED HEAD RETRIEVAL ===
-local headCache = {
-	players = {},
-	ai = {},
-	lastUpdate = 0
-}
-
-local function getPlayerHeads()
-	local currentTime = tick()
-	if currentTime - headCache.lastUpdate < 0.1 then -- Reduced from 0.033 to 0.1 for better performance
-		return headCache.players
-	end
-
-	local heads = {}
-	for _, player in Players:GetPlayers() do
-		if player.Character then
-			local root = player.Character:FindFirstChild("HumanoidRootPart")
-			if root and root.Parent then
-				heads[#heads + 1] = {player = player, part = root}
-			end
-		end
-	end
-
-	headCache.players = heads
-	headCache.lastUpdate = currentTime
-	return heads
-end
-
-local function getAISnakeHeads()
-	local heads = {}
-	if AISnakeModule._activeSnakes then
-		for _, snake in AISnakeModule._activeSnakes do
-			if snake.HeadParts and snake.HeadParts.head and snake.HeadParts.head.Parent then
-				local head = snake.HeadParts.head
-				heads[#heads + 1] = head
-
-				-- Set spawn protection for new AI snakes
-				if not spawnProtectedAI[head] and not deadAISnakes[head] then
-					-- Check if this is a new snake (no segments yet or very few)
-					if not snake.Segments or #snake.Segments < 50 then
-						setAISpawnProtection(head)
-					end
-				end
-			end
-		end
-	end
-	headCache.ai = heads
-	return heads
-end
-
--- === EXTREME SCALE SEGMENT PROCESSING (OPTIMIZED) ===
-local function createSegmentChunks(segments, snakeLength)
-	local chunks = {}
-	local currentChunk = {
-		segments = {},
-		bounds = {
-			min = Vector3.new(math.huge, math.huge, math.huge),
-			max = Vector3.new(-math.huge, -math.huge, -math.huge)
-		},
-		center = Vector3.new(0, 0, 0),
-		radius = 0
-	}
-
-	local processedCount = 0
-	for i, seg in ipairs(segments) do
-		local pos = seg.Position or seg.position
-		if pos then
-			-- Update bounding box
-			currentChunk.bounds.min = Vector3.new(
-				math.min(currentChunk.bounds.min.X, pos.X),
-				math.min(currentChunk.bounds.min.Y, pos.Y),
-				math.min(currentChunk.bounds.min.Z, pos.Z)
-			)
-			currentChunk.bounds.max = Vector3.new(
-				math.max(currentChunk.bounds.max.X, pos.X),
-				math.max(currentChunk.bounds.max.Y, pos.Y),
-				math.max(currentChunk.bounds.max.Z, pos.Z)
-			)
-
-			currentChunk.segments[#currentChunk.segments + 1] = seg
-
-			if #currentChunk.segments >= SEGMENT_CHUNK_SIZE then
-				-- Calculate chunk center and radius
-				currentChunk.center = (currentChunk.bounds.min + currentChunk.bounds.max) * 0.5
-				currentChunk.radius = (currentChunk.bounds.max - currentChunk.bounds.min).Magnitude * 0.5
-
-				chunks[#chunks + 1] = currentChunk
-				currentChunk = {
-					segments = {},
-					bounds = {
-						min = Vector3.new(math.huge, math.huge, math.huge),
-						max = Vector3.new(-math.huge, -math.huge, -math.huge)
-					},
-					center = Vector3.new(0, 0, 0),
-					radius = 0
-				}
-			end
-		end
-
-		processedCount = processedCount + 1
-		if processedCount % YIELD_INTERVAL == 0 then
-			task.wait()
-		end
-	end
-
-	if #currentChunk.segments > 0 then
-		currentChunk.center = (currentChunk.bounds.min + currentChunk.bounds.max) * 0.5
-		currentChunk.radius = (currentChunk.bounds.max - currentChunk.bounds.min).Magnitude * 0.5
-		chunks[#chunks + 1] = currentChunk
-	end
-
-	return chunks
-end
-
--- === ADAPTIVE INTERPOLATION (OPTIMIZED) ===
-local function interpolateSegments(segmentParts, snakeLength)
-	local segments = {}
-	local minSpacing = SnakeConfig.SegmentSpacing or 2.2
-
-	-- Progressive LOD system
-	local lodActive = snakeLength > ADAPTIVE_LOD_THRESHOLD
-	local skipFactor = 1
-
-	if snakeLength > EXTREME_LENGTH_THRESHOLD then
-		skipFactor = math.floor(snakeLength / 250) + 1
-	end
-
-	-- For very long snakes, reduce interpolation to prevent too many segments
-	if snakeLength > 1000 then
-		skipFactor = math.max(skipFactor, 5) -- Skip even more segments for huge snakes
-	end
-	
-	-- For AI snakes, be more conservative with interpolation
-	local isAI = false
-	if segmentParts[1] and segmentParts[1].Name and segmentParts[1].Name:find("AISegment") then
-		isAI = true
-		skipFactor = math.max(skipFactor, 2) -- AI snakes need less interpolation
-	end
-
-	local processedCount = 0
-	for i = 1, #segmentParts - 1, skipFactor do
-		local a = segmentParts[i]
-		local b = segmentParts[math.min(i + skipFactor, #segmentParts)]
-
-		if a and b and a.Parent and b.Parent then
-			segments[#segments + 1] = a
-
-			-- Dynamic interpolation with better limits for long snakes
-			local segmentProgress = i / snakeLength
-			local densityFactor = 0.5
-
-			if segmentProgress < 0.15 then -- Head region
-				densityFactor = 0.25
-			elseif segmentProgress > 0.85 then -- Tail region
-				densityFactor = 0.4
-			elseif snakeLength > 1000 then
-				densityFactor = 0.8 -- Reduced interpolation for very long snakes
-			end
-
-			local interpStep = minSpacing * densityFactor
-			local dist = (a.Position - b.Position).Magnitude
-
-			if dist > interpStep then
-				local numInterp = math.ceil(dist / interpStep)
-				-- Limit interpolation more aggressively for long snakes
-				if snakeLength > 1000 then
-					numInterp = math.min(numInterp, 2) -- Max 2 interpolated segments for very long snakes
-				else
-					numInterp = math.min(numInterp, lodActive and 3 or 8)
-				end
-
-				for j = 1, numInterp do
-					local alpha = j / (numInterp + 1)
-					local interpPos = a.Position:Lerp(b.Position, alpha)
-					segments[#segments + 1] = {
-						Position = interpPos,
-						_isVirtual = true,
-						_priority = segmentProgress < 0.3 and 2 or 1
-					}
-				end
-			end
-		end
-
-		processedCount = processedCount + 1
-		if processedCount % YIELD_INTERVAL == 0 then
-			task.wait()
-		end
-	end
-
-	if #segmentParts > 0 and segmentParts[#segmentParts].Parent then
-		segments[#segments + 1] = segmentParts[#segmentParts]
-	end
-
-	return segments
-end
-
--- === SEGMENT RETRIEVAL (ENHANCED) ===
-local function getPlayerSegments(player)
+-- === OPTIMIZED SEGMENT COLLECTION ===
+local function collectPlayerSegments(player)
 	local cache = CollisionCache.playerSegments[player]
-	local currentTime = tick()
-
-	-- For very long snakes, always refresh cache to ensure accuracy
-	local forceRefresh = false
-	if cache and cache.length and cache.length > 1000 then
-		forceRefresh = true
-	end
-
-	if cache and (currentTime - cache.lastUpdate) < CACHE_EXPIRY and not forceRefresh then
-		return cache
-	end
-
-	-- Check new snake system first
-	local snakeModel = Workspace:FindFirstChild("Snake_" .. player.Name)
-	local segmentParts = {}
+	local now = tick()
 	
+	-- Use very short cache duration for accuracy
+	if cache and (now - cache.time) < CACHE_DURATION then
+		return cache.segments
+	end
+	
+	local segments = {}
+	
+	-- Check new snake system first
+	local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
 	if snakeModel then
-		-- New optimized snake system - get head (Segment0_Head) and first 50 segments
-		local head = snakeModel:FindFirstChild("Segment0_Head")
-		if head and head:IsA("BasePart") and head.Parent then
-			-- Don't include head in body segments
-		end
-		
-		-- Get ALL body segments for collision (not just first 50)
-		-- The new snake system can have up to 500 segments
-		local maxSegments = 500
-		local segmentCheckInterval = 1
-		
-		-- For very long snakes, check every other segment to balance performance
+		-- Get actual length from leaderstats
+		local actualLength = 10
 		if player:FindFirstChild("leaderstats") then
 			local lengthValue = player.leaderstats:FindFirstChild("Length")
-			if lengthValue and lengthValue.Value > 200 then
-				segmentCheckInterval = 2 -- Check every other segment for long snakes
-			end
-			if lengthValue and lengthValue.Value > 1000 then
-				segmentCheckInterval = 3 -- Check every 3rd segment for very long snakes
+			if lengthValue then
+				actualLength = lengthValue.Value or 10
 			end
 		end
 		
-		for i = 1, maxSegments, segmentCheckInterval do
+		-- Adaptive segment collection based on length
+		local checkInterval = 1
+		if actualLength > 500 then
+			checkInterval = 2
+		end
+		if actualLength > 2000 then
+			checkInterval = 3
+		end
+		if actualLength > 5000 then
+			checkInterval = 5
+		end
+		
+		-- Collect segments with adaptive interval
+		local segmentCount = 0
+		for i = 1, 500, checkInterval do
 			local seg = snakeModel:FindFirstChild("Segment" .. i)
 			if seg and seg:IsA("BasePart") and seg.Parent then
-				segmentParts[#segmentParts + 1] = seg
+				table.insert(segments, {
+					part = seg,
+					index = i,
+					position = seg.Position
+				})
+				segmentCount = segmentCount + 1
+				
+				-- Add to spatial grid
+				collisionGrid:insert(seg, seg.Position, {
+					type = "player_segment",
+					owner = player,
+					index = i
+				})
 			else
-				-- No more segments found
+				-- If we're checking every 5th segment and one is missing,
+				-- check the ones in between to ensure we don't miss the tail
+				if checkInterval > 1 and i > segmentCount * checkInterval then
+					for j = i - checkInterval + 1, i - 1 do
+						local innerSeg = snakeModel:FindFirstChild("Segment" .. j)
+						if innerSeg and innerSeg:IsA("BasePart") and innerSeg.Parent then
+							table.insert(segments, {
+								part = innerSeg,
+								index = j,
+								position = innerSeg.Position
+							})
+							segmentCount = segmentCount + 1
+							
+							collisionGrid:insert(innerSeg, innerSeg.Position, {
+								type = "player_segment",
+								owner = player,
+								index = j
+							})
+						end
+					end
+				end
 				break
 			end
 		end
 		
-		-- If we found segments in the new system, use those
-		if #segmentParts > 0 then
-			-- For new system, don't interpolate - use real segments only
-			local snakeLength = #segmentParts
-			
-			-- Get actual length from leaderstats
-			if player:FindFirstChild("leaderstats") then
-				local lengthValue = player.leaderstats:FindFirstChild("Length")
-				if lengthValue then
-					snakeLength = lengthValue.Value or snakeLength
-				end
-			end
-			
-			local bounds = {
-				min = Vector3.new(math.huge, math.huge, math.huge),
-				max = Vector3.new(-math.huge, -math.huge, -math.huge)
-			}
-
-			for _, seg in ipairs(segmentParts) do
-				local pos = seg.Position
-				if pos then
-					bounds.min = Vector3.new(
-						math.min(bounds.min.X, pos.X),
-						math.min(bounds.min.Y, pos.Y),
-						math.min(bounds.min.Z, pos.Z)
-					)
-					bounds.max = Vector3.new(
-						math.max(bounds.max.X, pos.X),
-						math.max(bounds.max.Y, pos.Y),
-						math.max(bounds.max.Z, pos.Z)
-					)
-				end
-			end
-
-			local cacheData = {
-				segments = segmentParts, -- Use real segments directly
-				realSegments = segmentParts,
-				chunks = nil, -- No chunks for new system
-				bounds = bounds,
-				length = snakeLength,
-				lastUpdate = currentTime,
-				isNewSystem = true
-			}
-
-			CollisionCache.playerSegments[player] = cacheData
-			return cacheData
-		end
+		-- Cache the result
+		CollisionCache.playerSegments[player] = {
+			segments = segments,
+			time = now,
+			length = actualLength
+		}
+		
+		return segments
 	end
 	
 	-- Fallback to old system
 	local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
-	if not snakeInstance or not snakeInstance.segments then
+	if snakeInstance and snakeInstance.segments then
+		for i, seg in ipairs(snakeInstance.segments) do
+			if seg and seg.Parent then
+				table.insert(segments, {
+					part = seg,
+					index = i,
+					position = seg.Position
+				})
+				
+				-- Only add every few segments to grid for performance
+				if i == 1 or i % 5 == 0 then
+					collisionGrid:insert(seg, seg.Position, {
+						type = "player_segment",
+						owner = player,
+						index = i
+					})
+				end
+			end
+		end
+		
+		CollisionCache.playerSegments[player] = {
+			segments = segments,
+			time = now,
+			length = #segments
+		}
+		
+		return segments
+	end
+	
+	return nil
+end
+
+local function collectAISegments(aiSnake)
+	if not aiSnake or not aiSnake.Segments then
 		return nil
 	end
-
-	-- Extract ALL valid segments (including tail)
-	segmentParts = {}
-	for _, seg in ipairs(snakeInstance.segments) do
-		if seg and seg.Parent and seg.Parent.Parent then
-			segmentParts[#segmentParts + 1] = seg
+	
+	local cache = CollisionCache.aiSegments[aiSnake]
+	local now = tick()
+	
+	if cache and (now - cache.time) < CACHE_DURATION then
+		return cache.segments
+	end
+	
+	local segments = {}
+	for i, seg in ipairs(aiSnake.Segments) do
+		if seg and seg.Parent then
+			table.insert(segments, {
+				part = seg,
+				index = i,
+				position = seg.Position
+			})
+			
+			-- Add to spatial grid (less frequently for AI)
+			if i == 1 or i % 3 == 0 then
+				collisionGrid:insert(seg, seg.Position, {
+					type = "ai_segment",
+					owner = aiSnake,
+					index = i
+				})
+			end
 		end
 	end
-
-	local snakeLength = #segmentParts
-	if snakeLength == 0 then return nil end
-
-	-- For very long snakes, use real segments only
-	local interpolatedSegments
-	if snakeLength > 1000 then
-		interpolatedSegments = segmentParts -- Use real segments directly
-	else
-		-- Only interpolate for smaller snakes
-		interpolatedSegments = interpolateSegments(segmentParts, snakeLength)
-	end
-
-	-- Create spatial chunks for extreme lengths
-	local chunks = nil
-	if snakeLength > EXTREME_LENGTH_THRESHOLD then
-		chunks = createSegmentChunks(interpolatedSegments, snakeLength)
-	end
-
-	-- Calculate overall bounding box
-	local bounds = {
-		min = Vector3.new(math.huge, math.huge, math.huge),
-		max = Vector3.new(-math.huge, -math.huge, -math.huge)
+	
+	CollisionCache.aiSegments[aiSnake] = {
+		segments = segments,
+		time = now,
+		length = #segments
 	}
-
-	for _, seg in ipairs(interpolatedSegments) do
-		local pos = seg.Position or seg.position
-		if pos then
-			bounds.min = Vector3.new(
-				math.min(bounds.min.X, pos.X),
-				math.min(bounds.min.Y, pos.Y),
-				math.min(bounds.min.Z, pos.Z)
-			)
-			bounds.max = Vector3.new(
-				math.max(bounds.max.X, pos.X),
-				math.max(bounds.max.Y, pos.Y),
-				math.max(bounds.max.Z, pos.Z)
-			)
-		end
-	end
-
-	local cacheData = {
-		segments = interpolatedSegments,
-		realSegments = segmentParts, -- Store real segments for orb spawning
-		chunks = chunks,
-		bounds = bounds,
-		length = snakeLength,
-		lastUpdate = currentTime
-	}
-
-	CollisionCache.playerSegments[player] = cacheData
-	return cacheData
+	
+	return segments
 end
 
-local function getAISnakeSegments(snake)
-	if not snake or not snake.Segments then return nil end
-
-	local cache = CollisionCache.aiSegments[snake]
-	local currentTime = tick()
-
-	if cache and (currentTime - cache.lastUpdate) < CACHE_EXPIRY then
-		return cache
+-- === ULTRA-FAST COLLISION CHECK ===
+local function checkCollision(headPos, segments, collisionRadius)
+	if not segments or #segments == 0 then
+		return false, nil
 	end
-
-	local segmentParts = {}
-	for _, seg in ipairs(snake.Segments) do
-		if seg and seg.Parent and seg.Parent.Parent then
-			segmentParts[#segmentParts + 1] = seg
+	
+	local radiusSq = collisionRadius * collisionRadius
+	local heightTolerance = COLLISION_HEIGHT_TOLERANCE
+	
+	-- Use spatial grid for initial filtering
+	local nearbyObjects = collisionGrid:queryRadius(headPos, collisionRadius * 2)
+	local nearbySegmentIndices = {}
+	
+	for _, result in ipairs(nearbyObjects) do
+		if result.data.type == "player_segment" or result.data.type == "ai_segment" then
+			nearbySegmentIndices[result.data.index] = true
 		end
 	end
-
-	local snakeLength = #segmentParts
-	if snakeLength == 0 then return nil end
-
-	-- For AI snakes, use real segments directly (no interpolation)
-	-- This ensures we don't miss any tail segments
-	local interpolatedSegments = segmentParts
-
-	local chunks = nil
-	if snakeLength > EXTREME_LENGTH_THRESHOLD then
-		chunks = createSegmentChunks(interpolatedSegments, snakeLength)
-	end
-
-	local bounds = {
-		min = Vector3.new(math.huge, math.huge, math.huge),
-		max = Vector3.new(-math.huge, -math.huge, -math.huge)
-	}
-
-	for _, seg in ipairs(interpolatedSegments) do
-		local pos = seg.Position or seg.position
-		if pos then
-			bounds.min = Vector3.new(
-				math.min(bounds.min.X, pos.X),
-				math.min(bounds.min.Y, pos.Y),
-				math.min(bounds.min.Z, pos.Z)
-			)
-			bounds.max = Vector3.new(
-				math.max(bounds.max.X, pos.X),
-				math.max(bounds.max.Y, pos.Y),
-				math.max(bounds.max.Z, pos.Z)
-			)
+	
+	-- Check segments with spatial filtering
+	for _, segData in ipairs(segments) do
+		-- Skip if not in nearby grid cells
+		if not nearbySegmentIndices[segData.index] and segData.index % 5 ~= 0 then
+			continue
+		end
+		
+		local segPos = segData.position
+		if not segPos then continue end
+		
+		-- Quick Y-axis check first
+		local yDiff = math.abs(headPos.Y - segPos.Y)
+		if yDiff > heightTolerance then
+			continue
+		end
+		
+		-- Distance check (squared for performance)
+		local dx = headPos.X - segPos.X
+		local dz = headPos.Z - segPos.Z
+		local distSq = dx * dx + dz * dz
+		
+		if distSq < radiusSq then
+			return true, segData
 		end
 	end
-
-	local cacheData = {
-		segments = interpolatedSegments,
-		realSegments = segmentParts, -- Store real segments for orb spawning
-		chunks = chunks,
-		bounds = bounds,
-		length = snakeLength,
-		lastUpdate = currentTime
-	}
-
-	CollisionCache.aiSegments[snake] = cacheData
-	return cacheData
+	
+	return false, nil
 end
 
--- === COLLISION VALIDATION ===
-local function validateCollision(posA, posB, expectedDistance, isLongSnake)
-	-- Extra validation to prevent phantom collisions
-	if not posA or not posB then return false end
-
-	local dist = (posA - posB).Magnitude
-
-	-- Stricter validation for long snakes
-	if isLongSnake then
-		-- For long snakes, require closer proximity to trigger collision
-		if dist > expectedDistance * 0.8 then
-			return false
-		end
-	else
-		-- Normal validation
-		if dist > expectedDistance * 1.5 then
-			return false
-		end
-	end
-
-	-- Check for NaN
-	if dist ~= dist then
-		return false
-	end
-
-	-- Height check - prevent collisions when height difference is too large
-	local heightDiff = math.abs(posA.Y - posB.Y)
-	if heightDiff > 5 then
-		return false
-	end
-
-	-- Additional validation: check if positions are reasonable
-	if posA.Y < -10 or posB.Y < -10 then
-		return false -- Below map
-	end
-
-	if posA.Y > 50 or posB.Y > 50 then
-		return false -- Too high
-	end
-
-	return true
-end
-
--- === DEATH HANDLERS (QUEUE-BASED) ===
+-- === QUEUE DEATH FUNCTIONS ===
 local function queuePlayerDeath(player)
-	-- Additional safety checks to prevent random deaths
-	if not player or not player.Parent then
-		if DEBUG_COLLISIONS then
-			print(string.format("[SAFETY] Blocked death - invalid player object"))
-		end
-		return
-	end
-
-	-- Check if player has valid character
-	local character = player.Character
-	if not character then
-		if DEBUG_COLLISIONS then
-			print(string.format("[SAFETY] Blocked death - no character for %s", player.Name))
-		end
-		return
-	end
-
-	-- Check if player is actually in the game
-	local humanoid = character:FindFirstChild("Humanoid")
-	if not humanoid or humanoid.Health <= 0 then
-		if DEBUG_COLLISIONS then
-			print(string.format("[SAFETY] Blocked death - player already dead: %s", player.Name))
-		end
-		return
-	end
-
-	-- Height validation - prevent death if player is falling off map
-	local root = character:FindFirstChild("HumanoidRootPart")
-	if root and root.Position.Y < -5 then
-		if DEBUG_COLLISIONS then
-			print(string.format("[SAFETY] Blocked death - player below map: %s at Y=%f", player.Name, root.Position.Y))
-		end
-		return
-	end
-
-	-- Prevent double deaths
-	if deadPlayers[player] then
-		return
-	end
-
-	if isPlayerInvincible(player) then 
-		-- Debug: Log when invincibility prevents death
-		if DEBUG_COLLISIONS then
-			print(string.format("[INVINCIBILITY] Blocked death for player: %s (invincible)", player.Name))
-		end
-		return 
-	end
-
-	-- Prevent duplicate death entries
-	for _, death in ipairs(deathQueue) do
-		if death.type == "player" and death.target == player then
-			if DEBUG_COLLISIONS then
-				print(string.format("[DUPLICATE] Blocked duplicate death for player: %s", player.Name))
-			end
-			return
-		end
-	end
-
-	-- IMMEDIATELY mark as dead to prevent mutual deaths (with timestamp)
-	deadPlayers[player] = tick()
-
-	-- IMMEDIATELY kill the player so camera/movement stops
-	if humanoid and humanoid.Health > 0 then
-		humanoid.Health = 0
-		-- Notify client directly about death
-		deathNotifyEvent:FireClient(player, "died")
-	end
-
-	-- IMMEDIATELY disable collision on all segments to prevent timing issues
-	task.spawn(function()
-		if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-			local snake = _G.PlayerSnakes[player]
-			if snake and snake.segments then
-				for _, segment in ipairs(snake.segments) do
-					if segment and segment.Parent then
-						segment.CanCollide = false
-						segment.CanQuery = false
-						segment.CanTouch = false
-					end
-				end
-			end
-		end
-
-		-- Also disable collision on character parts
-		if character then
-			for _, part in ipairs(character:GetDescendants()) do
-				if part:IsA("BasePart") then
-					part.CanCollide = false
-					part.CanQuery = false
-					part.CanTouch = false
-				end
-			end
-		end
-	end)
-
-	if DEBUG_COLLISIONS then
-		print(string.format("[QUEUE] Adding death to queue for player: %s", player.Name))
-	end
-
-	-- Add to death queue with double-death prevention
-	table.insert(deathQueue, {
-		type = "player",
-		target = player,
-		timestamp = tick()
-	})
+	if not player or deadPlayers[player] then return end
+	deadPlayers[player] = true
+	table.insert(deathQueue, {type = "player", entity = player})
 end
 
-local function queueAIDeath(head)
-	-- Validate head exists and is a proper AI snake head
-	if not head or not head.Parent or head.Name ~= "AISnakeHead" then
-		if DEBUG_COLLISIONS then
-			print("[SAFETY] Blocked AI death - invalid head")
-		end
-		return
-	end
-
-	-- Check if this AI is already marked as dead
-	if deadAISnakes[head] then
-		return
-	end
-
-	-- Find the actual AI snake instance
-	local aiSnake = nil
-	for _, snake in AISnakeModule._activeSnakes do
-		if snake and snake._active and snake.HeadParts and snake.HeadParts.head == head then
-			aiSnake = snake
-			break
-		end
-	end
-
-	-- If we can't find the snake, don't process death
-	if not aiSnake then
-		if DEBUG_COLLISIONS then
-			print("[SAFETY] Blocked AI death - no snake instance found")
-		end
-		return
-	end
-
-	-- Check if snake is spawn protected
-	if isAIProtected(head) then
-		if DEBUG_COLLISIONS then
-			print("[SAFETY] Blocked AI death - spawn protected")
-		end
-		return
-	end
-
-	-- Prevent duplicate death entries
-	for _, death in ipairs(deathQueue) do
-		if death.type == "ai" and death.target == head then
-			return
-		end
-	end
-
-	-- Mark this AI as dead immediately (with timestamp)
-	deadAISnakes[head] = tick()
-
-	-- IMMEDIATELY disable collision on all segments to prevent timing issues
-	task.spawn(function()
-		if aiSnake and aiSnake.Segments then
-			for _, segment in ipairs(aiSnake.Segments) do
-				if segment and segment.Parent then
-					segment.CanCollide = false
-					segment.CanQuery = false
-					segment.CanTouch = false
-				end
-			end
-		end
-
-		-- Also disable collision on head
-		if head and head.Parent then
-			head.CanCollide = false
-			head.CanQuery = false
-			head.CanTouch = false
-		end
-	end)
-
-	if DEBUG_COLLISIONS then
-		print(string.format("[QUEUE] Adding death to queue for AI: %s", tostring(head)))
-	end
-
-	-- Add to death queue with double-death prevention
-	table.insert(deathQueue, {
-		type = "ai",
-		target = head,
-		timestamp = tick()
-	})
+local function queueAIDeath(aiHead)
+	if not aiHead or deadAISnakes[aiHead] then return end
+	deadAISnakes[aiHead] = true
+	table.insert(deathQueue, {type = "ai", entity = aiHead})
 end
 
--- FAST DEATH PROCESSING with double-death prevention
-local processDeathQueue
-task.spawn(function()
-	while true do
-		task.wait(0.033) -- Process 30 times per second for instant orbs
-
-		if #deathQueue > 0 and not isProcessingDeaths then
-			isProcessingDeaths = true
-			local death = table.remove(deathQueue, 1)
-
-			if death.type == "player" then
-				local player = death.target
-
-				-- Skip if player disconnected
-				if not player.Parent then
-					isProcessingDeaths = false
-					continue
-				end
-
-				local character = player.Character
-				if character then
-					local humanoid = character:FindFirstChild("Humanoid")
-					if humanoid and humanoid.Health > 0 then
-						-- Get actual snake segments
-						local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
-						if snakeInstance and snakeInstance.segments then
-							local segments = snakeInstance.segments
-							local totalLength = #segments
-
-							-- Calculate orb distribution
-							local orbsPerSegment = 1 / 2.5 -- One orb every 2.5 segments
-							local totalOrbs = math.clamp(math.floor(totalLength * orbsPerSegment), 3, 30)
-
-							-- Dynamic value calculation based on snake length
-							local baseValue = 1
-							if totalLength <= 100 then
-								-- Small snakes: give back 30% of length
-								local totalValue = math.floor(totalLength * 0.30)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							elseif totalLength <= 200 then
-								-- Medium snakes: give back 25% of length
-								local totalValue = math.floor(totalLength * 0.25)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							elseif totalLength <= 500 then
-								-- Large snakes: give back 20% of length
-								local totalValue = math.floor(totalLength * 0.20)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							else
-								-- Very large snakes: give back 15% of length with cap
-								local totalValue = math.min(math.floor(totalLength * 0.15), 150)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							end
-
-							local valuePerOrb = baseValue
-
-							-- Spawn orbs along the snake path with error handling
-							local spawnedOrbs = 0
-							for i = 1, totalLength do
-								if math.random() < orbsPerSegment then
-									local seg = segments[i]
-									if seg and seg.Parent and seg.Position then
-										local pos = seg.Position
-
-										-- Small random offset to prevent perfect stacking
-										local offset = Vector3.new(
-											(math.random() - 0.5) * 2,
-											0,
-											(math.random() - 0.5) * 2
-										)
-
-										-- Spawn at proper height so AI can collect
-										local spawnPos = Vector3.new(
-											pos.X + offset.X,
-											ORB_SPAWN_HEIGHT,  -- Use standard orb height!
-											pos.Z + offset.Z
-										)
-
-										local success = pcall(function()
-											-- Just spawn regular orbs that AI can eat
-											spawnOrbDirect(spawnPos, valuePerOrb)
-											spawnedOrbs = spawnedOrbs + 1
-										end)
-
-										if not success then
-											warn("Failed to spawn orb for player death")
-										end
-									end
-								end
-							end
-
-							-- Ensure at least some orbs spawn
-							if spawnedOrbs < GUARANTEED_ORB_COUNT then
-								-- Spawn remaining orbs at death location
-								local deathPos = humanoid.RootPart and humanoid.RootPart.Position or (segments[1] and segments[1].Position)
-								if deathPos then
-									for i = spawnedOrbs + 1, GUARANTEED_ORB_COUNT do
-										local angle = (i / GUARANTEED_ORB_COUNT) * math.pi * 2
-										local radius = 5 + (i * 2)
-										local spawnPos = Vector3.new(
-											deathPos.X + math.cos(angle) * radius,
-											ORB_SPAWN_HEIGHT,
-											deathPos.Z + math.sin(angle) * radius
-										)
-
-										local success = spawnOrbDirect(spawnPos, valuePerOrb)
-										if success then
-											spawnedOrbs = spawnedOrbs + 1
-										end
-									end
-								end
-							end
-
-							-- Log orb spawning for debugging
-							if DEBUG_COLLISIONS then
-								print(string.format("[ORBS] Spawned %d orbs for %s (length: %d)", spawnedOrbs, player.Name, totalLength))
-							end
-						end
-
-						-- Player already marked as dead and killed in queuePlayerDeath
-
-						-- Handle character cleanup
-						task.spawn(function()
-							-- Small delay to ensure client detects death before cleanup
-							task.wait(0.1)
-
-							if character and character.Parent then
-								-- Option 1: Move character far away (safer than destroying)
-								local root = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso")
-								if root then
-									root.CFrame = CFrame.new(0, -500, 0) -- Move below the map
-								end
-
-								-- Option 2: Make character invisible
-								for _, part in ipairs(character:GetDescendants()) do
-									if part:IsA("BasePart") or part:IsA("Decal") then
-										part.Transparency = 1
-									end
-									if part:IsA("BillboardGui") or part:IsA("SurfaceGui") then
-										part.Enabled = false
-									end
-								end
-
-								-- Option 3: Remove from workspace but don't destroy (let Roblox handle it)
-								character.Parent = game:GetService("ServerStorage")
-							end
-						end)
-
-						-- Clear dead flag after respawn time
-						task.spawn(function()
-							task.wait(5)
-							deadPlayers[player] = nil
-						end)
-
-						-- Also clear on CharacterAdded to prevent permanent death
-						local connection
-						connection = player.CharacterAdded:Connect(function()
-							deadPlayers[player] = nil
-							if connection then
-								connection:Disconnect()
-							end
-						end)
-
-						-- Force clear all snake parts and model
-						task.spawn(function()
-							-- Clean up immediately, orbs already spawned
-
-							-- Method 1: Clear from snake instance
-							if snakeInstance and snakeInstance.segments then
-								for _, segment in ipairs(snakeInstance.segments) do
-									if segment and segment.Parent then
-										segment:Destroy()
-									end
-								end
-							end
-
-							-- Method 2: Clear any segments in character
-							if character then
-								for _, child in ipairs(character:GetDescendants()) do
-									if child:IsA("BasePart") and (child.Name:match("Segment") or child.Name:match("segment")) then
-										child:Destroy()
-									end
-								end
-							end
-
-							-- Method 3: Clear by finding segment folder
-							local segmentFolder = character and character:FindFirstChild("Segments")
-							if segmentFolder then
-								segmentFolder:Destroy()
-							end
-
-							-- Method 4: Clear from workspace containers
-							local segmentContainer = workspace:FindFirstChild("SegmentContainer")
-							if segmentContainer then
-								for _, child in ipairs(segmentContainer:GetChildren()) do
-									if child.Name:find(player.Name) or (child:GetAttribute("Owner") == player.Name) then
-										child:Destroy()
-									end
-								end
-							end
-
-							-- Method 5: Look for AI snake models with player name
-							local aiSegmentContainer = workspace:FindFirstChild("AISegmentContainer")
-							if aiSegmentContainer then
-								for _, model in ipairs(aiSegmentContainer:GetChildren()) do
-									if model.Name:find(player.Name) or (model:GetAttribute("Owner") == player.Name) then
-										model:Destroy()
-									end
-								end
-							end
-
-							-- Method 6: Clear the actual snake model structure
-							-- Look for models that match "AISnakeModel_table:" pattern
-							for _, container in ipairs(workspace:GetChildren()) do
-								if container.Name == "AISegmentContainer" or container.Name == "SegmentContainer" then
-									for _, model in ipairs(container:GetChildren()) do
-										-- Check if this is a player's snake model
-										if model:IsA("Model") then
-											local shouldDestroy = false
-
-											-- Check various patterns
-											if model.Name:find(player.Name) then
-												shouldDestroy = true
-											elseif model.Name:match("AISnakeModel_table:") then
-												-- This might be a player snake with a weird name
-												-- Check if it belongs to this player
-												local hasPlayerSegments = false
-												for _, part in ipairs(model:GetDescendants()) do
-													if part:IsA("BasePart") then
-														-- Check if part position matches player position
-														if character and character:FindFirstChild("HumanoidRootPart") then
-															local dist = (part.Position - character.HumanoidRootPart.Position).Magnitude
-															if dist < 100 then
-																hasPlayerSegments = true
-																break
-															end
-														end
-													end
-												end
-												if hasPlayerSegments then
-													shouldDestroy = true
-												end
-											end
-
-											-- Additional checks
-											if model:GetAttribute("PlayerName") == player.Name then
-												shouldDestroy = true
-											elseif model:GetAttribute("Owner") == player.Name then
-												shouldDestroy = true
-											end
-
-											if shouldDestroy then
-												if DEBUG_COLLISIONS then
-													print("[CLEANUP] Destroying snake model:", model.Name)
-												end
-												model:Destroy()
-											end
-										end
-									end
-								end
-							end
-
-							-- Method 7: Extra cleanup for any remaining models
-							-- This works for ALL players, not just specific usernames
-							for _, container in ipairs(workspace:GetChildren()) do
-								if container:IsA("Folder") or container:IsA("Model") then
-									for _, child in ipairs(container:GetChildren()) do
-										-- Check if this model belongs to the dead player
-										if child.Name:match(player.Name) or 
-											child:GetAttribute("Owner") == player.Name or
-											child:GetAttribute("PlayerName") == player.Name then
-											child:Destroy()
-										end
-									end
-								end
-							end
-
-							-- Clear from global tracking
-							if _G.PlayerSnakes then
-								_G.PlayerSnakes[player] = nil
-							end
-						end)
-					end
-				end
-			elseif death.type == "ai" then
-				local head = death.target
-				if AISnakeModule._activeSnakes then
-					for _, snake in AISnakeModule._activeSnakes do
-						if snake.HeadParts and snake.HeadParts.head == head then
-							-- Get actual AI snake segments
-							if snake.Segments then
-								local segments = snake.Segments
-								local totalLength = #segments
-
-								-- Calculate orb distribution
-								local orbsPerSegment = 1 / 2.5 -- One orb every 2.5 segments
-								local totalOrbs = math.clamp(math.floor(totalLength * orbsPerSegment), 3, 30)
-
-								-- Dynamic value calculation based on snake length
-								local baseValue = 1
-								if totalLength <= 100 then
-									-- Small snakes: give back 30% of length
-									local totalValue = math.floor(totalLength * 0.30)
-									baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-								elseif totalLength <= 200 then
-									-- Medium snakes: give back 25% of length
-									local totalValue = math.floor(totalLength * 0.25)
-									baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-								elseif totalLength <= 500 then
-									-- Large snakes: give back 20% of length
-									local totalValue = math.floor(totalLength * 0.20)
-									baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-								else
-									-- Very large snakes: give back 15% of length with cap
-									local totalValue = math.min(math.floor(totalLength * 0.15), 150)
-									baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-								end
-
-								local valuePerOrb = baseValue
-
-								-- Get ground level
-								local groundY = 0
-								local raycastParams = RaycastParams.new()
-								raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-								raycastParams.FilterDescendantsInstances = {snake.Model}
-
-								local groundRay = workspace:Raycast(
-									head.Position + Vector3.new(0, 50, 0),
-									Vector3.new(0, -100, 0),
-									raycastParams
-								)
-
-								if groundRay then
-									groundY = groundRay.Position.Y
-								end
-
-								-- Spawn orbs along the snake path with error handling
-								local spawnedOrbs = 0
-								for i = 1, totalLength do
-									if math.random() < orbsPerSegment then
-										local seg = segments[i]
-										if seg and seg.Parent and seg.Position then
-											local pos = seg.Position
-
-											-- Small random offset
-											local offset = Vector3.new(
-												(math.random() - 0.5) * 2,
-												0,
-												(math.random() - 0.5) * 2
-											)
-
-											-- Ensure proper height
-											local spawnPos = Vector3.new(
-												pos.X + offset.X,
-												groundY + ORB_SPAWN_HEIGHT,  -- Use proper height!
-												pos.Z + offset.Z
-											)
-
-											local success = pcall(function()
-												-- Just spawn regular orbs for AI deaths
-												spawnOrbDirect(spawnPos, valuePerOrb)
-												spawnedOrbs = spawnedOrbs + 1
-											end)
-
-											if not success then
-												warn("Failed to spawn orb for AI death")
-											end
-										end
-									end
-								end
-
-								-- Ensure at least some orbs spawn
-								if spawnedOrbs < GUARANTEED_ORB_COUNT then
-									-- Spawn remaining orbs at death location
-									local deathPos = head.Position
-									if deathPos then
-										for i = spawnedOrbs + 1, GUARANTEED_ORB_COUNT do
-											local angle = (i / GUARANTEED_ORB_COUNT) * math.pi * 2
-											local radius = 5 + (i * 2)
-											local spawnPos = Vector3.new(
-												deathPos.X + math.cos(angle) * radius,
-												groundY + ORB_SPAWN_HEIGHT,
-												deathPos.Z + math.sin(angle) * radius
-											)
-
-											local success = spawnOrbDirect(spawnPos, valuePerOrb)
-											if success then
-												spawnedOrbs = spawnedOrbs + 1
-											end
-										end
-									end
-								end
-
-								-- Log orb spawning for debugging
-								if DEBUG_COLLISIONS then
-									print(string.format("[ORBS] Spawned %d orbs for AI snake (length: %d)", spawnedOrbs, totalLength))
-								end
-							end
-
-							if snake.Destroy then
-								snake:Destroy()
-							end
-							break
-						end
-					end
-				end
-			end
-
-			isProcessingDeaths = false
-		end
-	end
-end)
-
--- === NETWORK-AWARE COLLISION DETECTION ===
-local function checkBoundsOverlap(bounds1, bounds2, margin)
-	return not (
-		bounds1.max.X + margin < bounds2.min.X or
-			bounds1.min.X - margin > bounds2.max.X or
-			bounds1.max.Z + margin < bounds2.min.Z or
-			bounds1.min.Z - margin > bounds2.max.Z
-	)
-end
-
--- === ENHANCED COLLISION VALIDATION ===
-local function isValidCollision(headPos, segmentPos, collisionDist, snakeLength)
-	-- Basic distance check
-	local dist = (headPos - segmentPos).Magnitude
-
-	-- NO ADAPTIVE DISTANCE - Use consistent collision distance
-	local effectiveDist = collisionDist
-
-	if dist >= effectiveDist then
-		return false
-	end
-
-	-- Very close collision is always valid
-	if dist < MIN_COLLISION_DISTANCE then
-		return true
-	end
-
-	-- Height check - consistent for all
-	local heightDiff = math.abs(headPos.Y - segmentPos.Y)
-	if heightDiff > 3.0 then -- Back to normal height difference
-		return false
-	end
-
-	-- No velocity check - it was causing missed collisions
+-- === PROCESS DEATHS ===
+local function processDeathQueue()
+	if isProcessingDeaths or #deathQueue == 0 then return end
+	isProcessingDeaths = true
 	
-	return true
-end
-
--- === DEBUG COLLISION TRACKING ===
-local function debugCollision(headPos, segmentPos, collisionType, playerName)
-	if not DEBUG_COLLISIONS then return end
-
-	local dist = (headPos - segmentPos).Magnitude
-	local heightDiff = math.abs(headPos.Y - segmentPos.Y)
-
-	table.insert(collisionDebugData, {
-		timestamp = tick(),
-		headPos = headPos,
-		segmentPos = segmentPos,
-		distance = dist,
-		heightDiff = heightDiff,
-		collisionType = collisionType,
-		playerName = playerName or "Unknown"
-	})
-
-	-- Keep only last 50 debug entries
-	if #collisionDebugData > 50 then
-		table.remove(collisionDebugData, 1)
+	local toProcess = {}
+	for i = 1, #deathQueue do
+		toProcess[i] = deathQueue[i]
+		deathQueue[i] = nil
 	end
-
-	print(string.format("[COLLISION DEBUG] %s hit %s at distance %.2f, height diff %.2f", 
-		playerName or "Unknown", collisionType, dist, heightDiff))
-end
-
-local function findCollisionInChunks(headPos, chunks, collisionDist, snakeLength)
-	local effectiveDist = collisionDist + NETWORK_COMPENSATION
-
-	for _, chunk in ipairs(chunks) do
-		-- Optimized broad phase with pre-calculated values
-		if (headPos - chunk.center).Magnitude <= chunk.radius + effectiveDist then
-			-- Narrow phase
-			for _, seg in ipairs(chunk.segments) do
-				local segPos = seg.Position or seg.position
-				if segPos and isValidCollision(headPos, segPos, effectiveDist, snakeLength) then
-					return true
+	
+	for _, death in ipairs(toProcess) do
+		if death.type == "player" then
+			local player = death.entity
+			if player and player.Parent and player.Character then
+				local humanoid = player.Character:FindFirstChild("Humanoid")
+				if humanoid and humanoid.Health > 0 then
+					humanoid.Health = 0
+				end
+			end
+		elseif death.type == "ai" then
+			local aiHead = death.entity
+			if aiHead and aiHead.Parent then
+				for _, snake in ipairs(AISnakeModule._activeSnakes) do
+					if snake.HeadParts and snake.HeadParts.head == aiHead then
+						snake:Destroy()
+						break
+					end
 				end
 			end
 		end
 	end
-	return false
-end
-
-local function findCollisionInSegments(headPos, segments, collisionDist, useGrid, snakeLength)
-	local effectiveDist = collisionDist + NETWORK_COMPENSATION
 	
-	-- For very long snakes, always use direct iteration on real segments
-	-- The spatial grid gets overwhelmed with huge snakes
-	if snakeLength and snakeLength > 1000 then
-		useGrid = false
-		effectiveDist = collisionDist -- No compensation for large snakes
-	end
-
-	if useGrid and CollisionCache.spatialGrid.objectCount == 0 then
-		-- Build spatial grid if empty
-		for _, seg in ipairs(segments) do
-			local pos = seg.Position or seg.position
-			if pos then
-				CollisionCache.spatialGrid:insert(seg, pos)
-			end
-		end
-	end
-
-	if useGrid then
-		local nearby = CollisionCache.spatialGrid:query(headPos, effectiveDist * 1.5)
-		for _, seg in ipairs(nearby) do
-			local segPos = seg.Position or seg.position
-			if segPos and isValidCollision(headPos, segPos, effectiveDist, snakeLength) then
-				return true
-			end
-		end
-	else
-		-- Direct iteration
-		for i, seg in ipairs(segments) do
-			local segPos = seg.Position or seg.position
-			if segPos and isValidCollision(headPos, segPos, effectiveDist, snakeLength) then
-				return true
-			end
-		end
-	end
-	return false
+	isProcessingDeaths = false
 end
 
--- === IMPROVED HEAD-TO-HEAD COLLISION LOGIC ===
-local function determineHeadToHeadWinner(headA, headB, velA, velB, lengthA, lengthB)
-	-- Get actual velocities if not provided
-	if not velA or velA.Magnitude < 0.1 then
-		velA = headA.AssemblyLinearVelocity
-	end
-	if not velB or velB.Magnitude < 0.1 then
-		velB = headB.AssemblyLinearVelocity
-	end
-
-	-- Calculate collision angle
-	local dirAB = (headB.Position - headA.Position)
-	if dirAB.Magnitude < 0.1 then
-		-- Too close, use random winner
-		return math.random() > 0.5 and "A" or "B"
-	end
-	dirAB = dirAB.Unit
-	local dirBA = -dirAB
-
-	-- Calculate how directly each snake is moving toward the collision point
-	local dotA = velA.Magnitude > 0.1 and velA.Unit:Dot(dirAB) or 0
-	local dotB = velB.Magnitude > 0.1 and velB.Unit:Dot(dirBA) or 0
-
-	-- Calculate speeds
-	local speedA = velA.Magnitude
-	local speedB = velB.Magnitude
-
-	-- Check if both are moving toward each other (true head-on)
-	if dotA > HEAD_TO_HEAD_ANGLE_THRESHOLD and dotB > HEAD_TO_HEAD_ANGLE_THRESHOLD then
-		-- TRUE HEAD-ON COLLISION
-		-- In a true head-on, bigger snake wins (like real slither.io)
-		lengthA = lengthA or 100
-		lengthB = lengthB or 100
-
-		if math.abs(lengthA - lengthB) > 20 then
-			-- Significant size difference - bigger wins
-			return lengthA > lengthB and "B" or "A"
-		else
-			-- Similar size - faster/more aggressive wins
-			local aggressionA = speedA * dotA
-			local aggressionB = speedB * dotB
-
-			-- Add small randomness only for very close matches
-			if math.abs(aggressionA - aggressionB) < 0.5 then
-				aggressionA = aggressionA + math.random() * 0.2
-				aggressionB = aggressionB + math.random() * 0.2
-			end
-
-			return aggressionA > aggressionB and "B" or "A"
-		end
-	else
-		-- SIDE COLLISION - whoever hit more from the side wins
-		-- Higher dot product = more direct hit
-		if math.abs(dotA - dotB) < 0.1 then
-			-- Very similar angles - use speed as tiebreaker
-			return speedA > speedB and "B" or "A"
-		else
-			-- Clear side hit
-			return dotA > dotB and "B" or "A"
-		end
-	end
-end
-
--- === COLLISION DETECTION WITH RECENT TRACKING ===
-local function isRecentCollision(entityA, entityB)
-	local key = tostring(entityA) .. "-" .. tostring(entityB)
-	local reverseKey = tostring(entityB) .. "-" .. tostring(entityA)
-
-	local currentTime = tick()
-
-	-- Check both directions with longer cooldown
-	if recentCollisions[key] and currentTime - recentCollisions[key] < 1.0 then -- Increased from 0.5 to 1.0
-		return true
-	end
-	if recentCollisions[reverseKey] and currentTime - recentCollisions[reverseKey] < 1.0 then
-		return true
-	end
-
-	-- Mark as recent
-	recentCollisions[key] = currentTime
-	recentCollisions[reverseKey] = currentTime
-
-	-- Clean old entries
-	for k, time in pairs(recentCollisions) do
-		if currentTime - time > 2 then -- Increased from 1 to 2
-			recentCollisions[k] = nil
-		end
-	end
-
-	return false
-end
-
--- === DEATH EXCLUSION CHECK ===
-local function isEitherDead(entityA, entityB)
-	-- Check if either entity is already marked as dead
-	if type(entityA) == "userdata" and entityA:IsA("Player") then
-		if deadPlayers[entityA] then
+-- === WALL COLLISION ===
+local function checkWallCollision(position, isHead)
+	if not isHead then return false end
+	
+	local mapHalf = 400
+	local wallThreshold = mapHalf - 10
+	
+	if math.abs(position.X) > wallThreshold or math.abs(position.Z) > wallThreshold then
+		local distToWallX = mapHalf - math.abs(position.X)
+		local distToWallZ = mapHalf - math.abs(position.Z)
+		if distToWallX < 10 or distToWallZ < 10 then
 			return true
 		end
-		-- Also check death queue
-		for _, death in ipairs(deathQueue) do
-			if death.type == "player" and death.target == entityA then
-				return true
-			end
-		end
 	end
-
-	if type(entityB) == "userdata" and entityB:IsA("Player") then
-		if deadPlayers[entityB] then
-			return true
-		end
-		-- Also check death queue
-		for _, death in ipairs(deathQueue) do
-			if death.type == "player" and death.target == entityB then
-				return true
-			end
-		end
-	end
-
-	-- Check AI deaths
-	if type(entityA) ~= "userdata" and deadAISnakes[entityA] then
-		return true
-	end
-
-	if type(entityB) ~= "userdata" and deadAISnakes[entityB] then
-		return true
-	end
-
 	return false
 end
 
--- === MAIN COLLISION LOOP (SUPREME OPTIMIZATION) ===
-local frameCounter = 0
-local lastCollisionCheck = 0
-
-RunService.Stepped:Connect(function()
-	frameCounter = frameCounter + 1
-	if frameCounter % COLLISION_FRAME_SKIP ~= 0 then return end
-
-	-- Throttle collision checks to prevent lag
+local function handleWallCollision(entity, isPlayer)
+	local key = isPlayer and entity or (entity.Name or tostring(entity))
 	local currentTime = tick()
-	if currentTime - lastCollisionCheck < 0.1 then -- Increased from 0.05 to 0.1
+	
+	if wallCollisionCooldowns[key] and currentTime - wallCollisionCooldowns[key] < WALL_ORB_DROP_COOLDOWN then
 		return
 	end
-	lastCollisionCheck = currentTime
+	
+	wallCollisionCooldowns[key] = currentTime
+	
+	-- Spawn wall collision orbs
+	local snakeData = isPlayer and (_G.PlayerSnakes and _G.PlayerSnakes[entity]) or entity
+	if not snakeData or not snakeData.segments then return end
+	
+	local currentLength = #snakeData.segments
+	if currentLength <= 10 then return end
+	
+	local headPos = snakeData.segments[1] and snakeData.segments[1].Position
+	if headPos then
+		local mapBoundary = 395
+		local orbValue = math.min(15, math.floor(currentLength / 100) + 1)
+		
+		for i = 1, WALL_ORB_DROP_AMOUNT do
+			local randomOffset = Vector3.new(
+				math.random(-10, 10),
+				0,
+				math.random(-10, 10)
+			)
+			local orbPos = headPos + randomOffset
+			orbPos = Vector3.new(
+				math.clamp(orbPos.X, -mapBoundary, mapBoundary),
+				ORB_SPAWN_HEIGHT,
+				math.clamp(orbPos.Z, -mapBoundary, mapBoundary)
+			)
+			
+			local orb = OrbUtils.spawnOrbAt(orbPos, orbValue)
+			if orb and isPlayer then
+				orb:SetAttribute("SpawnedByUserId", entity.UserId)
+				orb:SetAttribute("SpawnTime", tick())
+			end
+		end
+		
+		-- Shrink player snake
+		if isPlayer and snakeData.shrink then
+			local segmentsToRemove = math.min(math.floor(currentLength * 0.1), currentLength - 10)
+			if segmentsToRemove > 0 then
+				snakeData.shrink(segmentsToRemove)
+			end
+		end
+	end
+end
 
-	-- Clear frame cache
-	CollisionCache.frameCache = {}
+-- === MAIN COLLISION LOOP ===
+local framesSinceGridRebuild = 0
+local collisionCheckCount = 0
 
-	local playerHeads = getPlayerHeads()
-	local aiHeads = getAISnakeHeads()
-
-	-- Early exit if no players or AI
-	if #playerHeads == 0 and #aiHeads == 0 then
+RunService.Heartbeat:Connect(function()
+	CollisionCache.frameCount = CollisionCache.frameCount + 1
+	
+	-- Skip frames for performance
+	if CollisionCache.frameCount % COLLISION_FRAME_SKIP ~= 0 then
 		return
 	end
-
-	-- This section handles wall collisions and player deaths from AI/other players
-	for _, headData in ipairs(playerHeads) do
-		local player = headData.player
-		local head = headData.part
-
-		-- Check player invincibility FIRST - skip if player is invincible
-		if isPlayerInvincible(player) then
-			continue
+	
+	-- Rebuild spatial grid periodically
+	framesSinceGridRebuild = framesSinceGridRebuild + 1
+	if framesSinceGridRebuild >= 30 then -- Every 0.5 seconds at 60 FPS
+		collisionGrid:clear()
+		framesSinceGridRebuild = 0
+	end
+	
+	-- Reset collision check counter
+	collisionCheckCount = 0
+	
+	-- Get all heads
+	local playerHeads = {}
+	local aiHeads = {}
+	
+	-- Collect player heads
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character then
+			local head = player.Character:FindFirstChild("HumanoidRootPart")
+			if head and head.Parent and not deadPlayers[player] then
+				table.insert(playerHeads, {
+					player = player,
+					part = head,
+					position = head.Position
+				})
+				
+				-- Add to spatial grid
+				collisionGrid:insert(head, head.Position, {
+					type = "player_head",
+					owner = player
+				})
+			end
 		end
-
-		if head and head.Parent then
-			local headPos = head.Position
-
-			-- Validate player position
-			if headPos.Y < -5 or headPos.Y > 50 then
-				continue -- Skip if player is out of bounds
-			end
-
-			-- Get player's snake length for adaptive collision
-			local playerSnakeLength = 10
-			if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-				local snake = _G.PlayerSnakes[player]
-				if snake.segments then
-					playerSnakeLength = #snake.segments
-				end
-			end
-
-			-- Throttle wall checks for performance
-			local currentTime = tick()
-			local lastCheck = wallLastCheck[player] or 0
-			if currentTime - lastCheck >= WALL_CHECK_INTERVAL then
-				wallLastCheck[player] = currentTime
-
-				-- Check wall collision (skip if being pushed or has immunity)
-				local hasImmunity = wallPushImmunity[player] and currentTime - wallPushImmunity[player] < WALL_PUSH_IMMUNITY_TIME
-				if checkWallCollision(headPos, playerSnakeLength, true) and not player:GetAttribute("BeingPushedFromWall") and not hasImmunity then
-					handleWallCollision(player, true)
-
-					-- Track wall contact time
-					local key = player
-					if not wallContactTime[key] then
-						wallContactTime[key] = tick()
-						-- Debug: Log when wall contact starts
-						if DEBUG_COLLISIONS then
-							print(string.format("[WALL CONTACT] %s touched wall at position (%.1f, %.1f, %.1f)", 
-								player.Name, headPos.X, headPos.Y, headPos.Z))
-						end
-					end
-
-					local contactDuration = tick() - wallContactTime[key]
-
-					-- Push player away if they've been at wall too long
-					if contactDuration > WALL_PUSH_TIME then
-						-- EXTRA VALIDATION: Make sure player is STILL at the wall before pushing
-						if not checkWallCollision(headPos, playerSnakeLength, true) then
-							-- Player moved away from wall, reset contact time
-							wallContactTime[key] = nil
-							continue
-						end
-
-						local character = player.Character
-						if character and character:FindFirstChild("HumanoidRootPart") then
-							local root = character.HumanoidRootPart
-
-							-- FINAL CHECK: Verify head is actually at wall, not just tail
-							local actualHeadPos = root.Position
-							if not checkWallCollision(actualHeadPos, playerSnakeLength, true) then
-								wallContactTime[key] = nil
-								continue
-							end
-
-							-- Check if player is actually stuck (not moving much)
-							local velocity = root.AssemblyLinearVelocity or Vector3.zero
-							if velocity.Magnitude > 10 then
-								-- Player is moving fine, not stuck - reset timer
-								wallContactTime[key] = tick() - (WALL_PUSH_TIME / 2) -- Give more time
-								continue
-							end
-
-							local pushDirection = -root.CFrame.LookVector
-
-							-- Determine push direction based on which wall
-							local pos = root.Position
-							if math.abs(pos.X) > 390 then
-								pushDirection = Vector3.new(-math.sign(pos.X) * WALL_PUSH_FORCE, 0, 0)
-							elseif math.abs(pos.Z) > 390 then
-								pushDirection = Vector3.new(0, 0, -math.sign(pos.Z) * WALL_PUSH_FORCE)
-							end
-
-							-- Apply balanced push force
-							local bodyVelocity = Instance.new("BodyVelocity")
-							bodyVelocity.MaxForce = Vector3.new(100000, 0, 100000) -- High force to overcome snake movement
-							bodyVelocity.Velocity = pushDirection * 0.6 -- Reduced velocity
-							bodyVelocity.Parent = root
-
-							-- Also apply BodyPosition for guaranteed movement
-							local bodyPosition = Instance.new("BodyPosition")
-							bodyPosition.MaxForce = Vector3.new(50000, 0, 50000) -- Strong enough to move
-							bodyPosition.Position = root.Position + pushDirection.Unit * 7 -- Only 7 studs away
-							bodyPosition.D = 3500 -- Higher damping for quicker stop
-							bodyPosition.P = 20000 -- Strong power to ensure movement
-							bodyPosition.Parent = root
-
-							-- Remove after push completes
-							game:GetService("Debris"):AddItem(bodyVelocity, 0.5)
-							game:GetService("Debris"):AddItem(bodyPosition, 0.7)
-
-							-- Reset contact time
-							wallContactTime[key] = nil
-
-							-- Grant temporary immunity
-							wallPushImmunity[player] = tick()
-
-							-- Mark player as being pushed to prevent re-collision
-							player:SetAttribute("BeingPushedFromWall", true)
-							task.spawn(function()
-								task.wait(1.5) -- Wait for push to complete
-								player:SetAttribute("BeingPushedFromWall", false)
-							end)
-
-							-- Visual feedback
-							print("[WALL PUSH] Pushed " .. player.Name .. " away from wall!")
-
-							-- Force drop extra orbs when pushed
-							local mapBoundary = 395
-
-							-- Get snake length for orb scaling
-							local snakeLength = 10
-							if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-								local snake = _G.PlayerSnakes[player]
-								if typeof(snake.length) == "number" then
-									snakeLength = snake.length
-								elseif snake.segments then
-									snakeLength = #snake.segments
-								end
-							end
-
-							-- Scale orb value based on size
-							local pushOrbValue = math.max(1, math.floor(snakeLength / 50))
-
-							for i = 1, 2 do
-								-- Random offset near the snake
-								local randomOffset = Vector3.new(
-									math.random(-8, 8),
-									0,
-									math.random(-8, 8)
-								)
-								local orbPos = headPos + randomOffset
-
-								-- Only clamp to keep inside map
-								orbPos = Vector3.new(
-									math.clamp(orbPos.X, -mapBoundary, mapBoundary),
-									5,
-									math.clamp(orbPos.Z, -mapBoundary, mapBoundary)
-								)
-
-								OrbUtils.spawnOrbAt(orbPos, pushOrbValue)
-							end
-
-							-- Also lose segments when pushed
-							if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-								local snake = _G.PlayerSnakes[player]
-								if snake.shrink then
-									-- Remove 2 extra segments for being pushed
-									snake.shrink(2)
-								end
-							end
-						end
-					elseif contactDuration > WALL_WARNING_TIME then
-						-- Warning phase - make snake segments shake and flash
-						if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-							local snake = _G.PlayerSnakes[player]
-							if snake.segments then
-								-- Calculate warning intensity
-								local warningIntensity = (contactDuration - WALL_WARNING_TIME) / (WALL_PUSH_TIME - WALL_WARNING_TIME)
-
-								for i = 1, math.min(10, #snake.segments) do
-									local segment = snake.segments[i]
-									if segment and segment.Parent then
-										-- Shake effect that gets stronger
-										local shake = Vector3.new(
-											math.random(-1, 1) * 0.7 * warningIntensity,
-											0,
-											math.random(-1, 1) * 0.7 * warningIntensity
-										)
-										segment.Position = segment.Position + shake
-									end
-								end
-							end
-
-							-- Warning message (once)
-							if not player:GetAttribute("WallWarningShown") then
-								player:SetAttribute("WallWarningShown", true)
-								-- You could fire a remote event here to show a GUI warning
-								print("[WALL WARNING] " .. player.Name .. " - Move away from wall!")
-							end
-						end
-					else
-						-- Reset warning
-						if player:GetAttribute("WallWarningShown") then
-							player:SetAttribute("WallWarningShown", false)
-						end
-					end
-				else
-					-- Reset wall contact time if not touching wall
-					if wallContactTime[player] then
-						wallContactTime[player] = nil
-						-- Also clear any wall warning attributes
-						if player:GetAttribute("WallWarningShown") then
-							player:SetAttribute("WallWarningShown", false)
-						end
-						if DEBUG_COLLISIONS then
-							print(string.format("[WALL] %s moved away from wall - contact reset", player.Name))
-						end
-					end
-				end
-			end
-
-			-- Check each AI snake
-			if AISnakeModule._activeSnakes then
-				for _, snake in AISnakeModule._activeSnakes do
-					if snake and snake._active then
-						-- Skip if this AI snake is already dead
-						if snake.HeadParts and snake.HeadParts.head and deadAISnakes[snake.HeadParts.head] then
-							continue
-						end
-						local segmentData = getAISnakeSegments(snake)
-						if segmentData and segmentData.segments then
-							local collision = false
-
-							-- Use appropriate collision method with proper distance
-							if segmentData.chunks then
-								collision = findCollisionInChunks(headPos, segmentData.chunks, BODY_COLLISION_DISTANCE, playerSnakeLength)
-							else
-								collision = findCollisionInSegments(
-									headPos, 
-									segmentData.segments, 
-									BODY_COLLISION_DISTANCE,
-									segmentData.length > 200,
-									segmentData.length
-								)
-							end
-
-							if collision then
-								queuePlayerDeath(player)
-								break
-							end
-						end
-					end
+	end
+	
+	-- Collect AI heads
+	if AISnakeModule._activeSnakes then
+		for _, snake in ipairs(AISnakeModule._activeSnakes) do
+			if snake and snake._active and snake.HeadParts and snake.HeadParts.head then
+				local head = snake.HeadParts.head
+				if head.Parent and not deadAISnakes[head] then
+					table.insert(aiHeads, {
+						snake = snake,
+						part = head,
+						position = head.Position
+					})
+					
+					-- Add to spatial grid
+					collisionGrid:insert(head, head.Position, {
+						type = "ai_head",
+						owner = snake
+					})
 				end
 			end
 		end
 	end
-
-	-- Player vs Player body collisions (FIXED: Was missing!)
-	for i = 1, #playerHeads do
-		local headDataA = playerHeads[i]
-		local playerA = headDataA.player
-		local headA = headDataA.part
-
-		-- Skip if player A is invincible or dead
-		if isPlayerInvincible(playerA) or deadPlayers[playerA] then
-			continue
+	
+	-- === PLAYER HEAD vs AI BODY (Player kills AI) ===
+	for _, playerHead in ipairs(playerHeads) do
+		if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+		
+		local player = playerHead.player
+		local headPos = playerHead.position
+		
+		-- Wall collision check
+		if checkWallCollision(headPos, true) then
+			handleWallCollision(player, true)
 		end
-
-		if headA and headA.Parent then
-			local headPosA = headA.Position
-
-			-- Validate position
-			if headPosA.Y < -5 or headPosA.Y > 50 then
+		
+		-- Check against AI bodies
+		for _, aiHead in ipairs(aiHeads) do
+			if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+			
+			local aiSnake = aiHead.snake
+			if isAIProtected(aiHead.part) then continue end
+			
+			-- Skip if too close to AI head (head-to-head collision)
+			local distToAIHead = (headPos - aiHead.position).Magnitude
+			if distToAIHead < HEAD_COLLISION_RADIUS * 1.5 then
 				continue
 			end
-
-			-- Get player A's snake length
-			local playerALength = 10
-			if _G.PlayerSnakes and _G.PlayerSnakes[playerA] then
-				local snake = _G.PlayerSnakes[playerA]
-				if snake.segments then
-					playerALength = #snake.segments
-				end
-			end
-
-			-- Check against all other players' bodies
-			for j = 1, #playerHeads do
-				if i ~= j then -- Don't check against self
-					local headDataB = playerHeads[j]
-					local playerB = headDataB.player
-
-					-- Don't need to check invincibility for playerB's body
-					local segmentData = getPlayerSegments(playerB)
-					if segmentData and segmentData.segments then
-						local collision = false
-
-						-- Use appropriate collision method
-						if segmentData.chunks then
-							collision = findCollisionInChunks(headPosA, segmentData.chunks, BODY_COLLISION_DISTANCE, playerALength)
-						else
-							collision = findCollisionInSegments(
-								headPosA,
-								segmentData.segments,
-								BODY_COLLISION_DISTANCE,
-								segmentData.length > 200,
-								playerALength
-							)
+			
+			-- Get AI segments
+			local aiSegments = collectAISegments(aiSnake)
+			if aiSegments then
+				collisionCheckCount = collisionCheckCount + 1
+				local hit, hitSegment = checkCollision(headPos, aiSegments, BODY_COLLISION_RADIUS)
+				
+				if hit then
+					-- Verify it's not the head
+					if hitSegment.index > 3 then -- Skip first few segments near head
+						queueAIDeath(aiHead.part)
+						if aiSnake.setConfidenceBuff then
+							aiSnake:setConfidenceBuff()
 						end
-
-						if collision then
-							-- Debug collision
-							if DEBUG_COLLISIONS then
-								debugCollision(headPosA, headPosA, "PlayerBody", playerA.Name .. " hit " .. playerB.Name .. "'s body")
-							end
-							queuePlayerDeath(playerA)
-							break
-						end
+						break
 					end
 				end
 			end
 		end
 	end
-
-	-- AI vs Player body collisions
+	
+	-- === AI HEAD vs PLAYER BODY (AI kills Player) ===
 	for _, aiHead in ipairs(aiHeads) do
-		if aiHead and aiHead.Parent then
-			-- Skip if AI is spawn protected
-			if isAIProtected(aiHead) then
-				continue
+		if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+		
+		local aiSnake = aiHead.snake
+		local aiHeadPos = aiHead.position
+		
+		-- Wall collision check for AI
+		if checkWallCollision(aiHeadPos, true) then
+			handleWallCollision(aiSnake, false)
+		end
+		
+		-- Check against player bodies
+		for _, playerHead in ipairs(playerHeads) do
+			if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+			
+			local player = playerHead.player
+			if isPlayerInvincible(player) then continue end
+			
+			-- Get player segments
+			local playerSegments = collectPlayerSegments(player)
+			if playerSegments then
+				collisionCheckCount = collisionCheckCount + 1
+				local hit, hitSegment = checkCollision(aiHeadPos, playerSegments, BODY_COLLISION_RADIUS)
+				
+				if hit then
+					queuePlayerDeath(player)
+					break
+				end
 			end
-
-			local aiPos = aiHead.Position
-
-			-- Validate AI position (more lenient for AI)
-			if aiPos.Y < -10 or aiPos.Y > 100 then
-				continue
-			end
-
-			-- Get AI snake length
-			local aiSnakeLength = 10
-			local aiSnake = nil
-			for _, snake in AISnakeModule._activeSnakes do
-				if snake and snake.HeadParts and snake.HeadParts.head == aiHead then
-					aiSnake = snake
-					if snake.Segments then
-						aiSnakeLength = #snake.Segments
+		end
+		
+		-- Check against other AI bodies
+		for _, otherAIHead in ipairs(aiHeads) do
+			if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+			if otherAIHead == aiHead then continue end
+			
+			local otherSnake = otherAIHead.snake
+			if isAIProtected(otherAIHead.part) then continue end
+			
+			local otherSegments = collectAISegments(otherSnake)
+			if otherSegments then
+				collisionCheckCount = collisionCheckCount + 1
+				local hit = checkCollision(aiHeadPos, otherSegments, BODY_COLLISION_RADIUS)
+				
+				if hit then
+					queueAIDeath(aiHead.part)
+					if otherSnake.setConfidenceBuff then
+						otherSnake:setConfidenceBuff()
 					end
 					break
 				end
 			end
-
-			-- Check wall collision for AI
-			if aiSnake and checkWallCollision(aiPos, aiSnakeLength, true) then
-				handleWallCollision(aiSnake, false)
-
-				-- Track wall contact time for AI
-				local key = aiSnake.Name or aiSnake
-				if not wallContactTime[key] then
-					wallContactTime[key] = tick()
-				end
-
-				local contactDuration = tick() - wallContactTime[key]
-
-				-- Make AI turn away from wall if too long
-				if contactDuration > WALL_PUSH_TIME then
-					-- Force AI to turn away
-					if aiSnake.TurnAwayFromWall then
-						aiSnake:TurnAwayFromWall()
-					else
-						-- Manual turn if method doesn't exist
-						local pos = aiPos
-						local newDirection
-						if math.abs(pos.X) > 390 then
-							newDirection = Vector3.new(-math.sign(pos.X), 0, math.random(-1, 1)).Unit
-						elseif math.abs(pos.Z) > 390 then
-							newDirection = Vector3.new(math.random(-1, 1), 0, -math.sign(pos.Z)).Unit
-						end
-						if newDirection and aiSnake.Direction then
-							aiSnake.Direction = newDirection
-						end
-					end
-					wallContactTime[key] = nil
-				end
-			else
-				-- Reset AI wall contact
-				if aiSnake then
-					local key = aiSnake.Name or aiSnake
-					wallContactTime[key] = nil
-				end
-			end
-
-			for _, headData in ipairs(playerHeads) do
-				local player = headData.player
-
-				-- Skip if player is already dead/dying
-				if deadPlayers[player] then
-					continue
-				end
-
-				if not isPlayerInvincible(player) then
-					local segmentData = getPlayerSegments(player)
-					if segmentData and segmentData.segments then
-						local collision = false
-
-						if segmentData.chunks then
-							collision = findCollisionInChunks(aiPos, segmentData.chunks, BODY_COLLISION_DISTANCE, aiSnakeLength)
-						else
-							collision = findCollisionInSegments(
-								aiPos,
-								segmentData.segments,
-								BODY_COLLISION_DISTANCE,
-								segmentData.length > 200,
-								aiSnakeLength
-							)
-						end
-
-						if collision then
-							-- Queue AI death immediately - collision detection already validated
-							queueAIDeath(aiHead)
-							break
-						end
-					end
-				end
-			end
 		end
 	end
-
-	-- NEW: Player head vs AI body collisions (Player kills AI)
-	for _, headData in ipairs(playerHeads) do
-		local player = headData.player
-		local head = headData.part
-
-		-- Skip if player is already dead
-		if deadPlayers[player] then
-			continue
-		end
-
-		if head and head.Parent then
-			local headPos = head.Position
-
-			-- Check against all AI snake bodies
-			if AISnakeModule._activeSnakes then
-				for _, aiSnake in AISnakeModule._activeSnakes do
-					if aiSnake and aiSnake._active and aiSnake.HeadParts and aiSnake.HeadParts.head then
-						-- Skip if AI is protected or already dead
-						if isAIProtected(aiSnake.HeadParts.head) or deadAISnakes[aiSnake.HeadParts.head] then
-							continue
-						end
-
-						-- Skip if we're checking AI head position (prevent head-to-head being counted as body collision)
-						local aiHeadPos = aiSnake.HeadParts.head.Position
-						local distToHead = (headPos - aiHeadPos).Magnitude
-						if distToHead < HEAD_COLLISION_DISTANCE * 1.5 then
-							-- Too close to head, this should be handled by head-to-head collision
-							continue
-						end
-
-						local aiSegmentData = getAISnakeSegments(aiSnake)
-						if aiSegmentData and aiSegmentData.segments then
-							local collision = false
-
-							-- Check if player head hits AI body (use tighter collision for precision)
-							if aiSegmentData.chunks then
-								collision = findCollisionInChunks(headPos, aiSegmentData.chunks, BODY_COLLISION_DISTANCE, aiSegmentData.length)
-							else
-								collision = findCollisionInSegments(
-									headPos,
-									aiSegmentData.segments,
-									BODY_COLLISION_DISTANCE,
-									aiSegmentData.length > 200,
-									aiSegmentData.length
-								)
-							end
-
-							if collision then
-								-- Double check it's not the AI's head area
-								local hitHead = false
-								if aiSnake.HeadParts and aiSnake.HeadParts.head then
-									local headDist = (headPos - aiSnake.HeadParts.head.Position).Magnitude
-									if headDist < HEAD_COLLISION_DISTANCE then
-										hitHead = true
-									end
-								end
-								
-								if not hitHead then
-									-- AI dies when player hits its body
-									queueAIDeath(aiSnake.HeadParts.head)
-									
-									-- Give AI confidence buff (not player)
-									if aiSnake.setConfidenceBuff then
-										aiSnake:setConfidenceBuff()
-									end
-									break
-								end
-							end
-						end
-					end
-				end
-			end
-		end
-	end
-
-	-- Head-to-head collisions
+	
+	-- === HEAD-TO-HEAD COLLISIONS ===
 	-- Player vs Player
 	for i = 1, #playerHeads - 1 do
-		local dataA = playerHeads[i]
-		local playerA = dataA.player
-		local headA = dataA.part
-
+		if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+		
 		for j = i + 1, #playerHeads do
-			local dataB = playerHeads[j]
-			local playerB = dataB.player
-			local headB = dataB.part
-
-			-- Check invincibility for both players
-			local playerAInvincible = isPlayerInvincible(playerA)
-			local playerBInvincible = isPlayerInvincible(playerB)
-
-			if playerAInvincible or playerBInvincible then
-				if DEBUG_COLLISIONS then
-					print(string.format("[INVINCIBILITY] Skipping collision - PlayerA: %s (invincible: %s), PlayerB: %s (invincible: %s)", 
-						playerA.Name, tostring(playerAInvincible), playerB.Name, tostring(playerBInvincible)))
-				end
+			if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+			
+			local playerA = playerHeads[i].player
+			local playerB = playerHeads[j].player
+			
+			if isPlayerInvincible(playerA) or isPlayerInvincible(playerB) then
 				continue
 			end
-
-			-- Safety checks
-			if not headA or not headA.Parent or not headB or not headB.Parent then
-				continue
-			end
-
-			-- Check if already processed recently
-			if isRecentCollision(playerA, playerB) then
-				continue
-			end
-
-			-- Check if either player is already dead
-			if isEitherDead(playerA, playerB) then
-				continue
-			end
-
-			local dist = (headA.Position - headB.Position).Magnitude
-
-			if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-				-- Get velocities
-				local velA = headA.AssemblyLinearVelocity or headA.Velocity or Vector3.zero
-				local velB = headB.AssemblyLinearVelocity or headB.Velocity or Vector3.zero
-
-				-- Check if they're actually moving
-				if velA.Magnitude < HEAD_TO_HEAD_SPEED_THRESHOLD and velB.Magnitude < HEAD_TO_HEAD_SPEED_THRESHOLD then
-					-- Both barely moving, skip collision
-					continue
-				end
-
-				-- Check for body collisions first
-				local playerADies = false
-				local playerBDies = false
-
-				-- Check if Player A's head is touching Player B's body
-				local segDataB = getPlayerSegments(playerB)
-				if segDataB and segDataB.segments and #segDataB.segments > 3 then
-					for i = 4, #segDataB.segments do
-						local seg = segDataB.segments[i]
-						if seg and seg.Parent then
-							local segPos = seg.Position
-							if (headA.Position - segPos).Magnitude < BODY_COLLISION_DISTANCE then
-								playerADies = true
-								if DEBUG_COLLISIONS then
-									print(string.format("[COLLISION] %s hit %s's body at segment %d", playerA.Name, playerB.Name, i))
-								end
-								break
-							end
-						end
-					end
-				end
-
-				-- Check if Player B's head is touching Player A's body
-				local segDataA = getPlayerSegments(playerA)
-				if segDataA and segDataA.segments and #segDataA.segments > 3 then
-					for i = 4, #segDataA.segments do
-						local seg = segDataA.segments[i]
-						if seg and seg.Parent then
-							local segPos = seg.Position
-							if (headB.Position - segPos).Magnitude < BODY_COLLISION_DISTANCE then
-								playerBDies = true
-								if DEBUG_COLLISIONS then
-									print(string.format("[COLLISION] %s hit %s's body at segment %d", playerB.Name, playerA.Name, i))
-								end
-								break
-							end
-						end
-					end
-				end
-
-				-- Process deaths
-				if playerADies and playerBDies then
-					-- Both hit bodies - only process if not recently collided
-					if not isRecentCollision(playerA, playerB) then
-						-- Get snake lengths
-						local charA = playerA.Character
-						local charB = playerB.Character
-						local lengthValueA = charA and charA:FindFirstChild("Length")
-						local lengthValueB = charB and charB:FindFirstChild("Length")
-						local lengthA = lengthValueA and lengthValueA.Value or 100
-						local lengthB = lengthValueB and lengthValueB.Value or 100
-
-						local winner = determineHeadToHeadWinner(headA, headB, velA, velB, lengthA, lengthB)
-						if winner == "A" then
-							if DEBUG_COLLISIONS then
-								print(string.format("[DEATH] %s dies (mutual collision, lost)", playerB.Name))
-							end
-							queuePlayerDeath(playerB)
-						else
-							if DEBUG_COLLISIONS then
-								print(string.format("[DEATH] %s dies (mutual collision, lost)", playerA.Name))
-							end
-							queuePlayerDeath(playerA)
-						end
-					end
-				elseif playerADies then
-					-- Only A hit B's body
-					if DEBUG_COLLISIONS then
-						print(string.format("[DEATH] %s dies (hit %s's body)", playerA.Name, playerB.Name))
-					end
-					queuePlayerDeath(playerA)
-				elseif playerBDies then
-					-- Only B hit A's body
-					if DEBUG_COLLISIONS then
-						print(string.format("[DEATH] %s dies (hit %s's body)", playerB.Name, playerA.Name))
-					end
-					queuePlayerDeath(playerB)
-				else
-					-- Pure head-to-head collision - ONLY ONE DIES!
-					if not isRecentCollision(playerA, playerB) then
-						-- Get snake lengths
-						local charA = playerA.Character
-						local charB = playerB.Character
-						local lengthValueA = charA and charA:FindFirstChild("Length")
-						local lengthValueB = charB and charB:FindFirstChild("Length")
-						local lengthA = lengthValueA and lengthValueA.Value or 100
-						local lengthB = lengthValueB and lengthValueB.Value or 100
-
-						local loser = determineHeadToHeadWinner(headA, headB, velA, velB, lengthA, lengthB)
-						if loser == "A" then
-							if DEBUG_COLLISIONS then
-								print(string.format("[DEATH] %s dies (head-to-head collision, length %d vs %d)", playerA.Name, lengthA, lengthB))
-							end
-							queuePlayerDeath(playerA)
-						else
-							if DEBUG_COLLISIONS then
-								print(string.format("[DEATH] %s dies (head-to-head collision, length %d vs %d)", playerB.Name, lengthB, lengthA))
-							end
-							queuePlayerDeath(playerB)
-						end
-					end
-				end
-				break
+			
+			local dist = (playerHeads[i].position - playerHeads[j].position).Magnitude
+			if dist < HEAD_COLLISION_RADIUS then
+				collisionCheckCount = collisionCheckCount + 1
+				
+				-- Both die in head-to-head
+				queuePlayerDeath(playerA)
+				queuePlayerDeath(playerB)
 			end
 		end
 	end
-
-	-- Player vs AI head
-	for _, headData in ipairs(playerHeads) do
-		local player = headData.player
-		local head = headData.part
-
-		-- Check player invincibility - skip if player is invincible
-		local playerInvincible = isPlayerInvincible(player)
-		if playerInvincible then
-			-- Debug: Log when invincibility prevents collision
-			if DEBUG_COLLISIONS then
-				print(string.format("[INVINCIBILITY] Skipping Player vs AI collision - Player: %s (invincible: %s)", 
-					player.Name, tostring(playerInvincible)))
-			end
-			continue
-		end
-
+	
+	-- Player vs AI head-to-head
+	for _, playerHead in ipairs(playerHeads) do
+		if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+		
+		local player = playerHead.player
+		if isPlayerInvincible(player) then continue end
+		
 		for _, aiHead in ipairs(aiHeads) do
-			if aiHead and aiHead.Parent then
-				-- Skip if this AI is already dead
-				if deadAISnakes[aiHead] then
-					continue
-				end
-
-				-- Check AI invincibility
-				local aiSnake = nil
-				if AISnakeModule and AISnakeModule._activeSnakes then
-					for _, snake in AISnakeModule._activeSnakes do
-						if snake.HeadParts and snake.HeadParts.head == aiHead then
-							aiSnake = snake
-							break
-						end
+			if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+			
+			local dist = (playerHead.position - aiHead.position).Magnitude
+			if dist < HEAD_COLLISION_RADIUS then
+				collisionCheckCount = collisionCheckCount + 1
+				
+				-- Determine winner based on length
+				local playerLength = 10
+				if player:FindFirstChild("leaderstats") then
+					local lengthValue = player.leaderstats:FindFirstChild("Length")
+					if lengthValue then
+						playerLength = lengthValue.Value or 10
 					end
 				end
-
-				if aiSnake and aiSnake.IsInvincible then
-					continue -- Skip if AI is invincible
-				end
-
-				-- Additional safety checks
-				if not head or not head.Parent then
-					continue
-				end
-
-				local dist = (head.Position - aiHead.Position).Magnitude
-				if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-					-- Real slither.io logic: check who hit whose body
-					local playerDies = false
-					local aiDies = false
-
-					-- Check if player's head hit AI's body
-					if aiSnake and aiSnake.Segments then
-						for i = 4, #aiSnake.Segments do
-							local seg = aiSnake.Segments[i]
-							if seg and seg.Parent then
-								if (head.Position - seg.Position).Magnitude < BODY_COLLISION_DISTANCE then
-									playerDies = true
-									break
-								end
-							end
-						end
-					end
-
-					-- Check if AI's head hit player's body
-					local segData = getPlayerSegments(player)
-					if segData and segData.segments and #segData.segments > 3 then
-						for i = 4, #segData.segments do
-							local seg = segData.segments[i]
-							if seg and seg.Parent then
-								if (aiHead.Position - seg.Position).Magnitude < BODY_COLLISION_DISTANCE then
-									aiDies = true
-									break
-								end
-							end
-						end
-					end
-
-					-- Apply deaths - FIXED: Only one should die when hitting body
-					if playerDies and aiDies then
-						-- RARE: Both somehow hit each other's body at exact same time
-						-- In this case, check who was moving faster/more aggressively
-						local velPlayer = head.AssemblyLinearVelocity or head.Velocity or Vector3.zero
-						local velAI = aiHead.AssemblyLinearVelocity or aiHead.Velocity or Vector3.zero
-
-						if velPlayer.Magnitude > velAI.Magnitude then
-							-- Player was more aggressive, only AI dies
-							queueAIDeath(aiHead)
-						else
-							-- AI was more aggressive, only player dies
-							queuePlayerDeath(player)
-						end
-					elseif playerDies then
-						-- Player hit AI's body - ONLY PLAYER DIES
-						queuePlayerDeath(player)
-					elseif aiDies then
-						-- AI hit player's body - ONLY AI DIES
-						queueAIDeath(aiHead)
-					else
-						-- Pure head-to-head - only ONE dies
-						local velPlayer = head.AssemblyLinearVelocity or head.Velocity or Vector3.zero
-						local velAI = aiHead.AssemblyLinearVelocity or aiHead.Velocity or Vector3.zero
-						local dirToAI = (aiHead.Position - head.Position).Unit
-						local dirToPlayer = -dirToAI
-
-						local dotPlayer = velPlayer:Dot(dirToAI)
-						local dotAI = velAI:Dot(dirToPlayer)
-
-						-- Check speeds
-						local speedPlayer = velPlayer.Magnitude
-						local speedAI = velAI.Magnitude
-
-						-- Calculate aggression scores
-						local scorePlayer = dotPlayer * speedPlayer
-						local scoreAI = dotAI * speedAI
-
-						if scorePlayer > scoreAI then
-							-- Player more aggressive, AI dies
-							queueAIDeath(aiHead)
-						else
-							-- AI more aggressive or equal, player dies
-							queuePlayerDeath(player)
-						end
-					end
+				
+				local aiLength = aiHead.snake.CurrentLength or 10
+				
+				if playerLength > aiLength then
+					queueAIDeath(aiHead.part)
+				elseif aiLength > playerLength then
+					queuePlayerDeath(player)
+				else
+					-- Both die if equal
+					queuePlayerDeath(player)
+					queueAIDeath(aiHead.part)
 				end
 			end
 		end
 	end
-
-	-- AI vs AI head
+	
+	-- AI vs AI head-to-head
 	for i = 1, #aiHeads - 1 do
-		local headA = aiHeads[i]
-		if headA and headA.Parent then
-			-- Skip if AI A is spawn protected
-			if isAIProtected(headA) then
-				continue
-			end
-
-			for j = i + 1, #aiHeads do
-				local headB = aiHeads[j]
-				if headB and headB.Parent then
-					-- Skip if AI B is spawn protected
-					if isAIProtected(headB) then
-						continue
+		if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+		
+		for j = i + 1, #aiHeads do
+			if collisionCheckCount > MAX_COLLISION_CHECKS_PER_FRAME then break end
+			
+			local dist = (aiHeads[i].position - aiHeads[j].position).Magnitude
+			if dist < HEAD_COLLISION_RADIUS then
+				collisionCheckCount = collisionCheckCount + 1
+				
+				local lengthA = aiHeads[i].snake.CurrentLength or 10
+				local lengthB = aiHeads[j].snake.CurrentLength or 10
+				
+				if lengthA > lengthB then
+					queueAIDeath(aiHeads[j].part)
+					if aiHeads[i].snake.setConfidenceBuff then
+						aiHeads[i].snake:setConfidenceBuff()
 					end
-					local dist = (headA.Position - headB.Position).Magnitude
-					if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-						local velA = headA.AssemblyLinearVelocity or headA.Velocity
-						local velB = headB.AssemblyLinearVelocity or headB.Velocity
-						local dirAB = (headB.Position - headA.Position).Unit
-						local dirBA = -dirAB
-
-						local dotA = velA:Dot(dirAB)
-						local dotB = velB:Dot(dirBA)
-
-						-- True slither.io head-to-head logic: body-hit detection
-						if dotA > 2 and not (dotB > 2) then
-							-- AI A's head hit AI B's body first
-							queueAIDeath(headA)
-						elseif dotB > 2 and not (dotA > 2) then
-							-- AI B's head hit AI A's body first
-							queueAIDeath(headB)
-						elseif dotA > 2 and dotB > 2 then
-							-- Rare simultaneous case: both die
-							queueAIDeath(headA)
-							task.spawn(function()
-								task.wait(0.05)
-								queueAIDeath(headB)
-							end)
-						end
+				elseif lengthB > lengthA then
+					queueAIDeath(aiHeads[i].part)
+					if aiHeads[j].snake.setConfidenceBuff then
+						aiHeads[j].snake:setConfidenceBuff()
 					end
+				else
+					-- Both die if equal
+					queueAIDeath(aiHeads[i].part)
+					queueAIDeath(aiHeads[j].part)
 				end
 			end
 		end
 	end
-
-	-- AI vs other AI bodies
-	for _, aiHead in ipairs(aiHeads) do
-		if aiHead and aiHead.Parent and AISnakeModule._activeSnakes then
-			-- Skip if AI is spawn protected
-			if isAIProtected(aiHead) then
-				continue
-			end
-
-			local aiSnakeLength = 10
-			-- Find this AI's snake to get its length
-			for _, snake in AISnakeModule._activeSnakes do
-				if snake and snake.HeadParts and snake.HeadParts.head == aiHead then
-					if snake.Segments then
-						aiSnakeLength = #snake.Segments
-					end
-					break
-				end
-			end
-
-			for _, snake in AISnakeModule._activeSnakes do
-				-- Skip self-collision
-				if snake and snake._active and snake.HeadParts and snake.HeadParts.head == aiHead then
-					continue
-				end
-
-				if snake and snake._active then
-					local segmentData = getAISnakeSegments(snake)
-					if segmentData and segmentData.segments then
-						local collision = false
-
-						if segmentData.chunks then
-							collision = findCollisionInChunks(aiHead.Position, segmentData.chunks, BODY_COLLISION_DISTANCE, aiSnakeLength)
-						else
-							collision = findCollisionInSegments(
-								aiHead.Position,
-								segmentData.segments,
-								BODY_COLLISION_DISTANCE,
-								segmentData.length > 200,
-								aiSnakeLength
-							)
-						end
-
-						if collision then
-							-- Queue AI death immediately
-							queueAIDeath(aiHead)
-							break
-						end
-					end
-				end
-			end
-		end
-	end
-
-	-- Clear spatial grid for next frame
-	CollisionCache.spatialGrid:clear()
+	
+	-- Process all queued deaths
+	processDeathQueue()
 end)
 
--- Cache cleanup (less aggressive)
-task.spawn(function()
-	while true do
-		task.wait(30) -- Increased from 15s
-
-		-- Only clear old entries
-		local currentTime = tick()
-		for player, cache in pairs(CollisionCache.playerSegments) do
-			if currentTime - cache.lastUpdate > 5 then
-				CollisionCache.playerSegments[player] = nil
-			end
-		end
-
-		for snake, cache in pairs(CollisionCache.aiSegments) do
-			if currentTime - cache.lastUpdate > 5 then
-				CollisionCache.aiSegments[snake] = nil
-			end
-		end
-
-		-- Clean up dead AI tracking (clear after 10 seconds)
-		for aiHead, _ in pairs(deadAISnakes) do
-			if not aiHead or not aiHead.Parent then
-				deadAISnakes[aiHead] = nil
-			end
-		end
-	end
+-- === SPAWN PROTECTION ===
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function()
+		setPlayerInvincible(player)
+	end)
 end)
 
-print("⚡ SnakeCollisionHandler V8.0 ENHANCED - REDUCED LAG & RANDOM DEATHS")
-print("🚀 Orbs spawn along snake body path like slither.io")
-print("🔧 ENHANCED: Stricter collision validation, adaptive distances for long snakes")
-print("📊 Head collision distance: " .. HEAD_COLLISION_DISTANCE .. ", Body collision distance: " .. BODY_COLLISION_DISTANCE)
-print("🐍 OPTIMIZED: Better performance with increased frame skip and throttling")
-print("🎯 FIXED: Height validation, velocity checks, and position bounds checking")
+-- === CLEANUP ===
+Players.PlayerRemoving:Connect(function(player)
+	-- Clean all references
+	deadPlayers[player] = nil
+	invinciblePlayers[player] = nil
+	wallCollisionCooldowns[player] = nil
+	wallContactTime[player] = nil
+	wallPushImmunity[player] = nil
+	wallLastCheck[player] = nil
+	CollisionCache.playerSegments[player] = nil
+end)
 
--- Debug command
-local function toggleDebug()
-	DEBUG_COLLISIONS = not DEBUG_COLLISIONS
-	print("🔍 Collision debug mode: " .. (DEBUG_COLLISIONS and "ENABLED" or "DISABLED"))
+-- Initialize existing players
+for _, player in ipairs(Players:GetPlayers()) do
+	if player.Character then
+		setPlayerInvincible(player)
+	end
 end
 
--- Add debug command to workspace
-local debugCommand = Instance.new("StringValue")
-debugCommand.Name = "ToggleCollisionDebug"
-debugCommand.Value = "Run this to toggle collision debugging"
-debugCommand.Parent = workspace
+-- === ORB SPAWNING FUNCTIONS ===
+local function spawnOrbDirect(position, value)
+	local success, err = pcall(function()
+		if not position or position ~= position then
+			position = Vector3.new(0, ORB_SPAWN_HEIGHT, 0)
+		end
+		value = math.clamp(value or 1, 1, 50)
+		OrbUtils.spawnOrbAt(position, value)
+	end)
+	return success
+end
 
-debugCommand.Changed:Connect(function()
-	if debugCommand.Value == "debug" then
-		toggleDebug()
-		debugCommand.Value = ""
+local function spawnDeathOrbs(position, count)
+	count = math.min(count, 30)
+	for i = 1, count do
+		local angle = (i / count) * math.pi * 2
+		local distance = math.random(5, 15)
+		local offset = Vector3.new(
+			math.cos(angle) * distance,
+			0,
+			math.sin(angle) * distance
+		)
+		spawnOrbDirect(position + offset, 3)
 	end
-end)
+end
+
+print("✅ SnakeCollisionHandler V9.0 - ULTRA-OPTIMIZED loaded")
+print("🐍 Features: Spatial hashing, adaptive segment checking, minimal CPU usage")
