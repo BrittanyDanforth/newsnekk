@@ -725,13 +725,6 @@ task.spawn(function()
 								-- Use stored positions instead of segment positions
 								local pos = segmentPositions[i]
 								if pos then
-									-- Skip segments too close to death position
-									if deathPosition and (pos - deathPosition).Magnitude < 50 then
-										if DEBUG_COLLISIONS then
-											print(string.format("[ORB DEBUG] Skipping segment %d - too close to death position (%.1f studs)", i, (pos - deathPosition).Magnitude))
-										end
-										continue -- Skip this segment
-									end
 
 									-- Check if this is near head or tail
 									local isNearHead = (i <= 10) -- Expanded head zone
@@ -758,16 +751,6 @@ task.spawn(function()
 
 											-- Calculate final position
 											local orbPosition = pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 5, 0)
-
-											-- Double-check it's far from death position
-											if deathPosition and (orbPosition - deathPosition).Magnitude < 45 then
-												-- Push even further away
-												offset = offset * 1.5
-												orbPosition = pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 5, 0)
-												if DEBUG_COLLISIONS then
-													print("[ORB DEBUG] Pushed orb further from death position")
-												end
-											end
 
 											spawnOrbBatched(orbPosition, baseValue)
 										end)
@@ -805,7 +788,7 @@ task.spawn(function()
 
 									-- Use segment 10 position instead of head
 									local basePos = segmentPositions[10] or segmentPositions[math.min(5, #segmentPositions)]
-									if basePos and (not deathPosition or (basePos - deathPosition).Magnitude > 30) then
+									if basePos then
 										for j = 1, 3 - spawnedOrbs do
 											-- Massive circular spread
 											local angle = (j - 1) * 120 * math.pi / 180
@@ -824,11 +807,7 @@ task.spawn(function()
 											)
 
 											local orbPos = basePos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 8, 0)
-
-											-- Final check against death position
-											if not deathPosition or (orbPos - deathPosition).Magnitude > 50 then
-												spawnOrbBatched(orbPos, baseValue)
-											end
+											spawnOrbBatched(orbPos, baseValue)
 										end
 									end
 								end)
