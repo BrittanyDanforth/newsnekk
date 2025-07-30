@@ -195,8 +195,10 @@ end
 local function getOrCreateSnakeModel(aiId)
 	local modelName = "AISnakeModel_" .. tostring(aiId)
 	local existing = Workspace:FindFirstChild(modelName)
-	if existing and existing:IsA("Model") then
-		return existing
+	-- ALWAYS destroy existing model to ensure clean respawn
+	if existing then
+		existing:Destroy()
+		task.wait() -- Single frame wait to ensure cleanup
 	end
 	local model = Instance.new("Model")
 	model.Name = modelName
@@ -419,8 +421,15 @@ local function createVisualHead(config, parentModel)
 	}
 end
 
-local function createSegment(index, position, color, config, parentModel, currentLength)
-	local segment = getSegment(config)
+local function createSegment(index, position, color, config, parentModel, currentLength, forceFresh)
+	local segment
+	if forceFresh then
+		-- Force create new segment, don't use pool
+		segment = Instance.new("Part")
+		resetSegment(segment, config)
+	else
+		segment = getSegment(config)
+	end
 	segment.Name = "AISegment" .. index
 	
 	-- Apply growth factor based on current snake length (same as players)
@@ -1672,7 +1681,7 @@ function AISnake.new(startPosition)
 		
 		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
 		local color = self.Config.BodyColors[colorIndex]
-		local segment = createSegment(i, segmentPos, color, self.Config, self.Model, i)
+		local segment = createSegment(i, segmentPos, color, self.Config, self.Model, i, true) -- Force fresh segments on spawn
 		self.Segments[i] = segment
 		
 		-- Make segments invisible initially
@@ -1752,7 +1761,7 @@ function AISnake:grow(amount)
 			local color = self.Config.BodyColors[colorIndex]
 			local lastSegment = self.Segments[#self.Segments]
 			local newPos = lastSegment and lastSegment.Position or self.Position
-			local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength)
+			local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength, false) -- Use pool for growth
 			self.Segments[self.CurrentLength] = segment
 
 			-- Match CharacterSetup's segment growth exactly
@@ -2258,6 +2267,11 @@ function AISnake:updateMovement(dt)
 
 	-- Segment following (OPTIMIZED)
 	local followSpeed = self.IsBoosting and self.BoostFollowSpeed or self.FollowSpeed
+	
+	-- Skip segment updates during spawn activation to prevent stretching
+	if self._spawnActivating then
+		return
+	end
 	
 	-- Initialize frame counter if needed
 	self._segmentUpdateFrame = (self._segmentUpdateFrame or 0) + 1
