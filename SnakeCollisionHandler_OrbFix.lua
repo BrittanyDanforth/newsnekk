@@ -653,9 +653,19 @@ task.spawn(function()
 								snakeLength = lengthValue.Value or 55
 							end
 						end
-						
+
 						-- FIXED: Get actual snake segments properly
 						local segments = getActualSnakeSegments(player)
+						
+						-- IMPORTANT: Store segment positions BEFORE the snake gets destroyed
+						local segmentPositions = {}
+						if segments and #segments > 0 then
+							for i, seg in ipairs(segments) do
+								if seg and seg:IsA("BasePart") and seg.Parent and seg.Position then
+									segmentPositions[i] = seg.Position:Clone() -- Store position
+								end
+							end
+						end
 						
 						if segments and #segments > 0 then
 							local totalSegments = #segments
@@ -689,18 +699,18 @@ task.spawn(function()
 									player.Name, snakeLength, totalSegments, totalOrbs, skipInterval))
 							end
 							
-							for i = 1, totalSegments, skipInterval do
+														for i = 1, totalSegments, skipInterval do
 								if spawnedOrbs >= totalOrbs then break end
-								
-								local seg = segments[i]
-								if seg and seg:IsA("BasePart") and seg.Parent and seg.Position then
-									local pos = seg.Position
+
+								-- Use stored positions instead of segment positions
+								local pos = segmentPositions[i]
+								if pos then
 									local offset = Vector3.new(
 										(math.random() - 0.5) * 3,
 										0,
 										(math.random() - 0.5) * 3
 									)
-									
+
 									-- Use batched spawning
 									spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), baseValue)
 									spawnedOrbs = spawnedOrbs + 1
