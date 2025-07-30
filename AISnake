@@ -1565,15 +1565,18 @@ function AISnake.new(startPosition)
 	self.Config.BodyMaterial = colorData.BodyMaterial
 
 	self.Position = startPosition or Vector3new(0, 5, 0)
-	self.Direction = Vector3new(0, 0, 1)
+	-- Start with a random direction to prevent all snakes facing the same way
+	local randomAngle = mathRandom() * 2 * mathPi
+	self.Direction = Vector3new(mathSin(randomAngle), 0, mathCos(randomAngle))
 	self.Speed = self.Config.BaseSpeed or 10
 	self.NormalSpeed = self.Config.BaseSpeed or 10
 	self.BoostSpeed = self.Config.BoostSpeed or 24
 	self.TurnSpeed = self.Config.TurnSpeed or 1.8 -- Better turning for orb collection
 	self.RandomTurnInterval = 1.5
 	self.LastTurn = tick()
-	self.TargetYaw = 0
-	self.CurrentYaw = 0
+	-- Initialize yaw to match the random starting direction
+	self.CurrentYaw = mathAtan2(self.Direction.X, self.Direction.Z)
+	self.TargetYaw = self.CurrentYaw
 
 	self.FollowSpeed = self.Config.FollowSpeed or 0.95
 	self.BoostFollowSpeed = self.Config.BoostFollowSpeed or 0.98
@@ -1631,6 +1634,14 @@ function AISnake.new(startPosition)
 	self.RootPart.Parent = self.Model
 
 	self.HeadParts = createVisualHead(self.Config, self.Model)
+	
+	-- FIXED: Set initial head position and orientation
+	if self.HeadParts and self.HeadParts.head then
+		local headOffset = self.Direction * 1.5
+		local headPos = self.Position + headOffset
+		self.HeadParts.head.CFrame = CFramelookAt(headPos, headPos + self.Direction)
+		self.HeadParts.head.Position = headPos
+	end
 
 	self.Segments = {}
 	self.CurrentLength = self.Config.InitialLength
