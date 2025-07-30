@@ -615,92 +615,150 @@ end
 
 -- === ENHANCED AI PERSONALITIES - STABLE & DISTINCT ===
 AISnake.PersonalityTypes = {
-	"Aggressor", "Scavenger", "Guardian", "Opportunist", "Hunter", "Nomad", "Shadow", "Berserker"
+	"Collector", "Explorer", "Predator", "Opportunist", "Farmer", "Raider", "Guardian", "Nomad"
 }
 
 AISnake.PersonalityDefinitions = {
-	Aggressor = {
-		Type = "Aggressor",
-		TargetPlayers = true,
-		TargetOrbs = true,
-		AvoidOthers = false,
-		SpeedMultiplier = 1.15,
-		TurnBias = 0.03,
-		BoostChance = 0.06,
-		CombatRadius = 45,
-		RandomTurnInterval = 5.0,
-		OrbSeekRadius = 100,
-		Description = "Balanced aggressor - hunts when advantageous",
-		FleeThreshold = 20,  -- Length difference before fleeing
-		AggressionLevel = 0.7,
-		PatrolRadius = 200,
-	},
-	Scavenger = {
-		Type = "Scavenger",
+	-- COMPLETELY REVAMPED PERSONALITIES WITH NATURAL MOVEMENT
+	Collector = {
+		Type = "Collector",
 		TargetPlayers = false,
 		TargetOrbs = true,
 		AvoidOthers = true,
-		SpeedMultiplier = 1.1,
-		TurnBias = 0.05,
-		BoostChance = 0.06,  -- Slightly more boost for orb collection
-		CombatRadius = 25,
-		RandomTurnInterval = 4.0,
-		OrbSeekRadius = 250,  -- Even better orb vision
-		Description = "Peaceful orb collector - avoids all conflict",
-		FleeThreshold = 5,
+		SpeedMultiplier = 1.05,
+		TurnBias = 0.015,  -- Very smooth turns
+		BoostChance = 0.04,
+		CombatRadius = 20,
+		RandomTurnInterval = 8.0,  -- Long straight paths
+		OrbSeekRadius = 300,  -- Excellent orb vision
+		Description = "Efficient orb collector - avoids all fights",
+		FleeThreshold = 10,
 		AggressionLevel = 0.0,
-		PatrolRadius = 400,  -- Wider patrol for more orbs
+		PatrolRadius = 500,  -- Uses entire map
+		MovementPattern = "spiral",  -- New: Spiral outward pattern
+		PreferEdgeOrbs = true,  -- Collects orbs near edges
+		MinStraightDistance = 100,  -- Move at least 100 studs before turning
 	},
-	Guardian = {
-		Type = "Guardian",
+	Explorer = {
+		Type = "Explorer",
+		TargetPlayers = false,
+		TargetOrbs = true,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.15,
+		TurnBias = 0.02,
+		BoostChance = 0.05,
+		CombatRadius = 30,
+		RandomTurnInterval = 12.0,  -- Very long paths
+		OrbSeekRadius = 200,
+		Description = "Map explorer - covers maximum ground",
+		FleeThreshold = 15,
+		AggressionLevel = 0.1,
+		PatrolRadius = 600,  -- Full map coverage
+		MovementPattern = "zigzag",  -- Zigzag across map
+		ExplorationSectors = 8,  -- Divides map into sectors
+		CurrentSector = 1,
+		MinStraightDistance = 150,
+	},
+	Predator = {
+		Type = "Predator",
 		TargetPlayers = true,
 		TargetOrbs = true,
 		AvoidOthers = false,
-		SpeedMultiplier = 1.05,
-		TurnBias = 0.02,
-		BoostChance = 0.03,
+		SpeedMultiplier = 1.2,
+		TurnBias = 0.025,
+		BoostChance = 0.08,
 		CombatRadius = 60,
 		RandomTurnInterval = 6.0,
-		OrbSeekRadius = 120,
-		Description = "Territory defender - patrols specific areas",
-		FleeThreshold = 30,
-		AggressionLevel = 0.5,
-		PatrolRadius = 150,  -- Stays in smaller area
-		TerritoryCenter = Vector3.new(0, 0, 0),  -- Set randomly on spawn
+		OrbSeekRadius = 150,
+		Description = "Smart hunter - ambushes smaller snakes",
+		FleeThreshold = 20,
+		AggressionLevel = 0.8,
+		PatrolRadius = 300,
+		MovementPattern = "patrol",  -- Patrols hunting grounds
+		AmbushPoints = {},  -- Will be populated with good ambush spots
+		PreferCenterHunting = true,
+		MinStraightDistance = 80,
 	},
 	Opportunist = {
 		Type = "Opportunist",
 		TargetPlayers = true,
 		TargetOrbs = true,
 		AvoidOthers = false,
-		SpeedMultiplier = 1.2,
-		TurnBias = 0.04,
-		BoostChance = 0.08,
-		CombatRadius = 40,
-		RandomTurnInterval = 3.5,
-		OrbSeekRadius = 140,
-		Description = "Smart fighter - only attacks smaller snakes",
-		FleeThreshold = 0,  -- Never flees from equal/smaller
-		AggressionLevel = 0.8,
-		PatrolRadius = 250,
-		OnlyAttackSmaller = true,
+		SpeedMultiplier = 1.18,
+		TurnBias = 0.03,
+		BoostChance = 0.07,
+		CombatRadius = 50,
+		RandomTurnInterval = 7.0,
+		OrbSeekRadius = 180,
+		Description = "Adaptive - switches between hunting and collecting",
+		FleeThreshold = 15,
+		AggressionLevel = 0.6,
+		PatrolRadius = 350,
+		MovementPattern = "adaptive",  -- Changes based on situation
+		OpportunityRadius = 100,  -- Looks for opportunities
+		MinStraightDistance = 90,
 	},
-	Hunter = {
-		Type = "Hunter",
+	Farmer = {
+		Type = "Farmer",
+		TargetPlayers = false,
+		TargetOrbs = true,
+		AvoidOthers = true,
+		SpeedMultiplier = 1.0,  -- Slow and steady
+		TurnBias = 0.01,  -- Very smooth
+		BoostChance = 0.02,  -- Rarely boosts
+		CombatRadius = 15,
+		RandomTurnInterval = 10.0,
+		OrbSeekRadius = 400,  -- Sees orbs from far
+		Description = "Peaceful farmer - systematic orb collection",
+		FleeThreshold = 5,
+		AggressionLevel = 0.0,
+		PatrolRadius = 250,
+		MovementPattern = "grid",  -- Moves in grid pattern
+		GridSize = 100,  -- Grid square size
+		CurrentGridX = 0,
+		CurrentGridZ = 0,
+		MinStraightDistance = 120,
+	},
+	Raider = {
+		Type = "Raider",
 		TargetPlayers = true,
 		TargetOrbs = true,
 		AvoidOthers = false,
-		SpeedMultiplier = 1.18,
-		TurnBias = 0.02,
-		BoostChance = 0.07,
-		CombatRadius = 50,
-		RandomTurnInterval = 5.5,
-		OrbSeekRadius = 130,
-		Description = "Persistent hunter - tracks targets",
+		SpeedMultiplier = 1.25,
+		TurnBias = 0.04,
+		BoostChance = 0.1,
+		CombatRadius = 45,
+		RandomTurnInterval = 5.0,
+		OrbSeekRadius = 120,
+		Description = "Aggressive raider - hits and runs",
 		FleeThreshold = 25,
-		AggressionLevel = 0.75,
-		PatrolRadius = 220,
-		TrackingDuration = 10,  -- Seconds to track a target
+		AggressionLevel = 0.9,
+		PatrolRadius = 400,
+		MovementPattern = "hitandrun",  -- Attack then retreat
+		RaidCooldown = 10,  -- Seconds between raids
+		LastRaidTime = 0,
+		MinStraightDistance = 70,
+	},
+	Guardian = {
+		Type = "Guardian",
+		TargetPlayers = true,
+		TargetOrbs = true,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.1,
+		TurnBias = 0.02,
+		BoostChance = 0.05,
+		CombatRadius = 70,
+		RandomTurnInterval = 8.0,
+		OrbSeekRadius = 160,
+		Description = "Area guardian - protects territory",
+		FleeThreshold = 30,
+		AggressionLevel = 0.5,
+		PatrolRadius = 200,
+		MovementPattern = "circular",  -- Circles territory
+		TerritoryCenter = Vector3.new(0, 0, 0),
+		TerritoryRadius = 150,
+		PatrolAngle = 0,
+		MinStraightDistance = 60,
 	},
 	Nomad = {
 		Type = "Nomad",
@@ -708,51 +766,19 @@ AISnake.PersonalityDefinitions = {
 		TargetOrbs = true,
 		AvoidOthers = false,
 		SpeedMultiplier = 1.12,
-		TurnBias = 0.06,
-		BoostChance = 0.05,
-		CombatRadius = 30,
-		RandomTurnInterval = 2.5,  -- Frequent direction changes
-		OrbSeekRadius = 160,
-		Description = "Wanderer - explores the entire map",
-		FleeThreshold = 10,
-		AggressionLevel = 0.2,
-		PatrolRadius = 400,  -- Roams widely
-		ExplorationBias = 0.8,
-	},
-	Shadow = {
-		Type = "Shadow",
-		TargetPlayers = true,
-		TargetOrbs = true,
-		AvoidOthers = false,
-		SpeedMultiplier = 1.22,
-		TurnBias = 0.01,
-		BoostChance = 0.02,  -- Rarely boosts
-		CombatRadius = 55,
-		RandomTurnInterval = 8.0,
-		OrbSeekRadius = 110,
-		Description = "Stealthy assassin - strikes from behind",
-		FleeThreshold = 15,
-		AggressionLevel = 0.6,
-		PatrolRadius = 180,
-		PreferRearAttack = true,
-		StalkDistance = 30,
-	},
-	Berserker = {
-		Type = "Berserker",
-		TargetPlayers = true,
-		TargetOrbs = false,  -- Ignores orbs when hunting
-		AvoidOthers = false,
-		SpeedMultiplier = 1.25,
-		TurnBias = 0.05,
-		BoostChance = 0.12,  -- Boosts frequently
+		TurnBias = 0.025,
+		BoostChance = 0.06,
 		CombatRadius = 35,
-		RandomTurnInterval = 6.0,
-		OrbSeekRadius = 50,  -- Poor orb vision
-		Description = "Reckless fighter - all aggression",
-		FleeThreshold = 40,  -- Only flees from much larger
-		AggressionLevel = 1.0,
-		PatrolRadius = 200,
-		RageMode = true,  -- Gets faster when smaller
+		RandomTurnInterval = 15.0,  -- Very long journeys
+		OrbSeekRadius = 220,
+		Description = "Wandering nomad - never stays in one place",
+		FleeThreshold = 20,
+		AggressionLevel = 0.3,
+		PatrolRadius = 700,  -- Entire map
+		MovementPattern = "wander",  -- True random wandering
+		WanderTargets = {},  -- Random points to visit
+		CurrentWanderTarget = 1,
+		MinStraightDistance = 200,  -- Long straight paths
 	},
 }
 
@@ -1362,72 +1388,125 @@ function AISnake:_determineAction()
 		end
 	end
 
-	-- Priority 5: Wandering (LESS CENTER BIAS)
+	-- Priority 5: Advanced Movement Patterns
 	if state == "WANDER" then
-		local mapCenter = Vector3new(0, headPos.Y, 0)
-		local toCenter = mapCenter - headPos
-		local distFromCenter = toCenter.Magnitude
-
-		-- Smoother, more natural wandering
-		if (now - (self.LastTurn or 0) > p.RandomTurnInterval) then
-			-- Check if we're constantly changing direction (wiggling)
-			local currentDir = self.Direction
-			local dirChange = (currentDir - (self.LastDirection or currentDir)).Magnitude
+		-- Initialize movement tracking
+		if not self._lastStraightDistance then
+			self._lastStraightDistance = 0
+			self._lastTurnPosition = headPos
+		end
+		
+		-- Calculate distance traveled since last turn
+		local distanceSinceTurn = (headPos - self._lastTurnPosition).Magnitude
+		
+		-- Check minimum straight distance requirement
+		local minStraight = p.MinStraightDistance or 100
+		
+		-- Movement pattern based on personality
+		local movementPattern = p.MovementPattern or "wander"
+		
+		if movementPattern == "spiral" then
+			-- Spiral outward pattern for Collectors
+			if not self._spiralAngle then self._spiralAngle = 0 end
+			if not self._spiralRadius then self._spiralRadius = 50 end
 			
-			if dirChange > 1.5 and (now - (self.DirectionChangeTime or 0)) < 2 then
-				-- We're wiggling too much, force straight movement
-				self.LastTurn = now + 2  -- Don't turn for 2 seconds
-			else
-				-- Normal turning
-				local maxTurn = 25  -- Reduced from 45
-				-- Bias towards smaller turns for more natural movement
-				local turnAmount = mathRandom(-maxTurn, maxTurn)
-				if mathAbs(turnAmount) > 15 then
-					-- Make large turns less likely
-					turnAmount = turnAmount * 0.6
+			if distanceSinceTurn > minStraight then
+				self._spiralAngle = self._spiralAngle + mathPi / 4  -- 45 degree turns
+				self._spiralRadius = mathMin(self._spiralRadius + 20, 400)
+				if self._spiralRadius >= 400 then
+					self._spiralRadius = 50  -- Reset spiral
 				end
+				local targetX = mathCos(self._spiralAngle) * self._spiralRadius
+				local targetZ = mathSin(self._spiralAngle) * self._spiralRadius
+				steer = (Vector3new(targetX, headPos.Y, targetZ) - headPos).Unit
+				self._lastTurnPosition = headPos
+			else
+				-- Continue straight
+				steer = self.Direction
+			end
+			
+		elseif movementPattern == "zigzag" then
+			-- Zigzag pattern for Explorers
+			if not self._zigzagDirection then self._zigzagDirection = 1 end
+			
+			if distanceSinceTurn > minStraight then
+				-- Alternate between left and right turns
+				self._zigzagDirection = -self._zigzagDirection
+				local turnAngle = self.TargetYaw + (mathPi / 6) * self._zigzagDirection  -- 30 degree turns
+				steer = Vector3new(mathSin(turnAngle), 0, mathCos(turnAngle))
+				self.TargetYaw = turnAngle
+				self._lastTurnPosition = headPos
+			else
+				steer = self.Direction
+			end
+			
+		elseif movementPattern == "grid" then
+			-- Grid pattern for Farmers
+			local gridSize = p.GridSize or 100
+			if not self._gridDirection then self._gridDirection = 0 end
+			
+			if distanceSinceTurn > gridSize then
+				-- Turn 90 degrees
+				self._gridDirection = (self._gridDirection + 1) % 4
+				local angles = {0, mathPi/2, mathPi, -mathPi/2}
+				self.TargetYaw = angles[self._gridDirection + 1]
+				steer = Vector3new(mathSin(self.TargetYaw), 0, mathCos(self.TargetYaw))
+				self._lastTurnPosition = headPos
+			else
+				steer = self.Direction
+			end
+			
+		elseif movementPattern == "circular" then
+			-- Circular patrol for Guardians
+			if not p.PatrolAngle then p.PatrolAngle = 0 end
+			
+			-- Circle around territory
+			p.PatrolAngle = p.PatrolAngle + 0.02  -- Slow rotation
+			local radius = p.TerritoryRadius or 150
+			local center = p.TerritoryCenter
+			local targetX = center.X + mathCos(p.PatrolAngle) * radius
+			local targetZ = center.Z + mathSin(p.PatrolAngle) * radius
+			local targetPos = Vector3new(targetX, headPos.Y, targetZ)
+			steer = (targetPos - headPos).Unit
+			
+		else
+			-- Default wandering with minimum straight distance
+			if (now - (self.LastTurn or 0) > p.RandomTurnInterval) and distanceSinceTurn > minStraight then
+				-- Only turn after traveling minimum distance
+				local maxTurn = 30
+				local turnAmount = mathRandom(-maxTurn, maxTurn)
+				
+				-- Prevent 180 degree turns
+				if mathAbs(turnAmount) > 90 then
+					turnAmount = turnAmount * 0.3
+				end
+				
 				self.TargetYaw = self.TargetYaw + mathRad(turnAmount)
 				self.LastTurn = now
+				self._lastTurnPosition = headPos
 				
-				if dirChange > 0.5 then
-					self.LastDirection = currentDir
-					self.DirectionChangeTime = now
-				end
+				steer = Vector3new(mathSin(self.TargetYaw), 0, mathCos(self.TargetYaw))
+			else
+				-- Continue straight
+				steer = self.Direction
 			end
 		end
-
-		-- Add subtle continuous drift for more organic movement
-		local driftAmount = mathSin(now * 0.5) * 0.02  -- Gentle sine wave drift
-		local baseSteer = Vector3new(
-			mathSin(self.TargetYaw + driftAmount), 
-			0, 
-			mathCos(self.TargetYaw + driftAmount)
-		)
-
-		-- Check if wander direction is safe
-		if not self:isPathSafe(headPos + baseSteer * 30, 30) then
-			-- Find a safe direction
-			for i = 1, 8 do
-				local testAngle = self.TargetYaw + (i * mathPi / 4)
-				local testSteer = Vector3new(mathSin(testAngle), 0, mathCos(testAngle))
-				if self:isPathSafe(headPos + testSteer * 30, 30) then
-					baseSteer = testSteer
-					self.TargetYaw = testAngle
-					break
-				end
-			end
+		
+		-- Boundary avoidance (keep from edges)
+		local edgeBuffer = 100
+		if headPos.X > MAP_BOUNDS.maxX - edgeBuffer then
+			steer = steer + Vector3new(-1, 0, 0)
+			steer = steer.Unit
+		elseif headPos.X < MAP_BOUNDS.minX + edgeBuffer then
+			steer = steer + Vector3new(1, 0, 0)
+			steer = steer.Unit
 		end
-
-		-- REDUCED center bias - only pull to center when VERY far
-		if distFromCenter > 400 then  -- Increased from 250
-			local centerBias = toCenter.Unit * 0.3  -- Reduced from full center
-			steer = (baseSteer + centerBias).Unit
-		elseif distFromCenter > 350 then  -- Increased from 150
-			local centerBias = toCenter.Unit * 0.15  -- Much less center bias
-			steer = (baseSteer + centerBias).Unit
-		else
-			-- Most of the time, just wander freely
-			steer = baseSteer
+		if headPos.Z > MAP_BOUNDS.maxZ - edgeBuffer then
+			steer = steer + Vector3new(0, 0, -1)
+			steer = steer.Unit
+		elseif headPos.Z < MAP_BOUNDS.minZ + edgeBuffer then
+			steer = steer + Vector3new(0, 0, 1)
+			steer = steer.Unit
 		end
 	end
 
