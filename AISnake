@@ -637,7 +637,7 @@ AISnake.PersonalityDefinitions = {
 		Description = "Balanced aggressor - hunts when advantageous",
 		FleeThreshold = 20,  -- Length difference before fleeing
 		AggressionLevel = 0.7,
-		PatrolRadius = 200,
+		PatrolRadius = 350,  -- Increased patrol radius
 	},
 	Scavenger = {
 		Type = "Scavenger",
@@ -653,7 +653,7 @@ AISnake.PersonalityDefinitions = {
 		Description = "Peaceful orb collector - avoids all conflict",
 		FleeThreshold = 5,
 		AggressionLevel = 0.0,
-		PatrolRadius = 300,
+		PatrolRadius = 450,  -- Roam widely for orbs
 	},
 	Guardian = {
 		Type = "Guardian",
@@ -686,7 +686,7 @@ AISnake.PersonalityDefinitions = {
 		Description = "Smart fighter - only attacks smaller snakes",
 		FleeThreshold = 0,  -- Never flees from equal/smaller
 		AggressionLevel = 0.8,
-		PatrolRadius = 250,
+		PatrolRadius = 400,  -- Hunt across the map
 		OnlyAttackSmaller = true,
 	},
 	Hunter = {
@@ -703,7 +703,7 @@ AISnake.PersonalityDefinitions = {
 		Description = "Persistent hunter - tracks targets",
 		FleeThreshold = 25,
 		AggressionLevel = 0.75,
-		PatrolRadius = 220,
+		PatrolRadius = 380,  -- Track prey across map
 		TrackingDuration = 10,  -- Seconds to track a target
 	},
 	Nomad = {
@@ -720,7 +720,7 @@ AISnake.PersonalityDefinitions = {
 		Description = "Wanderer - explores the entire map",
 		FleeThreshold = 10,
 		AggressionLevel = 0.2,
-		PatrolRadius = 400,  -- Roams widely
+		PatrolRadius = 600,  -- Maximum roaming range
 		ExplorationBias = 0.8,
 	},
 	Shadow = {
@@ -968,35 +968,33 @@ function AISnake:getFleeVector()
 		end
 	end
 
-	-- Default behavior - prefer center when fleeing
+	-- Default behavior - mostly random fleeing
 	if not fleeDir then
 		local mapCenter = Vector3new(0, headPos.Y, 0)
 		local toCenter = (mapCenter - headPos)
 		local distFromCenter = toCenter.Magnitude
 
-		if distFromCenter > 150 then
-			-- Too far - flee toward center
+		if distFromCenter > 300 then
+			-- Only flee toward center if VERY far
 			fleeDir = toCenter.Unit
 		else
-			-- Random direction with MORE center bias
+			-- Random direction with MINIMAL center bias
 			local randomAngle = mathRandom() * 2 * mathPi
 			local randomDir = Vector3new(mathSin(randomAngle), 0, mathCos(randomAngle))
-			if distFromCenter > 100 then
-				fleeDir = (randomDir + toCenter.Unit * 0.5).Unit
-			elseif distFromCenter > 60 then
-				fleeDir = (randomDir + toCenter.Unit * 0.3).Unit
+			if distFromCenter > 250 then
+				fleeDir = (randomDir + toCenter.Unit * 0.2).Unit
 			else
 				fleeDir = randomDir
 			end
 		end
 	end
 	
-	-- ADD center bias to ALL flee directions if far from center
+	-- Only add center bias if REALLY far from center
 	local mapCenter = Vector3new(0, headPos.Y, 0)
 	local distFromCenter = (mapCenter - headPos).Magnitude
-	if distFromCenter > 180 and fleeDir then
+	if distFromCenter > 350 and fleeDir then
 		local toCenter = (mapCenter - headPos).Unit
-		fleeDir = (fleeDir + toCenter * 0.4).Unit
+		fleeDir = (fleeDir + toCenter * 0.2).Unit
 	end
 
 	return fleeDir
@@ -1088,13 +1086,13 @@ function AISnake:getSmartFleeDirection(threats)
 		totalWeight = totalWeight + danger.weight
 	end
 	
-	-- Add bias towards center if far from it
+	-- Only add center bias if EXTREMELY far from center
 	local toCenter = Vector3new(0, myPos.Y, 0) - myPos
 	local distFromCenter = toCenter.Magnitude
-	if distFromCenter > 200 then
-		local centerWeight = (distFromCenter - 200) / 100
-		fleeDir = fleeDir + toCenter.Unit * centerWeight
-		totalWeight = totalWeight + centerWeight
+	if distFromCenter > 400 then
+		local centerWeight = (distFromCenter - 400) / 200
+		fleeDir = fleeDir + toCenter.Unit * centerWeight * 0.3  -- Reduced weight
+		totalWeight = totalWeight + centerWeight * 0.3
 	end
 	
 	if totalWeight > 0 then
@@ -1116,8 +1114,9 @@ function AISnake:getSmartFleeDirection(threats)
 		return fleeDir
 	end
 	
-	-- Default: flee towards center
-	return toCenter.Unit
+	-- Default: random direction instead of center
+	local randomAngle = mathRandom() * 2 * mathPi
+	return Vector3new(mathSin(randomAngle), 0, mathCos(randomAngle))
 end
 
 -- === MUCH SMARTER AI BRAIN ===
@@ -1389,13 +1388,16 @@ function AISnake:_determineAction()
 			end
 		end
 
-		-- Center bias based on distance
-		if distFromCenter > 250 then
+		-- Much less center bias - let them roam freely
+		if distFromCenter > 400 then
+			-- Only go to center if REALLY far
 			steer = toCenter.Unit
-		elseif distFromCenter > 150 then
-			local centerBias = toCenter.Unit * 0.7
+		elseif distFromCenter > 350 then
+			-- Slight center bias when far
+			local centerBias = toCenter.Unit * 0.3
 			steer = (baseSteer + centerBias).Unit
 		else
+			-- Free roaming when within reasonable distance
 			steer = baseSteer
 		end
 	end
