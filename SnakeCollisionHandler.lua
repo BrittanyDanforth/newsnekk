@@ -1,16 +1,19 @@
--- SnakeCollisionHandler V7.0 FINAL - POLISHED & MENU-READY
+-- SnakeCollisionHandler V7.0 FINAL - FULLY POLISHED
 -- All V7 functionality preserved with performance optimizations
 -- FIXED: Death orb spawning now properly distributes orbs along snake path
 -- FIXED: MAGNET EFFECT CLEARED ON DEATH (prevents orbs being pulled to dead character)
 -- FIXED: Smooth death transition without camera disruption
+-- FIXED: Dead players can't kill others (marked with Dead attribute)
+-- FIXED: Death orbs spawn at correct height (Y=5)
 -- 
 -- Death Handling Features:
---   - Magnet attributes cleared immediately on death
---   - Character smoothly fades out (no teleporting)
---   - Character anchored and collision disabled
---   - Death event fired for menu system integration
---   - 1-second delay for death orb spawning
---   - Death orbs named 'DeathOrb' for special LOD handling
+--   - Dead players excluded from collision detection
+--   - Character marked with Dead=true attribute
+--   - Character moved down 10 studs + anchored
+--   - Magnet attributes cleared immediately
+--   - Character smoothly fades out (0.5s)
+--   - Death orbs spawn at Y=5 (matches normal orbs)
+--   - 1-second delay for spawn protection
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -40,7 +43,7 @@ local MIN_COLLISION_DISTANCE = 2.0
 local COLLISION_BUFFER = 0.5
 
 -- === OPTIMIZED ORB SPAWNING ===
-local ORB_SPAWN_HEIGHT = 2
+local ORB_SPAWN_HEIGHT = 5 -- Match OrbSpawner height (Y=5)
 local MIN_ORB_SPACING = 3
 local ORB_BATCH_SIZE = 8 -- Spawn orbs in smaller batches
 local ORB_SPAWN_DELAY = 0.03 -- Small delay between batches
@@ -761,7 +764,7 @@ task.spawn(function()
 											)
 										end
 
-										spawnOrbDirect(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 2, 0), baseValue)
+										spawnOrbDirect(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), baseValue)
 										spawnedOrbs = spawnedOrbs + 1
 									end
 								end
@@ -783,7 +786,7 @@ task.spawn(function()
 												0,
 												(math.random() - 0.5) * 5
 											)
-											spawnOrbDirect(basePos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 3, 0), baseValue)
+											spawnOrbDirect(basePos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), baseValue)
 										end
 									end
 								end
@@ -819,17 +822,24 @@ task.spawn(function()
 						-- Smooth death handling - disable character without teleporting
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
 						if rootPart then
-							-- Make character invisible and non-collidable instead of teleporting
+							-- CRITICAL: Remove from collision detection immediately
+							rootPart:SetAttribute("Dead", true) -- Mark as dead for collision system
+							
+							-- Make character invisible and non-collidable
 							rootPart.Anchored = true -- Prevent any movement
 							rootPart.CanCollide = false
 							rootPart.CanTouch = false -- Prevent orb collection
 							rootPart.CanQuery = false
+							
+							-- Move slightly down to prevent any edge case collisions
+							rootPart.CFrame = rootPart.CFrame * CFrame.new(0, -10, 0)
 							
 							-- Fade out all character parts smoothly
 							for _, part in pairs(character:GetDescendants()) do
 								if part:IsA("BasePart") then
 									part.CanCollide = false
 									part.CanTouch = false
+									part.CanQuery = false -- Prevent all interactions
 									-- Smooth fade out
 									if part.Transparency < 1 then
 										task.spawn(function()
@@ -1114,8 +1124,18 @@ RunService.Stepped:Connect(function()
 		if isPlayerInvincible(player) then
 			continue
 		end
+		
+		-- Skip if player is already dead
+		if deadPlayers[player] then
+			continue
+		end
 
 		if head and head.Parent then
+			-- Skip if head is marked as dead
+			if head:GetAttribute("Dead") then
+				continue
+			end
+			
 			local headPos = head.Position
 
 			if AISnakeModule._activeSnakes then
@@ -1169,6 +1189,11 @@ RunService.Stepped:Connect(function()
 		end
 
 		if headA and headA.Parent then
+			-- Skip if head is marked as dead
+			if headA:GetAttribute("Dead") then
+				continue
+			end
+			
 			local headPosA = headA.Position
 
 			for j = 1, #playerHeads do
@@ -1501,18 +1526,20 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 FINAL - POLISHED & MENU-READY")
+print("⚡ SnakeCollisionHandler V7.0 FINAL - FULLY POLISHED")
 print("🚀 All V7 functionality preserved with performance optimizations")
 print("💎 FIXED: Death orbs properly spawn along snake segments")
 print("🧲 FIXED: MAGNET EFFECT CLEARED ON DEATH!")
+print("⚰️ FIXED: Dead players can't kill others!")
+print("📏 FIXED: Death orbs spawn at correct height (Y=5)")
 print("✨ FIXED: Smooth death transition (no camera issues)")
 print("🛡️ DEATH HANDLING:")
+print("   - Dead players marked with Dead=true attribute")
+print("   - Character moved down 10 studs + anchored")
 print("   - Magnet attributes reset immediately")
 print("   - Character fades out smoothly (0.5s)")
-print("   - Character anchored & collision disabled")
-print("   - Works perfectly with SlitherIO menu")
-print("   - 1-second delay for death orbs")
-print("   - Death orbs use special 'DeathOrb' LOD")
+print("   - Death orbs spawn at Y=5 (matches normal orbs)")
+print("   - 1-second delay for spawn protection")
 print("🔧 Optimizations: Batched spawning, aggressive LOD")
 print("📊 Performance: 12Hz collision checks, 96 chunk size")
 
