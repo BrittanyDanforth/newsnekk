@@ -11,6 +11,7 @@ local SPAWN_HEIGHT = 5
 
 -- === AI SNAKE MANAGEMENT ===
 local aiSnakes = {}
+local respawnQueue = {} -- Track snakes that need respawning
 
 -- Function to clean up orphaned snake parts (run periodically)
 local function cleanupOrphanedParts()
@@ -53,18 +54,43 @@ local function getRandomSpawnPosition()
 	return Vector3.new(x, SPAWN_HEIGHT, z)
 end
 
--- Initial spawn
-for i = 1, NUM_SNAKES do
-	local pos = getRandomSpawnPosition()
-	aiSnakes[i] = AISnake.new(pos)
-	task.wait(0.1) -- Small delay between spawns
-end
+-- Initial spawn with staggered timing to prevent all spawning at once
+task.spawn(function()
+	for i = 1, NUM_SNAKES do
+		local pos = getRandomSpawnPosition()
+		aiSnakes[i] = AISnake.new(pos)
+		task.wait(0.2) -- Slightly longer delay for initial spawn
+	end
+end)
 
 -- Periodic cleanup (every 10 seconds)
 task.spawn(function()
 	while true do
 		task.wait(10)
 		cleanupOrphanedParts()
+	end
+end)
+
+-- Respawn queue processor
+task.spawn(function()
+	while true do
+		task.wait(0.5) -- Check every half second
+		
+		local currentTime = tick()
+		
+		-- Process respawn queue
+		for i = #respawnQueue, 1, -1 do
+			local entry = respawnQueue[i]
+			if currentTime >= entry.respawnTime then
+				-- Time to respawn this snake
+				local pos = getRandomSpawnPosition()
+				print("🔄 Respawning AI Snake", entry.index, "at", pos)
+				aiSnakes[entry.index] = AISnake.new(pos)
+				
+				-- Remove from queue
+				table.remove(respawnQueue, i)
+			end
+		end
 	end
 end)
 
@@ -82,17 +108,30 @@ RunService.Stepped:Connect(function()
 	for i = 1, NUM_SNAKES do
 		local snake = aiSnakes[i]
 		if not snake or not snake.RootPart or not snake.RootPart.Parent then
-			-- Clean up old snake if needed
-			if snake and snake.Destroy then
-				pcall(function() snake:Destroy() end)
+			-- Check if already in respawn queue
+			local inQueue = false
+			for _, entry in ipairs(respawnQueue) do
+				if entry.index == i then
+					inQueue = true
+					break
+				end
 			end
 			
-			-- Simple respawn - just wait a bit then spawn new one
-			task.wait(2) -- Simple 2 second delay
-			
-			-- Respawn at random position
-			local pos = getRandomSpawnPosition()
-			aiSnakes[i] = AISnake.new(pos)
+			if not inQueue then
+				-- Clean up old snake if needed
+				if snake and snake.Destroy then
+					pcall(function() snake:Destroy() end)
+				end
+				
+				-- Clear reference
+				aiSnakes[i] = nil
+				
+				-- Add to respawn queue with 3 second delay
+				table.insert(respawnQueue, {
+					index = i,
+					respawnTime = tick() + 3
+				})
+			end
 		end
 	end
 end)
