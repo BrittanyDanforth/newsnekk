@@ -456,21 +456,49 @@ local function createMenu(onPlay)
 		copiedLabel.ZIndex = 21
 		copiedLabel.Parent = panel
 		copyBtn.MouseButton1Click:Connect(function()
-			local clipboardAvailable = typeof(setclipboard) == "function"
+			-- Check if setclipboard exists (it's a executor-specific function)
+			local clipboardAvailable = false
+			local setclipboardFunc = nil
+			
+			-- Safely check for clipboard functions
+			local function checkFunction(func)
+				local success, result = pcall(function()
+					return type(func) == "function"
+				end)
+				return success and result
+			end
+			
+			-- Try different clipboard methods
+			if checkFunction(setclipboard) then
+				clipboardAvailable = true
+				setclipboardFunc = setclipboard
+			elseif checkFunction(toclipboard) then
+				clipboardAvailable = true
+				setclipboardFunc = toclipboard
+			elseif type(syn) == "table" and checkFunction(syn.write_clipboard) then
+				clipboardAvailable = true
+				setclipboardFunc = syn.write_clipboard
+			end
+			
 			local success = false
-			if clipboardAvailable then
+			if clipboardAvailable and setclipboardFunc then
 				success = pcall(function()
-					setclipboard(linkBox.Text)
+					setclipboardFunc(linkBox.Text)
 				end)
 			end
+			
 			if clipboardAvailable and success then
 				copiedLabel.Text = "Copied!"
 			elseif not clipboardAvailable then
-				copiedLabel.Text = "Clipboard not available"
+				copiedLabel.Text = "Select text manually"
+				linkBox:CaptureFocus()
+				linkBox.SelectionStart = 1
+				linkBox.CursorPosition = #linkBox.Text + 1
 			else
 				copiedLabel.Text = "Copy failed"
 			end
-			task.wait(1.2)
+			
+			task.wait(1.5)
 			copiedLabel.Text = ""
 		end)
 		local closeBtn = Instance.new("TextButton")

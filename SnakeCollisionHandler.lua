@@ -1,15 +1,16 @@
--- SnakeCollisionHandler V7.0 OPTIMIZED: MAGNET FIX
+-- SnakeCollisionHandler V7.0 FINAL - POLISHED & MENU-READY
 -- All V7 functionality preserved with performance optimizations
 -- FIXED: Death orb spawning now properly distributes orbs along snake path
 -- FIXED: MAGNET EFFECT CLEARED ON DEATH (prevents orbs being pulled to dead character)
--- FIXED: Character moved far away before death to prevent spawn protection
+-- FIXED: Smooth death transition without camera disruption
 -- 
--- Death Orb Protection Strategy:
+-- Death Handling Features:
 --   - Magnet attributes cleared immediately on death
---   - Character moved to Y=-1000 before death
---   - Simple 1-second delay for ALL death orbs
+--   - Character smoothly fades out (no teleporting)
+--   - Character anchored and collision disabled
+--   - Death event fired for menu system integration
+--   - 1-second delay for death orb spawning
 --   - Death orbs named 'DeathOrb' for special LOD handling
---   - Start from segment 5 (skip head segments)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -815,13 +816,45 @@ task.spawn(function()
 						player:SetAttribute("TempMagnetRange", 1) -- Clear any temporary boost
 						player:SetAttribute("ActiveMagnet", false) -- Clear active state
 						
-						-- IMPORTANT: Move character far away BEFORE killing to prevent spawn protection issues
+						-- Smooth death handling - disable character without teleporting
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
 						if rootPart then
-							rootPart.CFrame = CFrame.new(0, -1000, 0) -- Move far below the map
+							-- Make character invisible and non-collidable instead of teleporting
+							rootPart.Anchored = true -- Prevent any movement
+							rootPart.CanCollide = false
+							rootPart.CanTouch = false -- Prevent orb collection
+							rootPart.CanQuery = false
+							
+							-- Fade out all character parts smoothly
+							for _, part in pairs(character:GetDescendants()) do
+								if part:IsA("BasePart") then
+									part.CanCollide = false
+									part.CanTouch = false
+									-- Smooth fade out
+									if part.Transparency < 1 then
+										task.spawn(function()
+											local startTrans = part.Transparency
+											for i = 1, 10 do
+												part.Transparency = startTrans + (1 - startTrans) * (i / 10)
+												task.wait(0.05)
+											end
+											part.Transparency = 1
+										end)
+									end
+								elseif part:IsA("Decal") or part:IsA("Texture") then
+									part.Transparency = 1
+								end
+							end
 						end
 						
+						-- Clean death with proper timing for menu
 						humanoid.Health = 0
+						
+						-- Fire death event for menu system
+						local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
+						if deathEvent then
+							deathEvent:Fire(player)
+						end
 
 						task.spawn(function()
 							task.wait(5)
@@ -1468,19 +1501,20 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - MAGNET FIX")
+print("⚡ SnakeCollisionHandler V7.0 FINAL - POLISHED & MENU-READY")
 print("🚀 All V7 functionality preserved with performance optimizations")
 print("💎 FIXED: Death orbs properly spawn along snake segments")
 print("🧲 FIXED: MAGNET EFFECT CLEARED ON DEATH!")
-print("✅ FIXED: Character moved to Y=-1000 before death")
-print("🛡️ DEATH ORB PROTECTION:")
-print("   - Magnet attributes reset immediately on death")
-print("   - Character teleported far away")
-print("   - Simple 1-second delay for ALL death orbs")
-print("   - Death orbs named 'DeathOrb' for special LOD")
-print("   - Skips first 4 segments (starts from segment 5)")
-print("🔧 Optimizations: Batched spawning, aggressive LOD, bounds checking")
-print("📊 Performance: 12Hz checks, 96 chunk size, 1.5s cache")
+print("✨ FIXED: Smooth death transition (no camera issues)")
+print("🛡️ DEATH HANDLING:")
+print("   - Magnet attributes reset immediately")
+print("   - Character fades out smoothly (0.5s)")
+print("   - Character anchored & collision disabled")
+print("   - Works perfectly with SlitherIO menu")
+print("   - 1-second delay for death orbs")
+print("   - Death orbs use special 'DeathOrb' LOD")
+print("🔧 Optimizations: Batched spawning, aggressive LOD")
+print("📊 Performance: 12Hz collision checks, 96 chunk size")
 
 -- Debug command (unchanged from V7)
 local function toggleDebug()
