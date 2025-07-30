@@ -1663,13 +1663,8 @@ local function findCollisionInSegments(headPos, segments, collisionDist, useGrid
 			end
 		end
 	else
-		-- Direct iteration - CHECK REAL SEGMENTS ONLY
+		-- Direct iteration
 		for i, seg in ipairs(segments) do
-			-- Skip interpolated/virtual segments for large snakes
-			if seg._isVirtual and snakeLength > 1000 then
-				continue
-			end
-			
 			local segPos = seg.Position or seg.position
 			if segPos and isValidCollision(headPos, segPos, effectiveDist, snakeLength) then
 				return true
@@ -2075,7 +2070,7 @@ RunService.Stepped:Connect(function()
 									segmentData.segments, 
 									BODY_COLLISION_DISTANCE,
 									segmentData.length > 200,
-									playerSnakeLength
+									segmentData.length
 								)
 							end
 
