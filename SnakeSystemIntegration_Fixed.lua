@@ -389,19 +389,10 @@ local function onCharacterAdded(character)
 				end
 			end
 
-			-- Get snake's current position and length for death orbs
-			local deathPos = rootPart.Position
+			-- SnakeCollisionHandler now handles orb spawning along snake path
+			-- No need to spawn orbs here anymore
 			local snakeLength = lengthValue and lengthValue.Value or 55
-
-			print("Snake died - spawning", math.floor(snakeLength / 10), "death orbs at", deathPos)
-
-			-- Spawn death orbs
-			if _G.OrbSpawner and _G.OrbSpawner.spawnDeathOrbsForSnake then
-				local orbCount = math.min(math.floor(snakeLength / 10), 100)
-				_G.OrbSpawner.spawnDeathOrbsForSnake(deathPos, orbCount)
-			else
-				warn("OrbSpawner not loaded yet or missing spawnDeathOrbsForSnake function")
-			end
+			print("Snake died - Length:", snakeLength, "(orbs handled by collision system)")
 
 			-- Clean up snake
 			activeSnakes[player]:destroy()
