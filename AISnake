@@ -2337,14 +2337,21 @@ function AISnake:updateMovement(dt)
 					return
 				end
 			elseif data.type == "PLAYER_HEAD" then
+				-- Let SnakeCollisionHandler handle player collisions to prevent double-processing
+				-- This was causing AI snakes to "go into" players
+				--[[
 				if otherOwner.Character and otherOwner.Character:FindFirstChildOfClass("Humanoid") then
 					otherOwner.Character:FindFirstChildOfClass("Humanoid").Health = 0
 				end
 				self:Destroy()
 				return
+				--]]
 			elseif data.type == "PLAYER_SEGMENT" then
+				-- Let SnakeCollisionHandler handle this too
+				--[[
 				self:Destroy()
 				return
+				--]]
 			end
 		end
 	end
