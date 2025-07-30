@@ -29,11 +29,11 @@ local YIELD_INTERVAL = 100
 
 -- === IMPROVED COLLISION SETTINGS ===
 local COLLISION_FRAME_SKIP = 2 -- More frequent checks for large snakes
-local BODY_COLLISION_DISTANCE = 3.0 -- Increased for reliability
-local HEAD_COLLISION_DISTANCE = 3.5 -- Increased for reliability
-local MIN_COLLISION_DISTANCE = 2.0 -- More forgiving
-local COLLISION_BUFFER = 0.2 -- Standard buffer
-local NETWORK_COMPENSATION = 0.2 -- Standard compensation
+local BODY_COLLISION_DISTANCE = 2.8 -- Tighter for body collisions
+local HEAD_COLLISION_DISTANCE = 3.2 -- Slightly larger for head-to-head
+local MIN_COLLISION_DISTANCE = 1.8 -- Tighter minimum
+local COLLISION_BUFFER = 0.15 -- Smaller buffer for precision
+local NETWORK_COMPENSATION = 0.15 -- Less compensation for accuracy
 local SPAWN_PROTECTION_TIME = 3 -- Reduced from 5 seconds
 local MIN_AI_SPAWN_DISTANCE = 50 -- Minimum distance between AI spawn points
 
@@ -728,11 +728,29 @@ local function getPlayerSegments(player)
 			-- Don't include head in body segments
 		end
 		
-		-- Get body segments (Segment1, Segment2, etc.)
-		for i = 1, 50 do
+		-- Get ALL body segments for collision (not just first 50)
+		-- The new snake system can have up to 500 segments
+		local maxSegments = 500
+		local segmentCheckInterval = 1
+		
+		-- For very long snakes, check every other segment to balance performance
+		if player:FindFirstChild("leaderstats") then
+			local lengthValue = player.leaderstats:FindFirstChild("Length")
+			if lengthValue and lengthValue.Value > 200 then
+				segmentCheckInterval = 2 -- Check every other segment for long snakes
+			end
+			if lengthValue and lengthValue.Value > 1000 then
+				segmentCheckInterval = 3 -- Check every 3rd segment for very long snakes
+			end
+		end
+		
+		for i = 1, maxSegments, segmentCheckInterval do
 			local seg = snakeModel:FindFirstChild("Segment" .. i)
 			if seg and seg:IsA("BasePart") and seg.Parent then
 				segmentParts[#segmentParts + 1] = seg
+			else
+				-- No more segments found
+				break
 			end
 		end
 		
@@ -791,7 +809,7 @@ local function getPlayerSegments(player)
 		return nil
 	end
 
-	-- Extract valid segments with parent check
+	-- Extract ALL valid segments (including tail)
 	segmentParts = {}
 	for _, seg in ipairs(snakeInstance.segments) do
 		if seg and seg.Parent and seg.Parent.Parent then
@@ -872,7 +890,9 @@ local function getAISnakeSegments(snake)
 	local snakeLength = #segmentParts
 	if snakeLength == 0 then return nil end
 
-	local interpolatedSegments = interpolateSegments(segmentParts, snakeLength)
+	-- For AI snakes, use real segments directly (no interpolation)
+	-- This ensures we don't miss any tail segments
+	local interpolatedSegments = segmentParts
 
 	local chunks = nil
 	if snakeLength > EXTREME_LENGTH_THRESHOLD then
@@ -2283,32 +2303,51 @@ RunService.Stepped:Connect(function()
 							continue
 						end
 
+						-- Skip if we're checking AI head position (prevent head-to-head being counted as body collision)
+						local aiHeadPos = aiSnake.HeadParts.head.Position
+						local distToHead = (headPos - aiHeadPos).Magnitude
+						if distToHead < HEAD_COLLISION_DISTANCE * 1.5 then
+							-- Too close to head, this should be handled by head-to-head collision
+							continue
+						end
+
 						local aiSegmentData = getAISnakeSegments(aiSnake)
 						if aiSegmentData and aiSegmentData.segments then
 							local collision = false
 
-							-- Check if player head hits AI body
+							-- Check if player head hits AI body (use tighter collision for precision)
 							if aiSegmentData.chunks then
-								collision = findCollisionInChunks(headPos, aiSegmentData.chunks, HEAD_COLLISION_DISTANCE, aiSegmentData.length)
+								collision = findCollisionInChunks(headPos, aiSegmentData.chunks, BODY_COLLISION_DISTANCE, aiSegmentData.length)
 							else
 								collision = findCollisionInSegments(
 									headPos,
 									aiSegmentData.segments,
-									HEAD_COLLISION_DISTANCE,
+									BODY_COLLISION_DISTANCE,
 									aiSegmentData.length > 200,
 									aiSegmentData.length
 								)
 							end
 
 							if collision then
-								-- AI dies when player hits its body
-								queueAIDeath(aiSnake.HeadParts.head)
-								
-								-- Give player confidence buff
-								if aiSnake.setConfidenceBuff then
-									aiSnake:setConfidenceBuff()
+								-- Double check it's not the AI's head area
+								local hitHead = false
+								if aiSnake.HeadParts and aiSnake.HeadParts.head then
+									local headDist = (headPos - aiSnake.HeadParts.head.Position).Magnitude
+									if headDist < HEAD_COLLISION_DISTANCE then
+										hitHead = true
+									end
 								end
-								break
+								
+								if not hitHead then
+									-- AI dies when player hits its body
+									queueAIDeath(aiSnake.HeadParts.head)
+									
+									-- Give AI confidence buff (not player)
+									if aiSnake.setConfidenceBuff then
+										aiSnake:setConfidenceBuff()
+									end
+									break
+								end
 							end
 						end
 					end
