@@ -1759,6 +1759,47 @@ function AISnake.new(startPosition)
 	self._lastPositions = {}
 	self._stuckCheckTime = 0
 	self._lastStuckCheck = tick()
+	
+	-- Enhanced spawn protection
+	self._spawnActivating = true
+	
+	-- Make segments visible after spawn stabilization
+	task.defer(function()
+		task.wait(1.0)  -- Wait for snake to fully stabilize
+		
+		-- Only activate if snake still exists
+		if not self._active or self._destroyed then return end
+		
+		self._spawnActivating = false
+		
+		-- Force a random direction to start moving
+		local randomAngle = mathRandom() * 2 * mathPi
+		self.Direction = Vector3new(mathSin(randomAngle), 0, mathCos(randomAngle))
+		self.CurrentYaw = mathAtan2(self.Direction.X, self.Direction.Z)
+		self.TargetYaw = self.CurrentYaw
+		self.State = "WANDER"
+		
+		-- Enable segments with simple fade-in (no movement during fade)
+		for i, segment in ipairs(self.Segments) do
+			if segment and segment.Parent then
+				-- Simple fade-in without movement
+				task.spawn(function()
+					local fadeTime = 0.2
+					local steps = 10
+					
+					for step = 1, steps do
+						if not segment or not segment.Parent then return end
+						task.wait(fadeTime / steps)
+						segment.Transparency = 1 - (step / steps)
+					end
+					
+					if segment and segment.Parent then
+						segment.Transparency = 0
+					end
+				end)
+			end
+		end
+	end)
 
 	return self
 end
