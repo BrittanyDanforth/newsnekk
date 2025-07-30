@@ -101,6 +101,10 @@ do
 		local results = {}
 		local minX, minZ = getCellCoords(position - Vector3new(radius, 0, radius))
 		local maxX, maxZ = getCellCoords(position + Vector3new(radius, 0, radius))
+		
+		-- Add safety limits to prevent overwhelming queries
+		local maxResults = 50
+		local resultCount = 0
 
 		for x = minX, maxX do
 			if grid[x] then
@@ -109,6 +113,12 @@ do
 						for _, entity in grid[x][z] do
 							if (entity.part.Position - position).Magnitude <= radius then
 								table.insert(results, entity)
+								resultCount = resultCount + 1
+								
+								-- Stop if we have too many results
+								if resultCount >= maxResults then
+									return results
+								end
 							end
 						end
 					end
@@ -862,7 +872,17 @@ function AISnake:findNearbyThreats()
 			if entity.type == "AI_HEAD" then
 				enemyLength = entity.owner.CurrentLength or 0
 			else
-				enemyLength = getPlayerLength(entity.owner)
+				-- Get player length more reliably
+				local player = entity.owner
+				if player and player:FindFirstChild("leaderstats") then
+					local lengthValue = player.leaderstats:FindFirstChild("Length")
+					if lengthValue then
+						enemyLength = lengthValue.Value or 0
+					end
+				end
+				
+				-- Cap enemy length perception to prevent AI panic
+				enemyLength = math.min(enemyLength, 1000)
 			end
 
 			local lengthDiff = enemyLength - self.CurrentLength
@@ -1321,6 +1341,15 @@ function AISnake:_determineAction()
 		-- Always look for orbs, even if we have a target
 		local orb, dist = self:findBestOrb()
 		
+		-- Safety check - if no orbs found and we're stuck, add random movement
+		if not orb and state == "WANDER" and (now - (self._lastOrbTime or 0)) > 5 then
+			-- Haven't found an orb in 5 seconds, add some random movement
+			self._needsRandomTurn = true
+			self._lastOrbTime = now
+		elseif orb then
+			self._lastOrbTime = now
+		end
+		
 		-- More aggressive orb targeting
 		if orb and dist < p.OrbSeekRadius * 2 then
 			-- Switch to closer orb if found
@@ -1380,10 +1409,27 @@ function AISnake:_determineAction()
 		local distFromCenter = toCenter.Magnitude
 
 		-- Random impulse movements for more interesting behavior
-		if mathRandom() < 0.02 then  -- 2% chance per frame
+		if mathRandom() < 0.02 or self._needsRandomTurn then  -- 2% chance per frame or when stuck
 			-- Sudden direction change for variety
 			self.TargetYaw = self.TargetYaw + mathRad(mathRandom(-90, 90))
 			self.LastTurn = now
+			self._needsRandomTurn = false
+		end
+		
+		-- Anti-straight-line check
+		if not self._lastDirectionChange then
+			self._lastDirectionChange = now
+			self._lastDirection = self.Direction
+		elseif now - self._lastDirectionChange > 3 then
+			-- Check if we've been going straight for too long
+			local dirChange = (self.Direction - self._lastDirection).Magnitude
+			if dirChange < 0.1 then
+				-- Force a turn
+				self.TargetYaw = self.TargetYaw + mathRad(mathRandom(-120, 120))
+				self._needsRandomTurn = true
+			end
+			self._lastDirectionChange = now
+			self._lastDirection = self.Direction
 		end
 
 		-- More dynamic wandering with variable turn patterns
@@ -2311,14 +2357,29 @@ function AISnake:updateMovement(dt)
 					return
 				end
 			elseif data.type == "PLAYER_HEAD" then
-				if otherOwner.Character and otherOwner.Character:FindFirstChildOfClass("Humanoid") then
-					otherOwner.Character:FindFirstChildOfClass("Humanoid").Health = 0
+				-- Check if it's a real collision with the new snake system
+				if otherOwner and otherOwner.Character then
+					local playerHead = otherOwner.Character:FindFirstChild("HumanoidRootPart")
+					if playerHead then
+						local realDist = (myHead.Position - playerHead.Position).Magnitude
+						if realDist < 10 then -- Only count real collisions
+							if otherOwner.Character:FindFirstChildOfClass("Humanoid") then
+								otherOwner.Character:FindFirstChildOfClass("Humanoid").Health = 0
+							end
+							self:Destroy()
+							return
+						end
+					end
 				end
-				self:Destroy()
-				return
 			elseif data.type == "PLAYER_SEGMENT" then
-				self:Destroy()
-				return
+				-- Verify it's a real segment collision
+				if otherPart and otherPart.Parent then
+					local realDist = (myHead.Position - otherPart.Position).Magnitude
+					if realDist < 5 then -- Only count close collisions
+						self:Destroy()
+						return
+					end
+				end
 			end
 		end
 	end
@@ -2414,12 +2475,29 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 					SpatialGrid.Insert(head, player, "PLAYER_HEAD")
 				end
 
-				local segmentCount = 0
-				for _, part in player.Character:GetChildren() do
-					if part:IsA("BasePart") and part.Name:match("Segment") then
-						segmentCount = segmentCount + 1
-						if segmentCount % 4 == 1 then
-							SpatialGrid.Insert(part, player, "PLAYER_SEGMENT")
+				-- Look for the optimized snake system
+				local snakeModel = Workspace:FindFirstChild("Snake_" .. player.Name)
+				if snakeModel then
+					-- Only add first 50 segments for collision (matching your system)
+					local segmentCount = 0
+					for i = 1, 50 do
+						local segment = snakeModel:FindFirstChild("Segment" .. i)
+						if segment and segment:IsA("BasePart") then
+							segmentCount = segmentCount + 1
+							if segmentCount % 4 == 1 then
+								SpatialGrid.Insert(segment, player, "PLAYER_SEGMENT")
+							end
+						end
+					end
+				else
+					-- Fallback to old method
+					local segmentCount = 0
+					for _, part in player.Character:GetChildren() do
+						if part:IsA("BasePart") and part.Name:match("Segment") then
+							segmentCount = segmentCount + 1
+							if segmentCount % 4 == 1 and segmentCount <= 50 then -- Limit to 50
+								SpatialGrid.Insert(part, player, "PLAYER_SEGMENT")
+							end
 						end
 					end
 				end
