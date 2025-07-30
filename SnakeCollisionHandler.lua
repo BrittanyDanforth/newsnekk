@@ -1,15 +1,15 @@
--- SnakeCollisionHandler V7.0 OPTIMIZED: CHARACTER CLEANUP FIX
+-- SnakeCollisionHandler V7.0 OPTIMIZED: MAGNET FIX
 -- All V7 functionality preserved with performance optimizations
 -- FIXED: Death orb spawning now properly distributes orbs along snake path
+-- FIXED: MAGNET EFFECT CLEARED ON DEATH (prevents orbs being pulled to dead character)
 -- FIXED: Character moved far away before death to prevent spawn protection
--- FIXED: No attributes or complex checks that can interfere with the game
 -- 
--- Spawn Protection Avoidance Strategy:
---   - Character moved to Y=-1000 before death (prevents spawn protection)
+-- Death Orb Protection Strategy:
+--   - Magnet attributes cleared immediately on death
+--   - Character moved to Y=-1000 before death
 --   - Simple 1-second delay for ALL death orbs
 --   - Death orbs named 'DeathOrb' for special LOD handling
 --   - Start from segment 5 (skip head segments)
---   - Near-head segments get 15-stud offset
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -810,6 +810,11 @@ task.spawn(function()
 
 						deadPlayers[player] = true
 						
+						-- IMPORTANT: Clear magnet effect IMMEDIATELY to prevent death orbs from being pulled
+						player:SetAttribute("MagnetRange", 1) -- Reset to default (no magnet)
+						player:SetAttribute("TempMagnetRange", 1) -- Clear any temporary boost
+						player:SetAttribute("ActiveMagnet", false) -- Clear active state
+						
 						-- IMPORTANT: Move character far away BEFORE killing to prevent spawn protection issues
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
 						if rootPart then
@@ -1463,16 +1468,17 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - CHARACTER CLEANUP FIX")
+print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - MAGNET FIX")
 print("🚀 All V7 functionality preserved with performance optimizations")
 print("💎 FIXED: Death orbs properly spawn along snake segments")
+print("🧲 FIXED: MAGNET EFFECT CLEARED ON DEATH!")
 print("✅ FIXED: Character moved to Y=-1000 before death")
-print("🛡️ SPAWN PROTECTION AVOIDANCE:")
-print("   - Character teleported far away to prevent spawn protection")
+print("🛡️ DEATH ORB PROTECTION:")
+print("   - Magnet attributes reset immediately on death")
+print("   - Character teleported far away")
 print("   - Simple 1-second delay for ALL death orbs")
-print("   - Death orbs named 'DeathOrb' for special LOD handling")
+print("   - Death orbs named 'DeathOrb' for special LOD")
 print("   - Skips first 4 segments (starts from segment 5)")
-print("   - Near-head segments get extra 15-stud offset")
 print("🔧 Optimizations: Batched spawning, aggressive LOD, bounds checking")
 print("📊 Performance: 12Hz checks, 96 chunk size, 1.5s cache")
 
