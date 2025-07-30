@@ -6,11 +6,12 @@ local RunService        = game:GetService("RunService")
 local AISnake = require(ReplicatedStorage:WaitForChild("AISnake"))
 
 -- === CONFIGURATION ===
-local NUM_SNAKES   = 8          -- reduced from 10+ for better performance
+local NUM_SNAKES   = 6          -- reduced to prevent overcrowding death orbs
 local SPAWN_HEIGHT = 5
 
 -- === AI SNAKE MANAGEMENT ===
 local aiSnakes = {}
+local respawnTimers = {} -- Track when snakes died to add respawn delay
 
 -- Function to clean up orphaned snake parts (run periodically)
 local function cleanupOrphanedParts()
@@ -79,16 +80,40 @@ RunService.Stepped:Connect(function()
 	if frameCount < 30 then return end
 	frameCount = 0
 	
+	local currentTime = tick()
+	
 	for i = 1, NUM_SNAKES do
 		local snake = aiSnakes[i]
 		if not snake or not snake.RootPart or not snake.RootPart.Parent then
-			-- Clean up old snake if needed
-			if snake and snake.Destroy then
-				pcall(function() snake:Destroy() end)
+			-- Check if we need to wait before respawning
+			if respawnTimers[i] then
+				-- Wait 3 seconds after death before respawning
+				if currentTime - respawnTimers[i] < 3 then
+					continue
+				end
+				respawnTimers[i] = nil
 			end
 			
-			-- Respawn at random position
+			-- Clean up old snake if needed
+			if snake then
+				-- Mark death time
+				if not respawnTimers[i] then
+					respawnTimers[i] = currentTime
+				end
+				
+				if snake.Destroy then
+					pcall(function() snake:Destroy() end)
+				end
+				aiSnakes[i] = nil -- Clear reference
+				continue -- Don't respawn yet
+			end
+			
+			-- Respawn at random position with spread
 			local pos = getRandomSpawnPosition()
+			-- Add some height variation to prevent all spawning at same level
+			pos = pos + Vector3.new(0, math.random(-2, 2), 0)
+			
+			print("🔄 Respawning AI Snake", i, "at", pos)
 			aiSnakes[i] = AISnake.new(pos)
 		end
 	end

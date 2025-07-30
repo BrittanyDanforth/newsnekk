@@ -767,9 +767,15 @@ function AISnake:findBestOrb()
 
 	-- Prioritize untargeted orbs
 	local targetedOrbs = {}
+	local deathOrbTargetCount = {} -- Track how many AI are targeting each death orb
+	
 	for ai, orb in AISnake._orbTargets do
 		if ai ~= self and orb and orb.Parent then
 			targetedOrbs[orb] = true
+			-- Count death orb targets
+			if orb.Name == "DeathOrb" then
+				deathOrbTargetCount[orb] = (deathOrbTargetCount[orb] or 0) + 1
+			end
 		end
 	end
 
@@ -777,6 +783,8 @@ function AISnake:findBestOrb()
 	local orbsFound = 0
 	local deathOrbFound = nil
 	local deathOrbDist = math.huge
+	local alternativeDeathOrb = nil
+	local alternativeDeathOrbDist = math.huge
 
 	-- Check OrbFolder
 	local orbFolder = Workspace:FindFirstChild("OrbFolder") or Workspace:FindFirstChild("Orbs")
@@ -787,10 +795,18 @@ function AISnake:findBestOrb()
 				if dist < minDist * 1.5 then -- Slightly larger radius for backup check
 					orbsFound = orbsFound + 1
 					
-					-- PRIORITIZE DEATH ORBS!
-					if orb.Name == "DeathOrb" and dist < deathOrbDist then
-						deathOrbDist = dist
-						deathOrbFound = orb
+					-- PRIORITIZE DEATH ORBS WITH SMART TARGETING!
+					if orb.Name == "DeathOrb" then
+						local targetCount = deathOrbTargetCount[orb] or 0
+						-- Prefer untargeted death orbs
+						if targetCount == 0 and dist < deathOrbDist then
+							deathOrbDist = dist
+							deathOrbFound = orb
+						elseif targetCount < 2 and dist < alternativeDeathOrbDist then
+							-- Keep track of alternative if main is taken
+							alternativeDeathOrbDist = dist
+							alternativeDeathOrb = orb
+						end
 					elseif not deathOrbFound and dist < minDist then
 						minDist = dist
 						nearest = orb
@@ -807,11 +823,17 @@ function AISnake:findBestOrb()
 			if dist < self.Personality.OrbSeekRadius * 2 then -- Double radius for death orbs
 				orbsFound = orbsFound + 1
 				
-				-- ALWAYS PRIORITIZE DEATH ORBS!
+				-- SMART DEATH ORB TARGETING!
 				if obj.Name == "DeathOrb" then
-					if dist < deathOrbDist then
+					local targetCount = deathOrbTargetCount[obj] or 0
+					-- Prefer untargeted death orbs
+					if targetCount == 0 and dist < deathOrbDist then
 						deathOrbDist = dist
 						deathOrbFound = obj
+					elseif targetCount < 2 and dist < alternativeDeathOrbDist then
+						-- Keep track of alternative if main is taken
+						alternativeDeathOrbDist = dist
+						alternativeDeathOrb = obj
 					end
 				elseif not deathOrbFound and dist < minDist then
 					minDist = dist
@@ -834,10 +856,17 @@ function AISnake:findBestOrb()
 		end
 	end
 
-	-- ALWAYS RETURN DEATH ORB IF FOUND!
+	-- SMART RETURN - Use alternative death orb if main is heavily targeted
 	if deathOrbFound then
-		print("🎯 AI Snake", self._personalityType, "found DEATH ORB at distance:", math.floor(deathOrbDist))
+		-- Only log if we're close enough to actually get it
+		if deathOrbDist < 50 then
+			print("🎯 AI Snake", self._personalityType, "found DEATH ORB at distance:", math.floor(deathOrbDist))
+		end
 		return deathOrbFound, deathOrbDist
+	elseif alternativeDeathOrb and alternativeDeathOrbDist < 100 then
+		-- Use alternative if it's reasonably close
+		print("🎯 AI Snake", self._personalityType, "found alternative DEATH ORB at distance:", math.floor(alternativeDeathOrbDist))
+		return alternativeDeathOrb, alternativeDeathOrbDist
 	end
 
 	return nearest, minDist
