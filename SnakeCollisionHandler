@@ -29,11 +29,11 @@ local YIELD_INTERVAL = 100
 
 -- === IMPROVED COLLISION SETTINGS ===
 local COLLISION_FRAME_SKIP = 4 -- Balanced for responsiveness and performance
-local BODY_COLLISION_DISTANCE = 2.2 -- Tightened from 2.5 for accuracy
-local HEAD_COLLISION_DISTANCE = 2.8 -- Tightened from 3.0 for accuracy
-local MIN_COLLISION_DISTANCE = 1.8 -- Minimum distance for any collision
-local COLLISION_BUFFER = 0.2 -- Reduced from 0.3 for precision
-local NETWORK_COMPENSATION = 0.15 -- Reduced from 0.2
+local BODY_COLLISION_DISTANCE = 2.0 -- Even tighter for AI precision
+local HEAD_COLLISION_DISTANCE = 2.5 -- Tighter to prevent false positives
+local MIN_COLLISION_DISTANCE = 1.5 -- Stricter minimum
+local COLLISION_BUFFER = 0.1 -- Very small buffer
+local NETWORK_COMPENSATION = 0.1 -- Minimal compensation for AI
 local SPAWN_PROTECTION_TIME = 3 -- Reduced from 5 seconds
 local MIN_AI_SPAWN_DISTANCE = 50 -- Minimum distance between AI spawn points
 
@@ -635,7 +635,14 @@ local function interpolateSegments(segmentParts, snakeLength)
 
 	-- For very long snakes, reduce interpolation to prevent too many segments
 	if snakeLength > 1000 then
-		skipFactor = math.max(skipFactor, 3) -- Skip more segments for very long snakes
+		skipFactor = math.max(skipFactor, 5) -- Skip even more segments for huge snakes
+	end
+	
+	-- For AI snakes, be more conservative with interpolation
+	local isAI = false
+	if segmentParts[1] and segmentParts[1].Name and segmentParts[1].Name:find("AISegment") then
+		isAI = true
+		skipFactor = math.max(skipFactor, 2) -- AI snakes need less interpolation
 	end
 
 	local processedCount = 0
@@ -1502,7 +1509,7 @@ local function isValidCollision(headPos, segmentPos, collisionDist, snakeLength)
 
 	-- For medium distances, add extra validation
 	local heightDiff = math.abs(headPos.Y - segmentPos.Y)
-	if heightDiff > 3.0 then
+	if heightDiff > 5.0 then -- Increased from 3.0 to prevent false AI deaths
 		return false -- Too much height difference
 	end
 
@@ -2082,8 +2089,8 @@ RunService.Stepped:Connect(function()
 
 			local aiPos = aiHead.Position
 
-			-- Validate AI position
-			if aiPos.Y < -5 or aiPos.Y > 50 then
+			-- Validate AI position (more lenient for AI)
+			if aiPos.Y < -10 or aiPos.Y > 100 then
 				continue
 			end
 
@@ -2166,8 +2173,34 @@ RunService.Stepped:Connect(function()
 						end
 
 						if collision then
-							queueAIDeath(aiHead)
-							break
+							-- Extra validation for AI - make sure it's a real collision
+							if segmentData and segmentData.segments then
+								-- Find the actual collision point
+								local realCollision = false
+								for _, seg in ipairs(segmentData.segments) do
+									if seg and seg.Parent then
+										local segPos = seg.Position or seg.position
+										if segPos then
+											local dist = (aiPos - segPos).Magnitude
+											if dist < BODY_COLLISION_DISTANCE * 0.8 then -- Stricter check
+												-- Verify height difference
+												if math.abs(aiPos.Y - segPos.Y) < 3 then
+													realCollision = true
+													if DEBUG_COLLISIONS then
+														print(string.format("[AI DEATH] AI collision verified at distance %.2f", dist))
+													end
+													break
+												end
+											end
+										end
+									end
+								end
+								
+								if realCollision then
+									queueAIDeath(aiHead)
+									break
+								end
+							end
 						end
 					end
 				end
@@ -2551,8 +2584,35 @@ RunService.Stepped:Connect(function()
 						end
 
 						if collision then
-							queueAIDeath(aiHead)
-							break
+							-- Extra validation for AI vs AI - verify it's real
+							local aiHeadPos = aiHead.Position
+							local realCollision = false
+							
+							-- Double-check with actual segment positions
+							for _, seg in ipairs(segmentData.segments) do
+								if seg and seg.Parent then
+									local segPos = seg.Position or seg.position
+									if segPos then
+										local dist = (aiHeadPos - segPos).Magnitude
+										-- Much stricter validation for AI vs AI
+										if dist < BODY_COLLISION_DISTANCE * 0.7 then
+											-- Verify height is similar
+											if math.abs(aiHeadPos.Y - segPos.Y) < 2 then
+												realCollision = true
+												if DEBUG_COLLISIONS then
+													print(string.format("[AI vs AI] Collision verified at distance %.2f", dist))
+												end
+												break
+											end
+										end
+									end
+								end
+							end
+							
+							if realCollision then
+								queueAIDeath(aiHead)
+								break
+							end
 						end
 					end
 				end
