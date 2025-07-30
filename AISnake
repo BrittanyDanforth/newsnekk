@@ -51,7 +51,7 @@ AISnake.__index = AISnake
 -- === OPTIMIZED SETTINGS ===
 local MAX_AI_SNAKES = 10  -- Reduced from 14 for better performance
 local SPATIAL_GRID_UPDATE_RATE = 1.0  -- Increased from 0.5 (update less often)
-local BRAIN_UPDATES_PER_FRAME = 1
+local BRAIN_UPDATES_PER_FRAME = 3  -- Update 3 snakes per frame to prevent freezing
 local DEBUG_UPDATE_RATE = 5.0  -- Increased from 2.0 (debug less often)
 local AI_HEIGHT = 5
 local SEGMENT_UPDATE_SKIP = 2  -- Update every other segment for performance
@@ -2342,9 +2342,12 @@ function AISnake:updateMovement(dt)
 	end
 end
 
--- === UPDATE LOOPS (unchanged) ===
+-- === UPDATE LOOPS ===
 if AISnake._movementConnection then AISnake._movementConnection:Disconnect() end
 if AISnake._brainConnection then AISnake._brainConnection:Disconnect() end
+
+-- Add a simple brain update counter
+local brainUpdateCounter = 0
 
 AISnake._movementConnection = RunService.Heartbeat:Connect(function(dt)
 	local snakesToUpdate = {}
@@ -2352,6 +2355,19 @@ AISnake._movementConnection = RunService.Heartbeat:Connect(function(dt)
 		local snake = AISnake._activeSnakes[i]
 		if snake and snake._active then
 			table.insert(snakesToUpdate, snake)
+		end
+	end
+
+	-- Update brain every 30 frames (0.5 seconds at 60fps)
+	brainUpdateCounter = brainUpdateCounter + 1
+	if brainUpdateCounter >= 30 then
+		brainUpdateCounter = 0
+		-- Update ALL snakes' brains at once
+		for i = 1, #snakesToUpdate do
+			local snake = snakesToUpdate[i]
+			if snake and snake._active then
+				snake:updateBrain()
+			end
 		end
 	end
 
