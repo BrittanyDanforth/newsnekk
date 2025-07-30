@@ -236,7 +236,12 @@ end
 -- Direct spawn function for immediate orbs
 local function spawnOrbDirect(position, value)
 	local success, err = pcall(function()
-		OrbUtils.spawnOrbAt(position, value)
+		local orb = OrbUtils.spawnOrbAt(position, value)
+		-- Mark as DeathOrb for special LOD handling
+		if orb then
+			orb.Name = "DeathOrb"
+		end
+		return orb
 	end)
 	if not success then
 		warn("Orb spawn failed:", err)
