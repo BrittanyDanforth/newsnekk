@@ -1,11 +1,10 @@
--- SnakeCollisionHandler V7.0 OPTIMIZED: SPAWN PROTECTION IMMUNITY FIX
+-- SnakeCollisionHandler V7.0 OPTIMIZED: V7.0 DEATH ORB SYSTEM
 -- All V7 functionality preserved with performance optimizations
--- FIXED: Death orb spawning now properly distributes orbs along snake path
--- SPAWN PROTECTION IMMUNITY:
---   - All death orbs marked with SpawnProtectionImmune attribute
---   - 3 second delay ensures spawn protection has ended
---   - Starts from segment 5 to avoid head area
---   - No complex distance checks that affect other orbs
+-- DEATH ORB SYSTEM: Using exact V7.0 death orb spawning (no shrinking/disappearing)
+--   - Direct spawning without delays or batching
+--   - Spawns along entire snake path
+--   - Simple random offset (2 studs)
+--   - No spawn protection workarounds needed
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -34,11 +33,9 @@ local BODY_COLLISION_DISTANCE = 2.8
 local MIN_COLLISION_DISTANCE = 2.0
 local COLLISION_BUFFER = 0.5
 
--- === OPTIMIZED ORB SPAWNING ===
-local ORB_SPAWN_HEIGHT = 2
-local MIN_ORB_SPACING = 3
-local ORB_BATCH_SIZE = 8 -- Spawn orbs in smaller batches
-local ORB_SPAWN_DELAY = 0.03 -- Small delay between batches
+-- === FIXED ORB SPAWNING SYSTEM (FROM V7.0) ===
+local ORB_SPAWN_HEIGHT = 2 -- Standard height above ground for orbs
+local MIN_ORB_SPACING = 3 -- Minimum distance between spawned orbs
 
 -- === DEBUG SYSTEM ===
 local DEBUG_COLLISIONS = false
@@ -182,65 +179,18 @@ local CollisionCache = {
 	frameCache = {}
 }
 
--- === OPTIMIZED ORB SPAWNING ===
-local orbSpawnBuffer = {}
-local isProcessingOrbs = false
+-- === FIXED ORB SPAWNING SYSTEM ===
+local ORB_SPAWN_HEIGHT = 2 -- Standard height above ground for orbs
+local MIN_ORB_SPACING = 3 -- Minimum distance between spawned orbs
 
-local function processOrbBatch()
-	if isProcessingOrbs or #orbSpawnBuffer == 0 then return end
+local function spawnOrbDirect(position, value)
+	-- Direct spawn with minimal processing
+	local success, err = pcall(function()
+		OrbUtils.spawnOrbAt(position, value)
+	end)
 
-	isProcessingOrbs = true
-	local batch = math.min(ORB_BATCH_SIZE, #orbSpawnBuffer)
-
-		for i = 1, batch do
-		local orbData = table.remove(orbSpawnBuffer, 1)
-		if orbData then
-			local success, result = pcall(function()
-				local orb = OrbUtils.spawnOrbAt(orbData.position, orbData.value)
-				
-				-- Mark death orbs as immune to spawn protection
-				if orb and orbData.isDeathOrb then
-					orb:SetAttribute("DeathOrb", true)
-					orb:SetAttribute("SpawnProtectionImmune", true)
-					orb:SetAttribute("IgnoreCleanup", true)
-					
-					-- Also add a tag for redundancy
-					local tag = Instance.new("BoolValue")
-					tag.Name = "DeathOrb"
-					tag.Parent = orb
-				end
-				
-				return orb
-			end)
-
-			if DEBUG_COLLISIONS and not success then
-				warn("[ORB SPAWN ERROR]", result)
-			end
-		end
-	end
-
-	isProcessingOrbs = false
-
-	-- Schedule next batch
-	if #orbSpawnBuffer > 0 then
-		task.spawn(function()
-			task.wait(ORB_SPAWN_DELAY)
-			processOrbBatch()
-		end)
-	end
-end
-
-local function spawnOrbBatched(position, value, isDeathOrb)
-	-- Add to buffer with death orb flag
-	table.insert(orbSpawnBuffer, {
-		position = position,
-		value = value,
-		isDeathOrb = isDeathOrb or false  -- Mark death orbs as special
-	})
-
-	-- Start processing if not already
-	if not isProcessingOrbs then
-		task.spawn(processOrbBatch)
+	if not success then
+		warn("Orb spawn failed:", err)
 	end
 end
 
@@ -693,101 +643,77 @@ task.spawn(function()
 							end
 						end
 						
-						if segments and #segments > 0 then
-							local totalSegments = #segments
+						-- Get actual snake segments (V7.0 style)
+						local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
+						if snakeInstance and snakeInstance.segments then
+							local segments = snakeInstance.segments
+							local totalLength = #segments
 							
 							-- Calculate orb distribution
-							local orbsPerSegment = 1 / 2.5
-							local totalOrbs = math.clamp(math.floor(snakeLength * orbsPerSegment), 3, 40)
+							local orbsPerSegment = 1 / 2.5 -- One orb every 2.5 segments
+							local totalOrbs = math.clamp(math.floor(totalLength * orbsPerSegment), 3, 30)
 							
-							-- Dynamic value calculation
+							-- Dynamic value calculation based on snake length
 							local baseValue = 1
-							if snakeLength <= 50 then
-								local totalValue = math.floor(snakeLength * 0.6)
+							if totalLength <= 50 then
+								-- Small snakes: give back 60% of length
+								local totalValue = math.floor(totalLength * 0.6)
 								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							elseif snakeLength <= 200 then
-								local totalValue = math.floor(snakeLength * 0.45)
+							elseif totalLength <= 200 then
+								-- Medium snakes: give back 45% of length
+								local totalValue = math.floor(totalLength * 0.45)
 								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							elseif snakeLength <= 500 then
-								local totalValue = math.floor(snakeLength * 0.35)
+							elseif totalLength <= 500 then
+								-- Large snakes: give back 35% of length
+								local totalValue = math.floor(totalLength * 0.35)
 								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
 							else
-								local totalValue = math.min(math.floor(snakeLength * 0.25), 200)
+								-- Very large snakes: give back 25% of length with cap
+								local totalValue = math.min(math.floor(totalLength * 0.25), 200)
 								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
 							end
 							
-							-- Spawn orbs distributed along snake
+							local valuePerOrb = baseValue
+							
+							-- Spawn orbs along the snake path with error handling
 							local spawnedOrbs = 0
-							local skipInterval = math.max(1, math.floor(totalSegments / totalOrbs))
-							
-							if DEBUG_COLLISIONS then
-								print(string.format("[ORB SPAWN] Player %s died - Length: %d, Segments: %d, TotalOrbs: %d, Skip: %d", 
-									player.Name, snakeLength, totalSegments, totalOrbs, skipInterval))
-							end
-							
-							-- Store death info for delayed spawning
-							local deathInfo = {
-								positions = segmentPositions,
-								totalOrbs = totalOrbs,
-								baseValue = baseValue,
-								playerName = player.Name,
-								skipInterval = skipInterval
-							}
-							
-							-- Wait for spawn protection to completely clear before spawning ANY orbs
-							task.spawn(function()
-								-- Wait 3 seconds for spawn protection to end
-								task.wait(3.0)
-								
-								if DEBUG_COLLISIONS then
-									print(string.format("[ORB SPAWN] Starting delayed orb spawn for %s after spawn protection", deathInfo.playerName))
-								end
-								
-								-- Now spawn ALL orbs at once, skipping first few segments
-								local spawnedCount = 0
-								for i = 5, #deathInfo.positions, deathInfo.skipInterval do
-									if spawnedCount >= deathInfo.totalOrbs then break end
-									
-									local pos = deathInfo.positions[i]
-									if pos then
-										-- Simple offset
+							for i = 1, totalLength do
+								if math.random() < orbsPerSegment then
+									local seg = segments[i]
+									if seg and seg.Parent and seg.Position then
+										local pos = seg.Position
+										
+										-- Small random offset to prevent perfect stacking
 										local offset = Vector3.new(
-											(math.random() - 0.5) * 4,
+											(math.random() - 0.5) * 2,
 											0,
-											(math.random() - 0.5) * 4
+											(math.random() - 0.5) * 2
 										)
 										
-										-- Spawn as death orb (marked for immunity)
-										spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), deathInfo.baseValue, true)
-										spawnedCount = spawnedCount + 1
+										-- Spawn at segment position with small offset
+										local success = pcall(function()
+											spawnOrbDirect(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), valuePerOrb)
+											spawnedOrbs = spawnedOrbs + 1
+										end)
+										
+										if not success then
+											warn("Failed to spawn orb for player death")
+										end
 									end
 								end
-								
-								if DEBUG_COLLISIONS then
-									print(string.format("[ORB SPAWN] Spawned %d death orbs for %s", spawnedCount, deathInfo.playerName))
+							end
+							
+							-- Ensure at least some orbs spawn
+							if spawnedOrbs == 0 and totalLength > 0 then
+								local firstSeg = segments[1]
+								if firstSeg and firstSeg.Parent and firstSeg.Position then
+									pcall(function()
+										spawnOrbDirect(firstSeg.Position + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), valuePerOrb)
+									end)
 								end
-							end)
-							
-							-- No need for separate fallback - main spawn handles everything
-							
-							if DEBUG_COLLISIONS then
-								print(string.format("[ORB SPAWN] Spawned %d orbs for %s", spawnedOrbs, player.Name))
 							end
 						else
-							-- Fallback: spawn orbs at death position
-							warn(string.format("No segments found for %s, spawning orbs at death position", player.Name))
-							local rootPart = character:FindFirstChild("HumanoidRootPart")
-							if rootPart then
-								local orbCount = math.min(math.floor(snakeLength / 10), 20)
-								for i = 1, orbCount do
-									local offset = Vector3.new(
-										(math.random() - 0.5) * 10,
-										0,
-										(math.random() - 0.5) * 10
-									)
-									spawnOrbBatched(rootPart.Position + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), 1)
-								end
-							end
+							-- No fallback needed - V7.0 style
 						end
 
 						deadPlayers[player] = true
@@ -846,43 +772,54 @@ task.spawn(function()
 									groundY = groundRay.Position.Y
 								end
 
-																-- Store AI segment positions before destruction
-								local aiSegmentPositions = {}
-								for i, seg in ipairs(segments) do
-									if seg and seg.Parent and seg.Position then
-										aiSegmentPositions[i] = seg.Position
-									end
-								end
-								
-								-- Spawn orbs with delay for AI too
-								task.spawn(function()
-									task.wait(2.0) -- Wait for any spawn protection
-									
-									local spawnedOrbs = 0
-									local skipInterval = math.max(1, math.floor(totalLength / totalOrbs))
-
-									for i = 1, totalLength, skipInterval do
-										if spawnedOrbs >= totalOrbs then break end
-
-										local pos = aiSegmentPositions[i]
-										if pos then
+																-- Spawn orbs along the snake path with error handling
+								local spawnedOrbs = 0
+								for i = 1, totalLength do
+									if math.random() < orbsPerSegment then
+										local seg = segments[i]
+										if seg and seg.Parent and seg.Position then
+											local pos = seg.Position
+											
+											-- Small random offset
 											local offset = Vector3.new(
-												(math.random() - 0.5) * 3,
+												(math.random() - 0.5) * 2,
 												0,
-												(math.random() - 0.5) * 3
+												(math.random() - 0.5) * 2
 											)
-
+											
+											-- Ensure proper height
 											local spawnPos = Vector3.new(
 												pos.X + offset.X,
 												math.max(groundY + ORB_SPAWN_HEIGHT, pos.Y),
 												pos.Z + offset.Z
 											)
-
-											spawnOrbBatched(spawnPos, valuePerOrb, true) -- Mark as death orb
-											spawnedOrbs = spawnedOrbs + 1
+											
+											local success = pcall(function()
+												spawnOrbDirect(spawnPos, valuePerOrb)
+												spawnedOrbs = spawnedOrbs + 1
+											end)
+											
+											if not success then
+												warn("Failed to spawn orb for AI death")
+											end
 										end
 									end
-								end)
+								end
+								
+								-- Ensure at least some orbs spawn
+								if spawnedOrbs == 0 and totalLength > 0 then
+									local firstSeg = segments[1]
+									if firstSeg and firstSeg.Parent and firstSeg.Position then
+										pcall(function()
+											local spawnPos = Vector3.new(
+												firstSeg.Position.X,
+												math.max(groundY + ORB_SPAWN_HEIGHT, firstSeg.Position.Y),
+												firstSeg.Position.Z
+											)
+											spawnOrbDirect(spawnPos, valuePerOrb)
+										end)
+									end
+								end
 							end
 
 							if snake.Destroy then
@@ -1436,15 +1373,13 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - SPAWN PROTECTION IMMUNITY")
+print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - V7.0 DEATH ORB SYSTEM")
 print("🚀 All V7 functionality preserved with performance optimizations")
-print("💎 FIXED: Death orbs properly spawn along snake segments")
-print("🛡️ SPAWN PROTECTION IMMUNITY:")
-print("   - Death orbs marked with SpawnProtectionImmune attribute")
-print("   - 3 second delay for ALL death orbs")
-print("   - Starts from segment 5 (skips head)")
-print("   - No distance checks affecting other orbs")
-print("🔧 Optimizations: Batched spawning, aggressive LOD, bounds checking")
+print("💎 DEATH ORBS: Using exact V7.0 spawning (no shrinking/disappearing)")
+print("   - Direct spawning along entire snake")
+print("   - No delays or batching")
+print("   - 2 stud random offset")
+print("🔧 Optimizations: Aggressive LOD, bounds checking, spatial grid")
 print("📊 Performance: 12Hz checks, 96 chunk size, 1.5s cache")
 
 -- Debug command (unchanged from V7)
