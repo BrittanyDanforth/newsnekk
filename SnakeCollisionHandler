@@ -28,12 +28,12 @@ local CACHE_EXPIRY = 1.0
 local YIELD_INTERVAL = 100
 
 -- === IMPROVED COLLISION SETTINGS ===
-local COLLISION_FRAME_SKIP = 4 -- Balanced for responsiveness and performance
-local BODY_COLLISION_DISTANCE = 2.0 -- Even tighter for AI precision
-local HEAD_COLLISION_DISTANCE = 2.5 -- Tighter to prevent false positives
-local MIN_COLLISION_DISTANCE = 1.5 -- Stricter minimum
-local COLLISION_BUFFER = 0.1 -- Very small buffer
-local NETWORK_COMPENSATION = 0.1 -- Minimal compensation for AI
+local COLLISION_FRAME_SKIP = 2 -- More frequent checks for large snakes
+local BODY_COLLISION_DISTANCE = 3.0 -- Increased for reliability
+local HEAD_COLLISION_DISTANCE = 3.5 -- Increased for reliability
+local MIN_COLLISION_DISTANCE = 2.0 -- More forgiving
+local COLLISION_BUFFER = 0.2 -- Standard buffer
+local NETWORK_COMPENSATION = 0.2 -- Standard compensation
 local SPAWN_PROTECTION_TIME = 3 -- Reduced from 5 seconds
 local MIN_AI_SPAWN_DISTANCE = 50 -- Minimum distance between AI spawn points
 
@@ -707,17 +707,86 @@ local function getPlayerSegments(player)
 	local cache = CollisionCache.playerSegments[player]
 	local currentTime = tick()
 
-	if cache and (currentTime - cache.lastUpdate) < CACHE_EXPIRY then
+	-- For very long snakes, always refresh cache to ensure accuracy
+	local forceRefresh = false
+	if cache and cache.length and cache.length > 1000 then
+		forceRefresh = true
+	end
+
+	if cache and (currentTime - cache.lastUpdate) < CACHE_EXPIRY and not forceRefresh then
 		return cache
 	end
 
+	-- Check new snake system first
+	local snakeModel = Workspace:FindFirstChild("Snake_" .. player.Name)
+	local segmentParts = {}
+	
+	if snakeModel then
+		-- New optimized snake system - get first 50 segments only (matching collision)
+		for i = 1, 50 do
+			local seg = snakeModel:FindFirstChild("Segment" .. i)
+			if seg and seg:IsA("BasePart") and seg.Parent then
+				segmentParts[#segmentParts + 1] = seg
+			end
+		end
+		
+		-- If we found segments in the new system, use those
+		if #segmentParts > 0 then
+			-- For new system, don't interpolate - use real segments only
+			local snakeLength = #segmentParts
+			
+			-- Get actual length from leaderstats
+			if player:FindFirstChild("leaderstats") then
+				local lengthValue = player.leaderstats:FindFirstChild("Length")
+				if lengthValue then
+					snakeLength = lengthValue.Value or snakeLength
+				end
+			end
+			
+			local bounds = {
+				min = Vector3.new(math.huge, math.huge, math.huge),
+				max = Vector3.new(-math.huge, -math.huge, -math.huge)
+			}
+
+			for _, seg in ipairs(segmentParts) do
+				local pos = seg.Position
+				if pos then
+					bounds.min = Vector3.new(
+						math.min(bounds.min.X, pos.X),
+						math.min(bounds.min.Y, pos.Y),
+						math.min(bounds.min.Z, pos.Z)
+					)
+					bounds.max = Vector3.new(
+						math.max(bounds.max.X, pos.X),
+						math.max(bounds.max.Y, pos.Y),
+						math.max(bounds.max.Z, pos.Z)
+					)
+				end
+			end
+
+			local cacheData = {
+				segments = segmentParts, -- Use real segments directly
+				realSegments = segmentParts,
+				chunks = nil, -- No chunks for new system
+				bounds = bounds,
+				length = snakeLength,
+				lastUpdate = currentTime,
+				isNewSystem = true
+			}
+
+			CollisionCache.playerSegments[player] = cacheData
+			return cacheData
+		end
+	end
+	
+	-- Fallback to old system
 	local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
 	if not snakeInstance or not snakeInstance.segments then
 		return nil
 	end
 
 	-- Extract valid segments with parent check
-	local segmentParts = {}
+	segmentParts = {}
 	for _, seg in ipairs(snakeInstance.segments) do
 		if seg and seg.Parent and seg.Parent.Parent then
 			segmentParts[#segmentParts + 1] = seg
@@ -727,8 +796,14 @@ local function getPlayerSegments(player)
 	local snakeLength = #segmentParts
 	if snakeLength == 0 then return nil end
 
-	-- Interpolate with adaptive LOD
-	local interpolatedSegments = interpolateSegments(segmentParts, snakeLength)
+	-- For very long snakes, use real segments only
+	local interpolatedSegments
+	if snakeLength > 1000 then
+		interpolatedSegments = segmentParts -- Use real segments directly
+	else
+		-- Only interpolate for smaller snakes
+		interpolatedSegments = interpolateSegments(segmentParts, snakeLength)
+	end
 
 	-- Create spatial chunks for extreme lengths
 	local chunks = nil
@@ -1492,36 +1567,26 @@ local function isValidCollision(headPos, segmentPos, collisionDist, snakeLength)
 	-- Basic distance check
 	local dist = (headPos - segmentPos).Magnitude
 
-	-- Adaptive collision distance based on snake length
+	-- NO ADAPTIVE DISTANCE - Use consistent collision distance
 	local effectiveDist = collisionDist
-	if snakeLength and snakeLength > 500 then
-		effectiveDist = collisionDist * 0.8 -- Stricter for long snakes
-	end
 
 	if dist >= effectiveDist then
 		return false
 	end
 
-	-- Additional validation to prevent false positives
+	-- Very close collision is always valid
 	if dist < MIN_COLLISION_DISTANCE then
-		return true -- Very close collision is always valid
+		return true
 	end
 
-	-- For medium distances, add extra validation
+	-- Height check - consistent for all
 	local heightDiff = math.abs(headPos.Y - segmentPos.Y)
-	if heightDiff > 5.0 then -- Increased from 3.0 to prevent false AI deaths
-		return false -- Too much height difference
+	if heightDiff > 3.0 then -- Back to normal height difference
+		return false
 	end
 
-	-- Velocity check - prevent collision if moving too fast (likely lag)
-	local velocity = workspace:GetPartBoundsInBox(CFrame.new(headPos), Vector3.new(1,1,1))
-	if velocity and #velocity > 0 then
-		local part = velocity[1]
-		if part.AssemblyLinearVelocity and part.AssemblyLinearVelocity.Magnitude > 100 then
-			return false -- Moving too fast, likely network lag
-		end
-	end
-
+	-- No velocity check - it was causing missed collisions
+	
 	return true
 end
 
@@ -1571,6 +1636,13 @@ end
 
 local function findCollisionInSegments(headPos, segments, collisionDist, useGrid, snakeLength)
 	local effectiveDist = collisionDist + NETWORK_COMPENSATION
+	
+	-- For very long snakes, always use direct iteration on real segments
+	-- The spatial grid gets overwhelmed with huge snakes
+	if snakeLength and snakeLength > 1000 then
+		useGrid = false
+		effectiveDist = collisionDist -- No compensation for large snakes
+	end
 
 	if useGrid and CollisionCache.spatialGrid.objectCount == 0 then
 		-- Build spatial grid if empty
@@ -1591,8 +1663,13 @@ local function findCollisionInSegments(headPos, segments, collisionDist, useGrid
 			end
 		end
 	else
-		-- Direct iteration for smaller segment counts
-		for _, seg in ipairs(segments) do
+		-- Direct iteration - CHECK REAL SEGMENTS ONLY
+		for i, seg in ipairs(segments) do
+			-- Skip interpolated/virtual segments for large snakes
+			if seg._isVirtual and snakeLength > 1000 then
+				continue
+			end
+			
 			local segPos = seg.Position or seg.position
 			if segPos and isValidCollision(headPos, segPos, effectiveDist, snakeLength) then
 				return true
@@ -2173,34 +2250,9 @@ RunService.Stepped:Connect(function()
 						end
 
 						if collision then
-							-- Extra validation for AI - make sure it's a real collision
-							if segmentData and segmentData.segments then
-								-- Find the actual collision point
-								local realCollision = false
-								for _, seg in ipairs(segmentData.segments) do
-									if seg and seg.Parent then
-										local segPos = seg.Position or seg.position
-										if segPos then
-											local dist = (aiPos - segPos).Magnitude
-											if dist < BODY_COLLISION_DISTANCE * 0.8 then -- Stricter check
-												-- Verify height difference
-												if math.abs(aiPos.Y - segPos.Y) < 3 then
-													realCollision = true
-													if DEBUG_COLLISIONS then
-														print(string.format("[AI DEATH] AI collision verified at distance %.2f", dist))
-													end
-													break
-												end
-											end
-										end
-									end
-								end
-								
-								if realCollision then
-									queueAIDeath(aiHead)
-									break
-								end
-							end
+							-- Queue AI death immediately - collision detection already validated
+							queueAIDeath(aiHead)
+							break
 						end
 					end
 				end
@@ -2584,35 +2636,9 @@ RunService.Stepped:Connect(function()
 						end
 
 						if collision then
-							-- Extra validation for AI vs AI - verify it's real
-							local aiHeadPos = aiHead.Position
-							local realCollision = false
-							
-							-- Double-check with actual segment positions
-							for _, seg in ipairs(segmentData.segments) do
-								if seg and seg.Parent then
-									local segPos = seg.Position or seg.position
-									if segPos then
-										local dist = (aiHeadPos - segPos).Magnitude
-										-- Much stricter validation for AI vs AI
-										if dist < BODY_COLLISION_DISTANCE * 0.7 then
-											-- Verify height is similar
-											if math.abs(aiHeadPos.Y - segPos.Y) < 2 then
-												realCollision = true
-												if DEBUG_COLLISIONS then
-													print(string.format("[AI vs AI] Collision verified at distance %.2f", dist))
-												end
-												break
-											end
-										end
-									end
-								end
-							end
-							
-							if realCollision then
-								queueAIDeath(aiHead)
-								break
-							end
+							-- Queue AI death immediately
+							queueAIDeath(aiHead)
+							break
 						end
 					end
 				end
