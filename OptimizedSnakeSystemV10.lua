@@ -353,11 +353,8 @@ function Snake:createUnifiedBody()
 		self.attachments[i] = attachment
 	end
 
-	-- CRITICAL FIX: Initialize all attachment positions to rootPart position
-	-- This prevents stray beams at spawn
-	for i = 0, segmentCount do
-		self.attachments[i].WorldPosition = self.rootPart.Position
-	end
+	-- Set initial head attachment position
+	self.attachments[0].WorldPosition = self.rootPart.Position
 
 	-- Create body segments in batches
 	local segmentBatch = {}
@@ -372,9 +369,6 @@ function Snake:createUnifiedBody()
 		segment.CanTouch = i <= 50
 		segment.CanQuery = false
 		segment.Anchored = true
-		
-		-- Initialize segment position to rootPart position
-		segment.Position = self.rootPart.Position
 
 		-- Color assignment
 		if i <= HEAD_BLEND_SEGMENTS then
@@ -489,3 +483,557 @@ function Snake:createUnifiedBody()
 	self.attachmentPart = attachmentPart
 	self.visibleSegmentCount = segmentCount
 end
+
+function Snake:updatePositionHistory()
+	local now = tick()
+	if now - self.lastHistoryUpdate < 1/120 then -- Limit history updates
+		return
+	end
+	self.lastHistoryUpdate = now
+
+	self.historyIndex = (self.historyIndex % HISTORY_SIZE) + 1
+
+	-- Calculate velocity for smoother interpolation
+	local prevIndex = self.historyIndex - 1
+	if prevIndex < 1 then prevIndex = HISTORY_SIZE end
+
+	local prevData = self.positionHistory[prevIndex]
+	local velocity = (self.rootPart.Position - prevData.position) / (now - prevData.time)
+
+	self.positionHistory[self.historyIndex] = {
+		position = self.rootPart.Position,
+		lookVector = self.rootPart.CFrame.LookVector,
+		cframe = self.rootPart.CFrame,
+		time = now,
+		velocity = velocity
+	}
+end
+
+function Snake:getHistoricalPosition(stepsBack)
+	local index = self.historyIndex - stepsBack
+	if index < 1 then
+		index = index + HISTORY_SIZE
+	end
+
+	local data = self.positionHistory[index]
+
+	-- If we need interpolation between history points
+	if stepsBack % 1 ~= 0 then
+		local nextIndex = index + 1
+		if nextIndex > HISTORY_SIZE then nextIndex = 1 end
+
+		local nextData = self.positionHistory[nextIndex]
+		local alpha = stepsBack % 1
+
+		return {
+			position = data.position:Lerp(nextData.position, alpha),
+			lookVector = data.lookVector:Lerp(nextData.lookVector, alpha),
+			cframe = data.cframe:Lerp(nextData.cframe, alpha),
+			time = data.time + (nextData.time - data.time) * alpha,
+			velocity = data.velocity:Lerp(nextData.velocity, alpha)
+		}
+	end
+
+	return data
+end
+
+function Snake:startUpdateLoop()
+	local frameCount = 0
+	local lastNetworkUpdate = 0
+	local lastFullUpdate = 0
+
+	self.updateConnection = RunService.Heartbeat:Connect(function(deltaTime)
+		if not self.character.Parent or not self.rootPart.Parent then
+			self:destroy()
+			return
+		end
+
+		frameCount = frameCount + 1
+		local now = tick()
+
+		-- Update position history
+		self:updatePositionHistory()
+
+		-- Smooth length interpolation
+		if self.actualLength ~= self.targetLength then
+			local diff = self.targetLength - self.actualLength
+			local growthRate = GROWTH_SPEED
+
+			if diff > 0.1 and not self.isGrowing then
+				self.isGrowing = true
+				self.growthStartTime = now
+			end
+
+			self.actualLength = self.actualLength + diff * growthRate
+
+			if math.abs(diff) < 0.1 then
+				self.actualLength = self.targetLength
+				self.isGrowing = false
+			end
+		else
+			self.isGrowing = false
+		end
+
+		-- Update growth factor
+		if frameCount % GROWTH_CHECK_INTERVAL == 0 then
+			self.growthFactor = self:calculateGrowthFactor()
+		end
+
+		-- Batch update visuals for performance
+		if now - lastFullUpdate > 1/60 then
+			self:updateUnifiedBodyBatched()
+			lastFullUpdate = now
+		else
+			-- Update only critical segments (head and nearby)
+			self:updateCriticalSegments()
+		end
+
+		-- Handle boost effects
+		self:updateBoostEffects()
+
+		-- Network updates
+		if self.player == Players.LocalPlayer and now - lastNetworkUpdate > 1/NETWORK_UPDATE_RATE then
+			lastNetworkUpdate = now
+			self:sendNetworkUpdate()
+		end
+	end)
+end
+
+function Snake:updateCriticalSegments()
+	-- Always update head to match rootPart exactly
+	local cf = CFrame.lookAt(
+		self.rootPart.Position,
+		self.rootPart.Position + self.rootPart.CFrame.LookVector
+	)
+	self.segments[0].CFrame = cf
+	self.segments[0].Position = self.rootPart.Position  -- ENSURE HEAD POSITION MATCHES ROOTPART
+
+	-- Update eyes
+	local headSize = self:getSegmentSize(0, BASE_SIZE * self.growthFactor)
+	local eyeScale = headSize / BASE_SIZE * 0.5
+	local eyeOffset = headSize * 0.3
+	local eyeForward = -headSize * 0.35
+
+	self.leftEye.CFrame = cf * CFrame.new(-eyeOffset, eyeOffset * 0.5, eyeForward)
+	self.rightEye.CFrame = cf * CFrame.new(eyeOffset, eyeOffset * 0.5, eyeForward)
+	self.leftPupil.CFrame = self.leftEye.CFrame * CFrame.new(0, 0, -eyeScale * 0.3)
+	self.rightPupil.CFrame = self.rightEye.CFrame * CFrame.new(0, 0, -eyeScale * 0.3)
+
+	-- Update head attachment to match rootPart position exactly
+	if self.attachments[0] then
+		self.attachments[0].WorldPosition = self.rootPart.Position  -- USE ROOTPART POSITION DIRECTLY
+	end
+
+	-- Update first few segments for smooth head connection
+	local currentBaseSize = BASE_SIZE * self.growthFactor
+	local spacing = currentBaseSize * SEGMENT_SPACING
+
+	for i = 1, math.min(10, self.visibleSegmentCount) do
+		local segment = self.segments[i]
+		if segment and segment.Parent then
+			local stepsBack = math.floor(i * spacing / 2)
+			local histData = self:getHistoricalPosition(stepsBack)
+
+			if histData then
+				segment.Position = segment.Position:Lerp(histData.position, 0.9)
+
+				if self.attachments[i] then
+					self.attachments[i].WorldPosition = segment.Position
+				end
+			end
+		end
+	end
+end
+
+function Snake:updateUnifiedBodyBatched()
+	-- Calculate required segments
+	local requiredSegments = math.min(math.ceil(self.actualLength / 2), MAX_SEGMENTS)
+
+	-- Add new segments if grown
+	if requiredSegments > self.visibleSegmentCount then
+		local now = tick()
+		if now - self.lastSegmentAddTime > SEGMENT_GROWTH_DELAY then
+			self:addSegmentsBatched(math.min(5, requiredSegments - self.visibleSegmentCount))
+			self.lastSegmentAddTime = now
+		end
+	end
+
+	local currentBaseSize = BASE_SIZE * self.growthFactor
+	local spacing = currentBaseSize * SEGMENT_SPACING
+
+	-- Get camera position for LOD
+	local cameraPos = self.camera and self.camera.CFrame.Position or self.rootPart.Position
+
+	-- Update segments in batches
+	local batchStart = 0
+	local batchSize = BATCH_UPDATE_SIZE
+
+	while batchStart <= self.visibleSegmentCount do
+		local batchEnd = math.min(batchStart + batchSize - 1, self.visibleSegmentCount)
+
+		for i = batchStart, batchEnd do
+			local segment = self.segments[i]
+			if segment and segment.Parent then
+				if i == 0 then
+					-- Head update - ensure it's at rootPart position
+					segment.Position = self.rootPart.Position
+					segment.CFrame = CFrame.lookAt(
+						self.rootPart.Position,
+						self.rootPart.Position + self.rootPart.CFrame.LookVector
+					)
+					local headSize = self:getSegmentSize(0, currentBaseSize)
+					segment.Size = Vector3.new(headSize, headSize, headSize)
+				else
+					-- Body segment update
+					local stepsBack = math.floor(i * spacing / 2)
+					local histData = self:getHistoricalPosition(stepsBack)
+
+					if histData then
+						-- Calculate distance for LOD
+						local distance = (segment.Position - cameraPos).Magnitude
+						local lodFactor = math.min(1, LOD_DISTANCE / distance)
+
+						-- Smoother interpolation for segments
+						local targetPos = histData.position
+						local currentPos = segment.Position
+						local smoothingFactor = VISUAL_SMOOTHING_FACTOR * lodFactor
+
+						segment.Position = currentPos:Lerp(targetPos, smoothingFactor)
+
+						-- Update size
+						local segmentSize = self:getSegmentSize(i, currentBaseSize)
+						segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
+
+						-- Pulse effect during boost
+						if self.isBoosting and lodFactor > 0.5 then
+							local pulse = math.sin(tick() * 10 + i * 0.1) * 0.03 + 1
+							segment.Size = segment.Size * pulse
+						end
+
+						-- Update attachment
+						if self.attachments[i] then
+							self.attachments[i].WorldPosition = segment.Position
+						end
+					end
+				end
+			end
+		end
+
+		batchStart = batchEnd + 1
+
+		-- Yield to prevent frame drops
+		if batchStart < self.visibleSegmentCount then
+			RunService.Heartbeat:Wait()
+		end
+	end
+
+	-- Update beams in separate pass
+	self:updateBeamsBatched(currentBaseSize)
+
+	-- Update glows
+	self:updateGlows(currentBaseSize)
+end
+
+function Snake:updateBeamsBatched(currentBaseSize)
+	local beamUpdateCount = 0
+
+	for i, beam in pairs(self.beams) do
+		if beam and beam.Parent and type(i) == "number" then
+			if i <= self.visibleSegmentCount then
+				local beamWidth = self:getBeamWidth(i, currentBaseSize)
+
+				-- Only update if width changed significantly
+				if math.abs(beam.Width0 - beamWidth) > 0.1 then
+					beam.Width0 = beamWidth
+					beam.Width1 = beamWidth
+				end
+
+				beam.Enabled = true
+
+				-- Dynamic color during boost
+				if self.isBoosting and i > HEAD_BLEND_SEGMENTS then
+					local colorShift = math.floor(tick() * 3) % #self.config.BodyColors
+					local colorIndex = ((i - 1 + colorShift) % #self.config.BodyColors) + 1
+					beam.Color = ColorSequence.new(self.config.BodyColors[colorIndex])
+				end
+			else
+				beam.Enabled = false
+			end
+
+			beamUpdateCount = beamUpdateCount + 1
+
+			-- Yield periodically
+			if beamUpdateCount % 50 == 0 then
+				RunService.Heartbeat:Wait()
+			end
+		end
+	end
+end
+
+function Snake:updateGlows(currentBaseSize)
+	for i, glow in pairs(self.glows) do
+		if glow and glow.Parent then
+			local glowScale = 1 - (i / self.visibleSegmentCount) * 0.3
+			glow.Range = (GLOW_RANGE_BASE + (currentBaseSize - BASE_SIZE) * 2) * glowScale
+
+			if self.isBoosting then
+				glow.Brightness = GLOW_INTENSITY * 1.5
+			else
+				glow.Brightness = GLOW_INTENSITY
+			end
+		end
+	end
+end
+
+function Snake:updateBoostEffects()
+	if self.isBoosting then
+		self.boostParticles.Rate = 150
+	else
+		self.boostParticles.Rate = 0
+	end
+end
+
+function Snake:addSegmentsBatched(count)
+	local newSegments = {}
+	local newBeams = {}
+
+	for i = self.visibleSegmentCount + 1, self.visibleSegmentCount + count do
+		if i > MAX_SEGMENTS then break end
+
+		-- Create segment
+		local segment = getPooledSegment()
+		segment.Name = "Segment" .. i
+
+		local targetSize = self:getSegmentSize(i, BASE_SIZE * self.growthFactor)
+		segment.Size = Vector3.new(targetSize * 0.1, targetSize * 0.1, targetSize * 0.1)
+		segment.Transparency = 0.8
+		segment.CanCollide = false
+		segment.CanTouch = i <= 50
+		segment.CanQuery = false
+		segment.Anchored = true
+
+		local colorIndex = ((i - 1) % #self.config.BodyColors) + 1
+		segment.Color = self.config.BodyColors[colorIndex]
+
+		-- Position at last segment
+		if self.segments[i - 1] then
+			segment.Position = self.segments[i - 1].Position
+		end
+
+		-- Add glow if needed
+		local shouldHaveGlow = i <= GLOW_FALLOFF_START and i % 2 == 0
+		if shouldHaveGlow then
+			local segmentGlow = Instance.new("PointLight")
+			segmentGlow.Name = "Glow"
+			segmentGlow.Brightness = GLOW_INTENSITY * 0.9
+			segmentGlow.Range = GLOW_RANGE_BASE * 0.8
+			segmentGlow.Color = segment.Color
+			segmentGlow.Shadows = false
+			segmentGlow.Parent = segment
+			self.glows[i] = segmentGlow
+		end
+
+		self.segments[i] = segment
+		table.insert(newSegments, segment)
+
+		-- Create attachment
+		local attachment = Instance.new("Attachment")
+		attachment.Name = "Attachment" .. i
+		attachment.Parent = self.attachmentPart
+		self.attachments[i] = attachment
+
+		-- Create beam
+		if self.attachments[i - 1] then
+			local beam = getPooledBeam()
+			beam.Name = "Beam" .. (i - 1)
+			beam.Attachment0 = self.attachments[i - 1]
+			beam.Attachment1 = self.attachments[i]
+
+			local beamWidth = self:getBeamWidth(i - 1, BASE_SIZE * self.growthFactor)
+			beam.Width0 = beamWidth * 0.1
+			beam.Width1 = beamWidth * 0.1
+			beam.CurveSize0 = 0
+			beam.CurveSize1 = 0
+			beam.Segments = BEAM_SEGMENTS
+			beam.TextureLength = 2
+			beam.Transparency = NumberSequence.new(0.8)
+			beam.Color = ColorSequence.new(self.config.BodyColors[colorIndex])
+
+			self.beams[i - 1] = beam
+			table.insert(newBeams, {beam = beam, targetWidth = beamWidth})
+		end
+	end
+
+	-- Parent all new segments at once
+	for _, segment in ipairs(newSegments) do
+		segment.Parent = self.model
+	end
+
+	-- Parent all new beams at once
+	for _, beamData in ipairs(newBeams) do
+		beamData.beam.Parent = self.attachmentPart
+	end
+
+	-- Animate growth
+	for i, segment in ipairs(newSegments) do
+		local targetSize = self:getSegmentSize(self.visibleSegmentCount + i, BASE_SIZE * self.growthFactor)
+		TweenService:Create(segment, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
+			Size = Vector3.new(targetSize, targetSize, targetSize),
+			Transparency = 0
+		}):Play()
+	end
+
+	-- Animate beams
+	for _, beamData in ipairs(newBeams) do
+		TweenService:Create(beamData.beam, TweenInfo.new(0.3), {
+			Width0 = beamData.targetWidth,
+			Width1 = beamData.targetWidth
+		}):Play()
+
+		-- Animate transparency
+		local startTime = tick()
+		local conn
+		conn = RunService.Heartbeat:Connect(function()
+			local elapsed = tick() - startTime
+			local progress = math.min(elapsed / 0.3, 1)
+			beamData.beam.Transparency = NumberSequence.new(0.8 * (1 - progress))
+			if progress >= 1 then
+				conn:Disconnect()
+			end
+		end)
+	end
+
+	self.visibleSegmentCount = math.min(self.visibleSegmentCount + count, MAX_SEGMENTS)
+end
+
+function Snake:grow(amount)
+	self.pendingGrowth = self.pendingGrowth + (amount or 1)
+	self.targetLength = math.min(self.targetLength + (amount or 1), 50000)
+
+	-- Visual feedback
+	if self.head and self.headGlow then
+		local originalBrightness = self.headGlow.Brightness
+		self.headGlow.Brightness = GLOW_INTENSITY * 2
+		TweenService:Create(self.headGlow, TweenInfo.new(0.2), {
+			Brightness = originalBrightness
+		}):Play()
+	end
+
+	if self.player then
+		local leaderstats = self.player:FindFirstChild("leaderstats")
+		if leaderstats then
+			local lengthValue = leaderstats:FindFirstChild("Length")
+			if lengthValue then
+				lengthValue.Value = math.floor(self.targetLength)
+			end
+		end
+	end
+end
+
+function Snake:setBoosting(boosting)
+	self.isBoosting = boosting
+
+	if boosting then
+		self.boostParticles.Enabled = true
+
+		-- Create speed lines effect
+		for i = 1, 5 do
+			local speedLine = Instance.new("Part")
+			speedLine.Name = "SpeedLine"
+			speedLine.Size = Vector3.new(0.3, 0.3, 10)
+			speedLine.Material = Enum.Material.Neon
+			speedLine.Color = self.head.Color
+			speedLine.CanCollide = false
+			speedLine.Anchored = true
+			speedLine.CFrame = self.head.CFrame * CFrame.new(
+				math.random(-3, 3),
+				math.random(-3, 3),
+				5
+			)
+			speedLine.Parent = self.model
+
+			local tween = TweenService:Create(speedLine,
+				TweenInfo.new(0.3, Enum.EasingStyle.Linear),
+				{
+					Transparency = 1,
+					Size = Vector3.new(0.1, 0.1, 20),
+					CFrame = speedLine.CFrame * CFrame.new(0, 0, -15)
+				}
+			)
+			tween:Play()
+			Debris:AddItem(speedLine, 0.3)
+		end
+	else
+		self.boostParticles.Enabled = false
+	end
+end
+
+function Snake:sendNetworkUpdate()
+	if remoteEvents.positionupdate then
+		remoteEvents.positionupdate:FireServer({
+			position = self.rootPart.Position,
+			lookVector = self.rootPart.CFrame.LookVector,
+			length = self.targetLength,
+			boosting = self.isBoosting
+		})
+	end
+end
+
+function Snake:updateLength(newLength)
+	self.targetLength = math.min(newLength, 50000)
+end
+
+function Snake:GetSegments()
+	local collisionSegments = {}
+	for i = 1, math.min(50, self.visibleSegmentCount) do
+		if self.segments[i] and self.segments[i].Parent then
+			table.insert(collisionSegments, self.segments[i])
+		end
+	end
+	return collisionSegments
+end
+
+function Snake:GetLength()
+	return math.floor(self.targetLength)
+end
+
+function Snake:destroy()
+	if self.updateConnection then
+		self.updateConnection:Disconnect()
+		self.updateConnection = nil
+	end
+
+	-- Return segments to pool
+	for _, segment in pairs(self.segments) do
+		if segment and segment.Parent then
+			returnToPool(segment)
+		end
+	end
+
+	-- Return beams to pool
+	for _, beam in pairs(self.beams) do
+		if beam and beam.Parent then
+			returnBeamToPool(beam)
+		end
+	end
+
+	if self.model then
+		self.model:Destroy()
+		self.model = nil
+	end
+end
+
+-- Module
+local OptimizedSnakeSystemV10 = {}
+
+function OptimizedSnakeSystemV10.init()
+	createNetworkEvents()
+	print("✅ Snake System V10 ULTIMATE - COMPLETELY REVAMPED!")
+	print("🐍 Features: No Gaps | No Disappearing Parts | Ultra Smooth | Perfect Beams")
+end
+
+function OptimizedSnakeSystemV10.createSnake(character, config)
+	return Snake.new(character, config)
+end
+
+return OptimizedSnakeSystemV10
