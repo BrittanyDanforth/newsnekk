@@ -649,6 +649,14 @@ task.spawn(function()
 							local segments = snakeInstance.segments
 							local totalLength = #segments
 							
+							-- IMPORTANT: Store positions BEFORE snake is destroyed
+							local segmentPositions = {}
+							for i, seg in ipairs(segments) do
+								if seg and seg.Parent and seg.Position then
+									segmentPositions[i] = seg.Position -- Vector3 values are copied
+								end
+							end
+							
 							-- Calculate orb distribution
 							local orbsPerSegment = 1 / 2.5 -- One orb every 2.5 segments
 							local totalOrbs = math.clamp(math.floor(totalLength * orbsPerSegment), 3, 30)
@@ -675,54 +683,71 @@ task.spawn(function()
 							
 							local valuePerOrb = baseValue
 							
-							-- Spawn orbs along the snake path with error handling
-							local spawnedOrbs = 0
-							for i = 1, totalLength do
-								if math.random() < orbsPerSegment then
-									local seg = segments[i]
-									if seg and seg.Parent and seg.Position then
-										local pos = seg.Position
-										
-										-- Small random offset to prevent perfect stacking
-										local offset = Vector3.new(
-											(math.random() - 0.5) * 2,
-											0,
-											(math.random() - 0.5) * 2
-										)
-										
-										-- Spawn at segment position with small offset
-										local success = pcall(function()
-											spawnOrbDirect(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), valuePerOrb)
-											spawnedOrbs = spawnedOrbs + 1
-										end)
-										
-										if not success then
-											warn("Failed to spawn orb for player death")
+							-- Mark player as dead IMMEDIATELY
+							deadPlayers[player] = true
+							
+							-- Store the death position
+							local deathPos = character:FindFirstChild("HumanoidRootPart") and character.HumanoidRootPart.Position
+							
+							-- Kill the humanoid
+							humanoid.Health = 0
+							
+							-- Spawn orbs in a separate task with delay
+							task.spawn(function()
+								-- Wait for spawn protection to clear
+								task.wait(0.5)
+								
+								-- Spawn orbs along the snake path using STORED positions
+								local spawnedOrbs = 0
+								for i = 1, totalLength do
+									if math.random() < orbsPerSegment then
+										local pos = segmentPositions[i]
+										if pos then
+											-- Skip positions too close to death location (first few segments)
+											if deathPos and i <= 3 and (pos - deathPos).Magnitude < 10 then
+												continue
+											end
+											
+											-- Small random offset to prevent perfect stacking
+											local offset = Vector3.new(
+												(math.random() - 0.5) * 2,
+												0,
+												(math.random() - 0.5) * 2
+											)
+											
+											-- Spawn at stored position with small offset
+											local success = pcall(function()
+												spawnOrbDirect(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), valuePerOrb)
+												spawnedOrbs = spawnedOrbs + 1
+											end)
+											
+											if not success then
+												warn("Failed to spawn orb for player death")
+											end
 										end
 									end
 								end
-							end
-							
-							-- Ensure at least some orbs spawn
-							if spawnedOrbs == 0 and totalLength > 0 then
-								local firstSeg = segments[1]
-								if firstSeg and firstSeg.Parent and firstSeg.Position then
-									pcall(function()
-										spawnOrbDirect(firstSeg.Position + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), valuePerOrb)
-									end)
+								
+								-- Ensure at least some orbs spawn
+								if spawnedOrbs == 0 and #segmentPositions > 3 then
+									-- Use a segment away from the head
+									local safePos = segmentPositions[math.min(5, #segmentPositions)]
+									if safePos then
+										pcall(function()
+											spawnOrbDirect(safePos + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), valuePerOrb)
+										end)
+									end
 								end
-							end
+							end)
+							
+							-- Clear dead flag after respawn time
+							task.spawn(function()
+								task.wait(5)
+								deadPlayers[player] = nil
+							end)
 						else
 							-- No fallback needed - V7.0 style
 						end
-
-						deadPlayers[player] = true
-						humanoid.Health = 0
-
-						task.spawn(function()
-							task.wait(5)
-							deadPlayers[player] = nil
-						end)
 					end
 				end
 			elseif death.type == "ai" then
