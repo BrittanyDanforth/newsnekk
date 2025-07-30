@@ -900,6 +900,85 @@ function AISnake:findNearbyThreats()
 	return threats
 end
 
+-- NEW: Check if we're trapped (surrounded by segments)
+function AISnake:isTrapped()
+	local myHead = self.HeadParts and self.HeadParts.head
+	if not myHead then return false, nil end
+	
+	local headPos = myHead.Position
+	local escapeRoutes = 0
+	local blockedDirections = {}
+	
+	-- Check 8 directions around us
+	local checkDirections = {
+		Vector3new(1, 0, 0),    -- Right
+		Vector3new(-1, 0, 0),   -- Left
+		Vector3new(0, 0, 1),    -- Forward
+		Vector3new(0, 0, -1),   -- Back
+		Vector3new(0.707, 0, 0.707),   -- Diagonals
+		Vector3new(-0.707, 0, 0.707),
+		Vector3new(0.707, 0, -0.707),
+		Vector3new(-0.707, 0, -0.707),
+	}
+	
+	for i, dir in ipairs(checkDirections) do
+		local checkPos = headPos + dir * 15  -- Check 15 studs away
+		local blocked = false
+		
+		-- Check for segments in this direction
+		local nearbyEntities = SpatialGrid.QueryRadius(checkPos, 10)
+		for _, entity in nearbyEntities do
+			if entity.owner ~= self and entity.type:match("SEGMENT") then
+				blocked = true
+				blockedDirections[i] = true
+				break
+			end
+		end
+		
+		if not blocked then
+			escapeRoutes = escapeRoutes + 1
+		end
+	end
+	
+	-- If we have less than 3 escape routes, we're getting trapped
+	local isTrapped = escapeRoutes < 3
+	
+	-- Find best escape direction if trapped
+	local escapeDir = nil
+	if isTrapped then
+		-- Find the most open direction
+		for i, dir in ipairs(checkDirections) do
+			if not blockedDirections[i] then
+				escapeDir = dir
+				break
+			end
+		end
+		
+		-- If no clear direction, try to find the least congested
+		if not escapeDir then
+			local minSegments = math.huge
+			for i, dir in ipairs(checkDirections) do
+				local checkPos = headPos + dir * 20
+				local nearbyEntities = SpatialGrid.QueryRadius(checkPos, 15)
+				local segmentCount = 0
+				
+				for _, entity in nearbyEntities do
+					if entity.type:match("SEGMENT") then
+						segmentCount = segmentCount + 1
+					end
+				end
+				
+				if segmentCount < minSegments then
+					minSegments = segmentCount
+					escapeDir = dir
+				end
+			end
+		end
+	end
+	
+	return isTrapped, escapeDir
+end
+
 function AISnake:startBoost(duration)
 	local now = tick()
 	duration = duration or 1.5
@@ -1266,6 +1345,91 @@ function AISnake:_determineAction()
 		return "COLLISION_AVOID", steer
 	end
 
+	-- Priority 2.3: TRAP DETECTION (NEW!)
+	-- Check if we're getting trapped/surrounded
+	local trapped, escapeDirection = self:isTrapped()
+	if trapped and escapeDirection then
+		-- Emergency escape!
+		self.TargetOrb = nil
+		self.TargetSnake = nil
+		self.Avoiding = true
+		self.AvoidDir = escapeDirection
+		self.AvoidExpire = now + 3
+		self.FleeReason = "trapped"
+		
+		-- Boost to escape
+		if not self.Boosting then
+			self:startBoost(1.5)
+		end
+		
+		return "ESCAPE_TRAP", escapeDirection
+	end
+
+	-- Priority 2.5: SPAWN PROTECTION AWARENESS (NEW!)
+	-- Check if we're inside another snake's spawn protection area
+	local spawnProtectionRadius = 35  -- Radius to check for spawn-protected snakes
+	local nearbySnakes = SpatialGrid.QueryRadius(headPos, spawnProtectionRadius)
+	local insideProtectedSnake = false
+	local protectedSnakePos = nil
+	
+	for _, entity in nearbySnakes do
+		if entity.owner ~= self then
+			-- Check if this snake might have spawn protection
+			if entity.type == "AI_HEAD" or entity.type == "PLAYER_HEAD" then
+				-- For AI snakes, check their spawn time
+				if entity.type == "AI_HEAD" and entity.owner._spawnTime then
+					local timeSinceSpawn = tick() - entity.owner._spawnTime
+					if timeSinceSpawn < 3 then  -- 3 seconds of spawn protection
+						-- We're near a spawn-protected snake!
+						insideProtectedSnake = true
+						protectedSnakePos = entity.part.Position
+						break
+					end
+				elseif entity.type == "PLAYER_HEAD" then
+					-- For players, check if they recently respawned (harder to detect)
+					-- Look for telltale signs: low segment count + centered position
+					local segmentCount = getPlayerLength(entity.owner)
+					local distFromCenter = (entity.part.Position - Vector3new(0, entity.part.Position.Y, 0)).Magnitude
+					
+					if segmentCount < 30 and distFromCenter < 50 then
+						-- Likely a newly spawned player
+						insideProtectedSnake = true
+						protectedSnakePos = entity.part.Position
+						break
+					end
+				end
+			end
+		end
+	end
+	
+	-- If we're inside or very close to a spawn-protected snake, GET OUT!
+	if insideProtectedSnake and protectedSnakePos then
+		-- Calculate escape vector - move directly away
+		local escapeDir = (headPos - protectedSnakePos).Unit
+		
+		-- If we're too close (likely inside), pick a random perpendicular direction
+		local distToProtected = (headPos - protectedSnakePos).Magnitude
+		if distToProtected < 10 then
+			local perpAngle = mathRandom() * mathPi * 2
+			escapeDir = Vector3new(mathCos(perpAngle), 0, mathSin(perpAngle))
+		end
+		
+		-- Override everything - this is critical for survival
+		self.TargetSnake = nil
+		self.TargetOrb = nil
+		self.Avoiding = true
+		self.AvoidDir = escapeDir
+		self.AvoidExpire = now + 4  -- Avoid for 4 seconds
+		self.FleeReason = "spawn_protection"
+		
+		-- Boost away if possible
+		if not self.Boosting and now > self.BoostCooldown then
+			self:startBoost(2.0)  -- Long boost to escape
+		end
+		
+		return "ESCAPE_SPAWN", escapeDir
+	end
+
 	-- Priority 3: Threat assessment (SMARTER)
 	local threats = self:findNearbyThreats()
 	local shouldFlee = false
@@ -1356,43 +1520,139 @@ function AISnake:_determineAction()
 		end
 	end
 
-	-- Priority 5: Wandering (SMARTER)
+	-- Priority 5: Smart Combat (IMPROVED)
+	if p.TargetPlayers and state == "WANDER" and not self.Avoiding then
+		local target, dist = self:findNearestSnakeHead()
+		
+		if target and dist < p.CombatRadius then
+			local targetLength = 0
+			
+			if target.isPlayer then
+				targetLength = getPlayerLength(target.player)
+			else
+				targetLength = target.snake.CurrentLength or 0
+			end
+			
+			local lengthAdvantage = self.CurrentLength - targetLength
+			
+			-- Smarter combat decisions based on personality
+			local shouldEngage = false
+			
+			if p.Type == "Opportunist" then
+				-- Only attack if we're bigger
+				shouldEngage = lengthAdvantage > 5
+			elseif p.Type == "Hunter" or p.Type == "Aggressor" then
+				-- Attack if we have any advantage or are equal
+				shouldEngage = lengthAdvantage >= -5
+			elseif p.Type == "Guardian" then
+				-- Only attack in our territory
+				if p.TerritoryCenter then
+					local inTerritory = (headPos - p.TerritoryCenter).Magnitude < p.PatrolRadius
+					shouldEngage = inTerritory and lengthAdvantage >= -10
+				end
+			elseif p.Type == "Berserker" then
+				-- Attack almost anyone
+				shouldEngage = lengthAdvantage > -20
+			elseif p.Type == "Shadow" then
+				-- Only attack if we can ambush (from behind)
+				local targetDir = target.part.CFrame.LookVector
+				local toTarget = (target.part.Position - headPos).Unit
+				local angle = targetDir:Dot(toTarget)
+				shouldEngage = lengthAdvantage > -5 and angle < 0.5  -- Target not facing us
+			end
+			
+			if shouldEngage and self:isPathSafe(target.part.Position, dist) then
+				self.TargetSnake = target
+				state = "HUNT"
+				
+				-- Smart approach based on personality
+				if p.Type == "Shadow" and dist > 20 then
+					-- Stalk from behind
+					local targetVel = target.part.AssemblyLinearVelocity or Vector3.zero
+					local predictedPos = target.part.Position + targetVel * 0.5
+					local behindPos = predictedPos - target.part.CFrame.LookVector * 15
+					steer = (behindPos - headPos).Unit
+				else
+					-- Direct approach
+					steer = (target.part.Position - headPos).Unit
+				end
+				
+				-- Combat boost
+				if not self.Boosting and dist < 30 and mathRandom() < 0.4 then
+					self:startBoost(1.0)
+				end
+			end
+		end
+	end
+
+	-- Priority 6: Wandering (SMARTER)
 	if state == "WANDER" then
 		local mapCenter = Vector3new(0, headPos.Y, 0)
 		local toCenter = mapCenter - headPos
 		local distFromCenter = toCenter.Magnitude
 
-		-- Smoother wandering
-		if (now - (self.LastTurn or 0) > p.RandomTurnInterval) then
-			local maxTurn = 45
-			self.TargetYaw = self.TargetYaw + mathRad(mathRandom(-maxTurn, maxTurn))
-			self.LastTurn = now
-		end
-
-		local baseSteer = Vector3new(mathSin(self.TargetYaw), 0, mathCos(self.TargetYaw))
-
-		-- Check if wander direction is safe
-		if not self:isPathSafe(headPos + baseSteer * 30, 30) then
-			-- Find a safe direction
-			for i = 1, 8 do
-				local testAngle = self.TargetYaw + (i * mathPi / 4)
-				local testSteer = Vector3new(mathSin(testAngle), 0, mathCos(testAngle))
-				if self:isPathSafe(headPos + testSteer * 30, 30) then
-					baseSteer = testSteer
-					self.TargetYaw = testAngle
-					break
-				end
+		-- Personality-based wandering
+		local wanderStyle = "normal"
+		
+		if p.Type == "Guardian" and p.TerritoryCenter then
+			-- Patrol around territory
+			local toTerritory = p.TerritoryCenter - headPos
+			local territoryDist = toTerritory.Magnitude
+			
+			if territoryDist > p.PatrolRadius then
+				-- Return to territory
+				steer = toTerritory.Unit
+				wanderStyle = "returning"
+			else
+				-- Circular patrol
+				local angle = mathAtan2(toTerritory.X, toTerritory.Z)
+				angle = angle + mathPi / 2  -- Perpendicular for circular motion
+				steer = Vector3new(mathSin(angle), 0, mathCos(angle))
+				wanderStyle = "patrolling"
+			end
+		elseif p.Type == "Nomad" then
+			-- Explorer - prefers edges of map
+			if distFromCenter < 200 then
+				-- Move away from center
+				steer = -toCenter.Unit
+				wanderStyle = "exploring"
 			end
 		end
+		
+		-- Normal wandering with smart turns
+		if wanderStyle == "normal" then
+			-- Smoother wandering
+			if (now - (self.LastTurn or 0) > p.RandomTurnInterval) then
+				local maxTurn = 45
+				self.TargetYaw = self.TargetYaw + mathRad(mathRandom(-maxTurn, maxTurn))
+				self.LastTurn = now
+			end
 
-		-- Center bias based on distance
-		if distFromCenter > 250 then
-			steer = toCenter.Unit
-		elseif distFromCenter > 150 then
-			local centerBias = toCenter.Unit * 0.7
-			steer = (baseSteer + centerBias).Unit
-		else
-			steer = baseSteer
+			local baseSteer = Vector3new(mathSin(self.TargetYaw), 0, mathCos(self.TargetYaw))
+
+			-- Check if wander direction is safe
+			if not self:isPathSafe(headPos + baseSteer * 30, 30) then
+				-- Find a safe direction
+				for i = 1, 8 do
+					local testAngle = self.TargetYaw + (i * mathPi / 4)
+					local testSteer = Vector3new(mathSin(testAngle), 0, mathCos(testAngle))
+					if self:isPathSafe(headPos + testSteer * 30, 30) then
+						baseSteer = testSteer
+						self.TargetYaw = testAngle
+						break
+					end
+				end
+			end
+
+			-- Center bias based on distance
+			if distFromCenter > 250 then
+				steer = toCenter.Unit
+			elseif distFromCenter > 150 then
+				local centerBias = toCenter.Unit * 0.7
+				steer = (baseSteer + centerBias).Unit
+			else
+				steer = baseSteer
+			end
 		end
 	end
 
@@ -1557,6 +1817,9 @@ function AISnake.new(startPosition)
 	self._lastPositions = {}
 	self._stuckCheckTime = 0
 	self._lastStuckCheck = tick()
+	
+	-- Track spawn time for spawn protection awareness
+	self._spawnTime = tick()
 
 	return self
 end
@@ -1785,6 +2048,9 @@ function AISnake:updateMovement(dt)
 	elseif state == "COLLISION_AVOID" then
 		-- Emergency collision avoidance needs instant response
 		turnSpeed = turnSpeed * 3.0
+	elseif state == "ESCAPE_TRAP" or state == "ESCAPE_SPAWN" then
+		-- Maximum turning for emergency escapes
+		turnSpeed = turnSpeed * 3.5
 	end
 	
 	-- When boosting, turn slightly slower like players do
@@ -1862,6 +2128,10 @@ function AISnake:updateMovement(dt)
 		if state == "AVOID_WALL" then
 			shouldBoost = true
 			boostDuration = 0.8
+		elseif state == "ESCAPE_TRAP" or state == "ESCAPE_SPAWN" then
+			-- Always boost in emergency situations
+			shouldBoost = true
+			boostDuration = 2.0  -- Long boost for escapes
 		elseif state == "SEEK_ORB" then
 			-- RARELY boost when seeking orbs - they need control, not speed
 			if mathRandom() < 0.02 then -- Only 2% chance when orb seeking
@@ -1874,6 +2144,10 @@ function AISnake:updateMovement(dt)
 				shouldBoost = true
 				boostDuration = 1.5
 			end
+		elseif state == "AVOID_BOUNDARY" then
+			-- Boost to avoid edges
+			shouldBoost = true
+			boostDuration = 1.0
 		else
 			-- Normal wandering/hunting boost chance
 			if mathRandom() < (p.BoostChance or 0) * 0.3 then -- Reduced general boost chance
@@ -2230,10 +2504,14 @@ function AISnake:updateMovement(dt)
 		-- Color coding
 		if state == "FLEE" then
 			label.TextColor3 = Color3.fromRGB(255, 100, 100)
+		elseif state == "ESCAPE_TRAP" or state == "ESCAPE_SPAWN" then
+			label.TextColor3 = Color3.fromRGB(255, 50, 50)  -- Bright red for emergencies
 		elseif state == "CIRCLE" or state == "HUNT" then
 			label.TextColor3 = Color3.fromRGB(255, 150, 100)
 		elseif state == "SEEK_ORB" then
 			label.TextColor3 = Color3.fromRGB(100, 255, 100)
+		elseif state == "AVOID_BOUNDARY" or state == "AVOID_WALL" then
+			label.TextColor3 = Color3.fromRGB(255, 255, 100)  -- Yellow for caution
 		elseif self.isConfident then
 			label.TextColor3 = Color3.fromRGB(255, 200, 0)
 		else
