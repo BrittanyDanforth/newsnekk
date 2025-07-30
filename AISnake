@@ -1502,10 +1502,6 @@ function AISnake.new(startPosition)
 	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.2) + 20
 	self.PositionHistory = table.create(self.MaxHistorySize)
 	self.HistoryHead = 1
-	local initialHistoryPoint = { position = self.Position, lookVector = self.Direction }
-	for i = 1, self.MaxHistorySize do
-		self.PositionHistory[i] = initialHistoryPoint
-	end
 
 	function self:addToHistory(data)
 		self.PositionHistory[self.HistoryHead] = data
@@ -1519,33 +1515,69 @@ function AISnake.new(startPosition)
 		return self.PositionHistory[index]
 	end
 
-	-- Create all segments at spawn position initially (prevents dragging on respawn)
-	for i = 1, self.CurrentLength do
-		-- Start all segments BEHIND the head position
-		local offset = self.Direction * (-i * self.SegmentSpacing)
-		local pos = self.Position + offset
-		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
-		local color = self.Config.BodyColors[colorIndex]
-		local segment = createSegment(i, pos, color, self.Config, self.Model, i)
-		self.Segments[i] = segment
-		
-		-- Make segments invisible initially to prevent visual glitch
-		segment.Transparency = 1
-	end
+	-- CRITICAL FIX: Use the ACTUAL spacing that matches movement updates
+	local actualSegmentSpacing = self.SegmentSpacing * 0.15  -- This matches the spacing in updateMovement
 	
-	-- Populate position history with proper spread positions
+	-- Initialize position history with correct spacing BEFORE creating segments
 	for i = 1, self.MaxHistorySize do
-		local historyOffset = self.Direction * (-i * 0.5) -- Smaller spacing for history
+		local historyOffset = self.Direction * (-i * actualSegmentSpacing)
 		local historyPos = self.Position + historyOffset
 		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
 	end
+
+	-- Create segments with matching positions
+	for i = 1, self.CurrentLength do
+		-- Calculate position based on the delay formula used in updateMovement
+		local delay = mathFloor(i * 1.2)
+		local segmentPos = self.Position + self.Direction * (-delay * actualSegmentSpacing)
+		
+		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
+		local color = self.Config.BodyColors[colorIndex]
+		local segment = createSegment(i, segmentPos, color, self.Config, self.Model, i)
+		self.Segments[i] = segment
+		
+		-- Make segments invisible initially
+		segment.Transparency = 1
+		segment.CanCollide = false
+		segment.CanTouch = false
+		segment.CanQuery = false
+	end
 	
-	-- Make segments visible after a frame
+	-- Enhanced spawn protection
+	self._spawnProtection = tick() + 1.0
+	self._spawnActivating = true
+	
+	-- Make segments visible after spawn stabilization
 	task.defer(function()
-		task.wait(0.1)
-		for _, segment in ipairs(self.Segments) do
+		task.wait(0.5)  -- Wait for snake to stabilize
+		
+		-- Only activate if snake still exists
+		if not self._active or self._destroyed then return end
+		
+		self._spawnActivating = false
+		
+		-- Enable collision for segments with fade-in effect
+		for i, segment in ipairs(self.Segments) do
 			if segment and segment.Parent then
-				segment.Transparency = 0
+				-- Smooth fade-in
+				task.spawn(function()
+					local fadeTime = 0.2
+					local startTime = tick()
+					while tick() - startTime < fadeTime do
+						if not segment or not segment.Parent then return end
+						local alpha = (tick() - startTime) / fadeTime
+						segment.Transparency = 1 - alpha
+						task.wait()
+					end
+					if segment and segment.Parent then
+						segment.Transparency = 0
+						-- Only enable collision after fully visible
+						if i > 5 then  -- Keep first few segments non-collidable
+							segment.CanTouch = true
+							segment.CanQuery = true
+						end
+					end
+				end)
 			end
 		end
 	end)
