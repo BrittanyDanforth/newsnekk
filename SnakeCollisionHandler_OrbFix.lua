@@ -1,10 +1,11 @@
--- SnakeCollisionHandler V7.0 OPTIMIZED: SIMPLE SPAWN PROTECTION FIX
+-- SnakeCollisionHandler V7.0 OPTIMIZED: NUCLEAR SPAWN PROTECTION FIX
 -- All V7 functionality preserved with performance optimizations
 -- FIXED: Death orb spawning now properly distributes orbs along snake path
--- FIXED: Head orbs avoid spawn protection with simple approach:
---   - Skips first 3 segments entirely
---   - 1 second delay for segments 4-8
---   - No complex distance checks that might affect other orbs
+-- NUCLEAR FIX: Extremely aggressive spawn protection avoidance:
+--   - Skips first 10 segments entirely (NO orbs near head)
+--   - 2 second delay for segments 11-20
+--   - 0.5 second delay for segments 21-30
+--   - Fallback orbs start at segment 15 with 2.5s delay
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -709,31 +710,44 @@ task.spawn(function()
 									player.Name, snakeLength, totalSegments, totalOrbs, skipInterval))
 							end
 							
-							-- Simple fix: just skip first few segments and add delay
+							-- NUCLEAR FIX: Skip WAY more segments and add HUGE delays
 							for i = 1, totalSegments, skipInterval do
 								if spawnedOrbs >= totalOrbs then break end
 
 								-- Use stored positions instead of segment positions
 								local pos = segmentPositions[i]
 								if pos then
-									-- Skip first 3 segments entirely
-									if i <= 3 then
+									-- Skip first 10 segments entirely - FUCK spawn protection
+									if i <= 10 then
 										continue
 									end
 									
-									-- For segments 4-8, add a delay
-									if i <= 8 then
+									-- For segments 11-20, add a BIG delay
+									if i <= 20 then
 										task.spawn(function()
-											-- Wait to avoid spawn protection
-											task.wait(1.0)
+											-- Wait LONG to avoid spawn protection
+											task.wait(2.0) -- 2 full seconds!
 											
 											local offset = Vector3.new(
-												(math.random() - 0.5) * 8,
+												(math.random() - 0.5) * 10,
 												0,
-												(math.random() - 0.5) * 8
+												(math.random() - 0.5) * 10
 											)
 											
-											spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 2, 0), baseValue)
+											spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 3, 0), baseValue)
+										end)
+									elseif i <= 30 then
+										-- Segments 21-30 get medium delay
+										task.spawn(function()
+											task.wait(0.5)
+											
+											local offset = Vector3.new(
+												(math.random() - 0.5) * 5,
+												0,
+												(math.random() - 0.5) * 5
+											)
+											
+											spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), baseValue)
 										end)
 									else
 										-- Normal segments spawn immediately
@@ -750,21 +764,21 @@ task.spawn(function()
 								end
 							end
 							
-							-- Ensure minimum orbs
-							if spawnedOrbs < 3 and segmentPositions[5] then
+							-- Ensure minimum orbs - spawn FAR from head
+							if spawnedOrbs < 3 and segmentPositions[15] then
 								task.spawn(function()
-									task.wait(1.2) -- Wait for spawn protection
+									task.wait(2.5) -- LONG wait for spawn protection
 									
-									local basePos = segmentPositions[5] or segmentPositions[math.max(4, #segmentPositions)]
+									local basePos = segmentPositions[15] or segmentPositions[math.max(11, #segmentPositions)]
 									if basePos then
 										for j = 1, 3 - spawnedOrbs do
 											local offset = Vector3.new(
-												(math.random() - 0.5) * 10,
+												(math.random() - 0.5) * 15,
 												0,
-												(math.random() - 0.5) * 10
+												(math.random() - 0.5) * 15
 											)
 											
-											spawnOrbBatched(basePos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 2, 0), baseValue)
+											spawnOrbBatched(basePos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 4, 0), baseValue)
 										end
 									end
 								end)
@@ -1439,10 +1453,13 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - SIMPLE SPAWN PROTECTION FIX")
+print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - NUCLEAR SPAWN PROTECTION FIX")
 print("🚀 All V7 functionality preserved with performance optimizations")
 print("💎 FIXED: Death orbs properly spawn along snake segments")
-print("🛡️ SIMPLE FIX: Skips first 3 segments, 1s delay for segments 4-8")
+print("☢️ NUCLEAR FIX:")
+print("   - Skips first 10 segments entirely")
+print("   - 2s delay for segments 11-20")
+print("   - 0.5s delay for segments 21-30")
 print("🔧 Optimizations: Batched spawning, aggressive LOD, bounds checking")
 print("📊 Performance: 12Hz checks, 96 chunk size, 1.5s cache")
 
