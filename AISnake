@@ -1403,6 +1403,10 @@ function AISnake:updateBrain()
 	if not self._active or not self.HeadParts or not self.HeadParts.head or not self.HeadParts.head.Parent then
 		return
 	end
+	
+	-- Update brain tick for debugging
+	self._lastBrainUpdate = tick()
+	
 	local state, steer = self:_determineAction()
 	self.State = state
 	self.SteerDirection = steer
@@ -1816,6 +1820,18 @@ function AISnake:updateMovement(dt)
 	-- Failsafe: Ensure we have a valid steer direction
 	if not steer or steer.Magnitude < 0.1 then
 		steer = self.Direction
+	end
+	
+	-- Failsafe: Check if brain updates have stopped
+	if self._lastBrainUpdate then
+		local timeSinceLastBrain = now - self._lastBrainUpdate
+		if timeSinceLastBrain > 5.0 then  -- No brain update for 5 seconds
+			warn("AI Snake brain frozen for", timeSinceLastBrain, "seconds! Forcing update...")
+			self:updateBrain()
+		end
+	else
+		-- First brain update
+		self:updateBrain()
 	end
 
 	-- SPAWN PROTECTION - Don't check boundaries for first few seconds
@@ -2329,8 +2345,28 @@ end)
 AISnake._brainUpdateIndex = 1
 AISnake._spatialGridTimer = 0
 
+-- Periodic cleanup of invalid snakes
+local lastCleanup = 0
+local CLEANUP_INTERVAL = 10  -- Clean every 10 seconds
+
 AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 	AISnake._spatialGridTimer = AISnake._spatialGridTimer + deltaTime
+
+	-- Periodic cleanup of dead/invalid snakes
+	if time - lastCleanup > CLEANUP_INTERVAL then
+		lastCleanup = time
+		local removed = 0
+		for i = #AISnake._activeSnakes, 1, -1 do
+			local snake = AISnake._activeSnakes[i]
+			if not snake or not snake._active or snake._destroyed then
+				table.remove(AISnake._activeSnakes, i)
+				removed = removed + 1
+			end
+		end
+		if removed > 0 then
+			print("🧹 Cleaned up", removed, "invalid AI snakes from active list")
+		end
+	end
 
 	if AISnake._spatialGridTimer >= SPATIAL_GRID_UPDATE_RATE then
 		AISnake._spatialGridTimer = 0
@@ -2375,7 +2411,10 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 	end 
 
 	local snakes = AISnake._activeSnakes
-	if #snakes == 0 then return end
+	if #snakes == 0 then 
+		AISnake._brainUpdateIndex = 1  -- Reset index when no snakes
+		return 
+	end
 
 	-- Get nearest player position for LOD
 	local nearestPlayerPos = nil
@@ -2390,7 +2429,8 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 	end
 
 	for i = 1, BRAIN_UPDATES_PER_FRAME do
-		if AISnake._brainUpdateIndex > #snakes then
+		-- Safety check for index bounds
+		if AISnake._brainUpdateIndex > #snakes or AISnake._brainUpdateIndex < 1 then
 			AISnake._brainUpdateIndex = 1
 		end
 
