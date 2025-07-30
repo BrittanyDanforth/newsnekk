@@ -628,12 +628,12 @@ AISnake.PersonalityDefinitions = {
 		TurnBias = 0.03,
 		BoostChance = 0.06,
 		CombatRadius = 45,
-		RandomTurnInterval = 5.0,
-		OrbSeekRadius = 100,
+		RandomTurnInterval = 3.5,  -- Turn more often
+		OrbSeekRadius = 180,  -- Increased from 100 for better death orb detection
 		Description = "Balanced aggressor - hunts when advantageous",
 		FleeThreshold = 20,  -- Length difference before fleeing
 		AggressionLevel = 0.7,
-		PatrolRadius = 200,
+		PatrolRadius = 350,  -- Increased patrol radius
 	},
 	Scavenger = {
 		Type = "Scavenger",
@@ -644,12 +644,12 @@ AISnake.PersonalityDefinitions = {
 		TurnBias = 0.05,
 		BoostChance = 0.04,
 		CombatRadius = 25,
-		RandomTurnInterval = 4.0,
-		OrbSeekRadius = 200,  -- Excellent orb vision
+		RandomTurnInterval = 2.5,  -- Frequent direction changes
+		OrbSeekRadius = 300,  -- Amazing orb vision - especially for death orbs
 		Description = "Peaceful orb collector - avoids all conflict",
 		FleeThreshold = 5,
 		AggressionLevel = 0.0,
-		PatrolRadius = 300,
+		PatrolRadius = 450,  -- Roam widely for orbs
 	},
 	Guardian = {
 		Type = "Guardian",
@@ -660,8 +660,8 @@ AISnake.PersonalityDefinitions = {
 		TurnBias = 0.02,
 		BoostChance = 0.03,
 		CombatRadius = 60,
-		RandomTurnInterval = 6.0,
-		OrbSeekRadius = 120,
+		RandomTurnInterval = 3.0,  -- More active patrolling
+		OrbSeekRadius = 200,  -- Better orb detection for death orbs
 		Description = "Territory defender - patrols specific areas",
 		FleeThreshold = 30,
 		AggressionLevel = 0.5,
@@ -677,12 +677,12 @@ AISnake.PersonalityDefinitions = {
 		TurnBias = 0.04,
 		BoostChance = 0.08,
 		CombatRadius = 40,
-		RandomTurnInterval = 3.5,
-		OrbSeekRadius = 140,
+		RandomTurnInterval = 2.0,  -- Very active
+		OrbSeekRadius = 220,  -- Great orb vision for death orbs
 		Description = "Smart fighter - only attacks smaller snakes",
 		FleeThreshold = 0,  -- Never flees from equal/smaller
 		AggressionLevel = 0.8,
-		PatrolRadius = 250,
+		PatrolRadius = 400,  -- Hunt across the map
 		OnlyAttackSmaller = true,
 	},
 	Hunter = {
@@ -694,12 +694,12 @@ AISnake.PersonalityDefinitions = {
 		TurnBias = 0.02,
 		BoostChance = 0.07,
 		CombatRadius = 50,
-		RandomTurnInterval = 5.5,
-		OrbSeekRadius = 130,
+		RandomTurnInterval = 2.8,  -- More dynamic hunting
+		OrbSeekRadius = 200,  -- Better awareness for death orbs
 		Description = "Persistent hunter - tracks targets",
 		FleeThreshold = 25,
 		AggressionLevel = 0.75,
-		PatrolRadius = 220,
+		PatrolRadius = 380,  -- Track prey across map
 		TrackingDuration = 10,  -- Seconds to track a target
 	},
 	Nomad = {
@@ -711,12 +711,12 @@ AISnake.PersonalityDefinitions = {
 		TurnBias = 0.06,
 		BoostChance = 0.05,
 		CombatRadius = 30,
-		RandomTurnInterval = 2.5,  -- Frequent direction changes
-		OrbSeekRadius = 160,
+		RandomTurnInterval = 1.5,  -- Very frequent direction changes
+		OrbSeekRadius = 250,  -- Excellent orb finding for death orbs
 		Description = "Wanderer - explores the entire map",
 		FleeThreshold = 10,
 		AggressionLevel = 0.2,
-		PatrolRadius = 400,  -- Roams widely
+		PatrolRadius = 600,  -- Maximum roaming range
 		ExplorationBias = 0.8,
 	},
 	Shadow = {
@@ -729,7 +729,7 @@ AISnake.PersonalityDefinitions = {
 		BoostChance = 0.02,  -- Rarely boosts
 		CombatRadius = 55,
 		RandomTurnInterval = 8.0,
-		OrbSeekRadius = 110,
+		OrbSeekRadius = 150,  -- Decent orb vision for death orbs
 		Description = "Stealthy assassin - strikes from behind",
 		FleeThreshold = 15,
 		AggressionLevel = 0.6,
@@ -747,7 +747,7 @@ AISnake.PersonalityDefinitions = {
 		BoostChance = 0.12,  -- Boosts frequently
 		CombatRadius = 35,
 		RandomTurnInterval = 6.0,
-		OrbSeekRadius = 50,  -- Poor orb vision
+		OrbSeekRadius = 100,  -- Still sees death orbs if close
 		Description = "Reckless fighter - all aggression",
 		FleeThreshold = 40,  -- Only flees from much larger
 		AggressionLevel = 1.0,
@@ -773,41 +773,48 @@ function AISnake:findBestOrb()
 		end
 	end
 
-	-- PRIORITIZE UPGRADE ORBS (check OrbFolder directly)
-	local orbFolder = Workspace:FindFirstChild("OrbFolder")
+	-- ALWAYS check workspace for orbs directly as backup
+	local orbsFound = 0
+
+	-- Check OrbFolder
+	local orbFolder = Workspace:FindFirstChild("OrbFolder") or Workspace:FindFirstChild("Orbs")
 	if orbFolder then
 		for _, orb in pairs(orbFolder:GetChildren()) do
-			if orb:IsA("BasePart") and orb.Name == "UpgradeOrb" and not targetedOrbs[orb] then
+			if orb:IsA("BasePart") and not targetedOrbs[orb] then
 				local dist = (orb.Position - headPos).Magnitude
-				if dist < minDist then
-					minDist = dist
-					nearest = orb
+				if dist < minDist * 1.5 then -- Slightly larger radius for backup check
+					orbsFound = orbsFound + 1
+					if dist < minDist then
+						minDist = dist
+						nearest = orb
+					end
 				end
 			end
 		end
 	end
-	
-	-- If no upgrade orbs, check regular orbs from spatial grid
+
+	-- Also check workspace directly for any loose orbs (including DeathOrbs!)
+	for _, obj in pairs(Workspace:GetChildren()) do
+		if obj:IsA("BasePart") and (obj.Name == "Orb" or obj.Name == "UpgradeOrb" or obj.Name == "DeathOrb") and not targetedOrbs[obj] then
+			local dist = (obj.Position - headPos).Magnitude
+			if dist < minDist * 1.5 then
+				orbsFound = orbsFound + 1
+				if dist < minDist then
+					minDist = dist
+					nearest = obj
+				end
+			end
+		end
+	end
+
+	-- If no orbs from direct search, check spatial grid
 	if not nearest and #nearbyEntities > 0 then
 		for _, entity in nearbyEntities do
-			if entity.type == "ORB" and not targetedOrbs[entity.part] then
+			if entity.type == "ORB" and entity.part and entity.part.Parent then
 				local dist = (entity.part.Position - headPos).Magnitude
 				if dist < minDist then
 					minDist = dist
 					nearest = entity.part
-				end
-			end
-		end
-
-		-- If no untargeted orbs, allow targeting of any orb
-		if not nearest then
-			for _, entity in nearbyEntities do
-				if entity.type == "ORB" then
-					local dist = (entity.part.Position - headPos).Magnitude
-					if dist < minDist then
-						minDist = dist
-						nearest = entity.part
-					end
 				end
 			end
 		end
@@ -1313,44 +1320,86 @@ function AISnake:_determineAction()
 		return "FLEE", fleeDir
 	end
 
-	-- Priority 4: Smart orb seeking
+	-- Priority 4: Aggressive orb seeking
 	if p.TargetOrbs then
-		-- Find best orb with path checking
-		if not self.TargetOrb or not self:isPathSafe(self.TargetOrb.Position) then
-			local orb, dist = self:findBestOrb()
+		-- Always look for orbs, even if we have a target
+		local orb, dist = self:findBestOrb()
+
+		-- Safety check - if no orbs found and we're stuck, add random movement
+		if not orb and state == "WANDER" and (now - (self._lastOrbTime or 0)) > 5 then
+			-- Haven't found an orb in 5 seconds, add some random movement
+			self._needsRandomTurn = true
+			self._lastOrbTime = now
+		elseif orb then
+			self._lastOrbTime = now
+		end
+
+		-- SUPER aggressive orb targeting for DeathOrbs
+		if orb then
+			local isDeathOrb = orb.Name == "DeathOrb"
+			local effectiveRadius = isDeathOrb and p.OrbSeekRadius * 3 or p.OrbSeekRadius * 2
 			
-			-- Only target orb if path is safe
-			if orb and dist < p.OrbSeekRadius * 1.5 and self:isPathSafe(orb.Position) then
-				self.TargetOrb = orb
-				self.TargetOrbExpire = now + mathRandom(50, 80) / 10
-				AISnake._orbTargets[self] = orb
-			else
-				self.TargetOrb = nil
+			if dist < effectiveRadius then
+				-- Always switch to DeathOrbs or closer orbs
+				local shouldSwitch = false
+				if isDeathOrb and (not self.TargetOrb or self.TargetOrb.Name ~= "DeathOrb") then
+					shouldSwitch = true -- Always prioritize DeathOrbs
+				elseif not self.TargetOrb or dist < (self.TargetOrb.Position - headPos).Magnitude * 0.7 then
+					shouldSwitch = true -- Switch to closer orb
+				end
+				
+				if shouldSwitch then
+					self.TargetOrb = orb
+					self.TargetOrbExpire = now + mathRandom(30, 50) / 10  -- Shorter expire time
+					AISnake._orbTargets[self] = orb
+					
+					-- Clear combat targets when going for DeathOrbs
+					if isDeathOrb then
+						self.TargetSnake = nil
+						self.Avoiding = false
+					end
+				end
 			end
 		end
-		
+
+		-- Clear expired orb
+		if self.TargetOrb and (not self.TargetOrb.Parent or now > self.TargetOrbExpire) then
+			self.TargetOrb = nil
+			AISnake._orbTargets[self] = nil
+		end
+
 		if self.TargetOrb and self.TargetOrb.Parent then
 			state = "SEEK_ORB"
 			local toOrb = self.TargetOrb.Position - headPos
 			local orbDist = toOrb.Magnitude
-			
-			-- Smart orb approach with collision checking
-			if orbDist < 15 then
+			local isDeathOrb = self.TargetOrb.Name == "DeathOrb"
+
+			-- More direct orb approach, especially for DeathOrbs
+			if orbDist < 10 then
+				-- Very close - go straight
 				steer = toOrb.Unit
-			elseif orbDist < 30 then
-				-- Check for obstacles
-				if not self:isPathSafe(self.TargetOrb.Position, 30) then
-					-- Path blocked, find new orb
-					self.TargetOrb = nil
-					AISnake._orbTargets[self] = nil
-				else
-					local leadFactor = mathMin(orbDist / 30, 0.5)
-					steer = toOrb.Unit
-				end
+			elseif orbDist < 25 or isDeathOrb then
+				-- Close or DeathOrb - slight prediction with more direct approach
+				local orbVel = self.TargetOrb.AssemblyLinearVelocity or Vector3.zero
+				local predictTime = mathMin(orbDist / self.Speed, isDeathOrb and 0.1 or 0.3)
+				local predictedPos = self.TargetOrb.Position + orbVel * predictTime
+				steer = (predictedPos - headPos).Unit
 			else
-				steer = toOrb.Unit
+				-- Far - use intercept angle for smoother approach
+				local angle = mathAtan2(toOrb.X, toOrb.Z)
+				local currentAngle = mathAtan2(self.Direction.X, self.Direction.Z)
+				local angleDiff = angle - currentAngle
+
+				-- Normalize angle difference
+				if angleDiff > mathPi then angleDiff = angleDiff - 2 * mathPi end
+				if angleDiff < -mathPi then angleDiff = angleDiff + 2 * mathPi end
+
+				-- Smooth turn towards orb
+				local turnAmount = mathClamp(angleDiff * 2, -1, 1)
+				local newAngle = currentAngle + turnAmount * 0.3
+				steer = Vector3new(mathSin(newAngle), 0, mathCos(newAngle))
 			end
-			
+
 			-- Clear any combat targets when seeking orbs
 			self.TargetSnake = nil
 		end
@@ -1385,14 +1434,45 @@ function AISnake:_determineAction()
 			end
 		end
 
-		-- Center bias based on distance
-		if distFromCenter > 250 then
-			steer = toCenter.Unit
-		elseif distFromCenter > 150 then
-			local centerBias = toCenter.Unit * 0.7
-			steer = (baseSteer + centerBias).Unit
+		-- Check for nearby orbs to add attraction even when wandering
+		local nearbyOrb, orbDist = self:findBestOrb()
+		local orbInfluence = Vector3.zero
+		local switchToSeek = false
+		
+		if nearbyOrb and orbDist < 80 then  -- Increased range for orb detection
+			local toOrb = (nearbyOrb.Position - headPos).Unit
+			local influence = (80 - orbDist) / 80  -- Stronger when closer
+			
+			-- MUCH stronger influence for death orbs!
+			if nearbyOrb.Name == "DeathOrb" then
+				orbInfluence = toOrb * influence * 0.9  -- 90% influence for death orbs
+				-- Switch to seeking if within reasonable distance
+				if orbDist < 50 then
+					self.TargetOrb = nearbyOrb
+					self.TargetOrbExpire = now + 5
+					AISnake._orbTargets[self] = nearbyOrb
+					state = "SEEK_ORB"
+					switchToSeek = true
+				end
+			else
+				orbInfluence = toOrb * influence * 0.4  -- 40% max influence for regular orbs
+			end
+		end
+
+		-- Only apply center bias and orb influence if not switching to seek
+		if not switchToSeek then
+			-- Center bias based on distance
+			if distFromCenter > 250 then
+				steer = toCenter.Unit
+			elseif distFromCenter > 150 then
+				local centerBias = toCenter.Unit * 0.7
+				steer = (baseSteer + centerBias + orbInfluence).Unit
+			else
+				steer = (baseSteer + orbInfluence).Unit
+			end
 		else
-			steer = baseSteer
+			-- Already switching to SEEK_ORB, use direct path
+			steer = (nearbyOrb.Position - headPos).Unit
 		end
 	end
 
@@ -1985,7 +2065,7 @@ function AISnake:updateMovement(dt)
 	-- CHECK FOR ORB PICKUPS (including upgrade orbs)
 	-- Look for orbs in workspace directly (OrbSpawner puts them there)
 	local headPos = self.HeadParts.head.Position
-	local pickupRadius = 8  -- Increased for better upgrade orb pickup (they're bigger)
+	local pickupRadius = 10  -- Further increased for better orb collection
 	
 	-- Check both workspace and any orb folders
 	local orbsToCheck = {}
@@ -2032,6 +2112,10 @@ function AISnake:updateMovement(dt)
 						print("🎯 AI Snake collecting upgrade orb!")
 						SnakeUpgrades.GiveUpgrade(self)
 					end
+				elseif orb.Name == "DeathOrb" then
+					-- Death orb - grow the snake more!
+					print("💀 AI Snake collecting DEATH ORB! Value:", orbValue)
+					self:grow(orbValue)
 				else
 					-- Regular orb - grow the snake
 					self:grow(orbValue)
