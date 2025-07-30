@@ -17,7 +17,8 @@ for i = 1, NUM_SNAKES do
 	snakeSlots[i] = {
 		snake = nil,
 		deathTime = nil,
-		spawning = false
+		spawning = false,
+		lastPersonality = nil  -- Track personality for respawn
 	}
 end
 
@@ -44,6 +45,12 @@ end
 
 local function cleanupSnake(slot)
 	if slot.snake then
+		-- Save personality before cleanup
+		if slot.snake.Personality and slot.snake.Personality.Type then
+			slot.lastPersonality = slot.snake.Personality.Type
+			print("💾 Saved personality:", slot.lastPersonality)
+		end
+		
 		-- Try multiple cleanup methods
 		pcall(function()
 			if slot.snake.Destroy then
@@ -81,13 +88,16 @@ local function spawnSnake(slotIndex)
 	-- Spawn new snake
 	local position = getRandomSpawnPosition()
 	local success, newSnake = pcall(function()
-		return AISnake.new(position)
+		-- Create snake with preserved personality if available
+		local snake = AISnake.new(position, slot.lastPersonality)
+		return snake
 	end)
 	
 	if success and newSnake then
 		slot.snake = newSnake
 		slot.deathTime = nil
-		print("✅ Spawned AI Snake #" .. slotIndex .. " at", position)
+		local personality = newSnake.Personality and newSnake.Personality.Type or "Unknown"
+		print("✅ Spawned AI Snake #" .. slotIndex .. " at", position, "with personality:", personality)
 	else
 		warn("❌ Failed to spawn AI Snake #" .. slotIndex)
 	end

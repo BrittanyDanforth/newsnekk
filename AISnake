@@ -1409,7 +1409,7 @@ function AISnake:updateBrain()
 end
 
 -- === AI CONSTRUCTOR ===
-function AISnake.new(startPosition)
+function AISnake.new(startPosition, preservedPersonalityType)
 	if #AISnake._activeSnakes >= MAX_AI_SNAKES then
 		print("AI Snake limit reached:", MAX_AI_SNAKES)
 		return nil
@@ -1464,7 +1464,15 @@ function AISnake.new(startPosition)
 	self.killCount = 0
 	self.lastKillTime = 0
 
-	local pType = AISnake.PersonalityTypes[mathRandom(1, #AISnake.PersonalityTypes)]
+	-- Use preserved personality or assign random one
+	local pType
+	if preservedPersonalityType and AISnake.PersonalityDefinitions[preservedPersonalityType] then
+		pType = preservedPersonalityType
+		print("🧠 Restoring personality:", pType)
+	else
+		pType = AISnake.PersonalityTypes[mathRandom(1, #AISnake.PersonalityTypes)]
+		print("🎲 Assigning new personality:", pType)
+	end
 	self.Personality = deepCopy(AISnake.PersonalityDefinitions[pType])
 	self._personalityType = pType
 
