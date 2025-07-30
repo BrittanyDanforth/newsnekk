@@ -632,8 +632,8 @@ AISnake.PersonalityDefinitions = {
 		TurnBias = 0.03,
 		BoostChance = 0.06,
 		CombatRadius = 45,
-		RandomTurnInterval = 5.0,
-		OrbSeekRadius = 100,
+		RandomTurnInterval = 3.5,  -- Turn more often
+		OrbSeekRadius = 150,  -- See orbs from further
 		Description = "Balanced aggressor - hunts when advantageous",
 		FleeThreshold = 20,  -- Length difference before fleeing
 		AggressionLevel = 0.7,
@@ -648,8 +648,8 @@ AISnake.PersonalityDefinitions = {
 		TurnBias = 0.05,
 		BoostChance = 0.04,
 		CombatRadius = 25,
-		RandomTurnInterval = 4.0,
-		OrbSeekRadius = 200,  -- Excellent orb vision
+		RandomTurnInterval = 2.5,  -- Frequent direction changes
+		OrbSeekRadius = 250,  -- Amazing orb vision
 		Description = "Peaceful orb collector - avoids all conflict",
 		FleeThreshold = 5,
 		AggressionLevel = 0.0,
@@ -1365,9 +1365,22 @@ function AISnake:_determineAction()
 		local toCenter = mapCenter - headPos
 		local distFromCenter = toCenter.Magnitude
 
-		-- Smoother wandering
-		if (now - (self.LastTurn or 0) > p.RandomTurnInterval) then
-			local maxTurn = 45
+		-- More dynamic wandering with variable turn patterns
+		if (now - (self.LastTurn or 0) > p.RandomTurnInterval * mathRandom(50, 150) / 100) then
+			-- Sometimes make small adjustments, sometimes big turns
+			local turnType = mathRandom()
+			local maxTurn
+			if turnType < 0.3 then
+				-- Small adjustment
+				maxTurn = mathRandom(10, 25)
+			elseif turnType < 0.8 then
+				-- Medium turn
+				maxTurn = mathRandom(30, 60)
+			else
+				-- Big turn for variety
+				maxTurn = mathRandom(70, 120)
+			end
+			
 			self.TargetYaw = self.TargetYaw + mathRad(mathRandom(-maxTurn, maxTurn))
 			self.LastTurn = now
 		end
