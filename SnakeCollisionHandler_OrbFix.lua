@@ -1,10 +1,12 @@
--- SnakeCollisionHandler V7.0 OPTIMIZED: V7.0 DEATH ORB SYSTEM
+-- SnakeCollisionHandler V7.0 OPTIMIZED: AGGRESSIVE SPAWN PROTECTION FIX
 -- All V7 functionality preserved with performance optimizations
--- DEATH ORB SYSTEM: Using exact V7.0 death orb spawning (no shrinking/disappearing)
---   - Direct spawning without delays or batching
---   - Spawns along entire snake path
---   - Simple random offset (2 studs)
---   - No spawn protection workarounds needed
+-- FIXED: Death orb spawning now properly distributes orbs along snake path
+-- FIXED: Head orbs completely avoid spawn protection zones:
+--   - Starts spawning from segment 5 (skips first 4 segments)
+--   - 1.5 second delay for near-head segments
+--   - 50+ stud offset from death position
+--   - Checks and skips segments within 50 studs of death location
+--   - Fallback orbs spawn after 2 seconds, 60 studs away
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -33,9 +35,11 @@ local BODY_COLLISION_DISTANCE = 2.8
 local MIN_COLLISION_DISTANCE = 2.0
 local COLLISION_BUFFER = 0.5
 
--- === FIXED ORB SPAWNING SYSTEM (FROM V7.0) ===
-local ORB_SPAWN_HEIGHT = 2 -- Standard height above ground for orbs
-local MIN_ORB_SPACING = 3 -- Minimum distance between spawned orbs
+-- === OPTIMIZED ORB SPAWNING ===
+local ORB_SPAWN_HEIGHT = 2
+local MIN_ORB_SPACING = 3
+local ORB_BATCH_SIZE = 8 -- Spawn orbs in smaller batches
+local ORB_SPAWN_DELAY = 0.03 -- Small delay between batches
 
 -- === DEBUG SYSTEM ===
 local DEBUG_COLLISIONS = false
@@ -163,7 +167,7 @@ function SpatialGrid:clear()
 	if currentTime - self.lastClear < 0.5 then
 		return
 	end
-	
+
 	for k in pairs(self.cells) do
 		self.cells[k] = nil
 	end
@@ -179,18 +183,50 @@ local CollisionCache = {
 	frameCache = {}
 }
 
--- === FIXED ORB SPAWNING SYSTEM ===
-local ORB_SPAWN_HEIGHT = 2 -- Standard height above ground for orbs
-local MIN_ORB_SPACING = 3 -- Minimum distance between spawned orbs
+-- === OPTIMIZED ORB SPAWNING ===
+local orbSpawnBuffer = {}
+local isProcessingOrbs = false
 
-local function spawnOrbDirect(position, value)
-	-- Direct spawn with minimal processing
-	local success, err = pcall(function()
-		OrbUtils.spawnOrbAt(position, value)
-	end)
+local function processOrbBatch()
+	if isProcessingOrbs or #orbSpawnBuffer == 0 then return end
 
-	if not success then
-		warn("Orb spawn failed:", err)
+	isProcessingOrbs = true
+	local batch = math.min(ORB_BATCH_SIZE, #orbSpawnBuffer)
+
+	for i = 1, batch do
+		local orbData = table.remove(orbSpawnBuffer, 1)
+		if orbData then
+			local success, result = pcall(function()
+				return OrbUtils.spawnOrbAt(orbData.position, orbData.value)
+			end)
+
+			if DEBUG_COLLISIONS and not success then
+				warn("[ORB SPAWN ERROR]", result)
+			end
+		end
+	end
+
+	isProcessingOrbs = false
+
+	-- Schedule next batch
+	if #orbSpawnBuffer > 0 then
+		task.spawn(function()
+			task.wait(ORB_SPAWN_DELAY)
+			processOrbBatch()
+		end)
+	end
+end
+
+local function spawnOrbBatched(position, value)
+	-- Add to buffer
+	table.insert(orbSpawnBuffer, {
+		position = position,
+		value = value
+	})
+
+	-- Start processing if not already
+	if not isProcessingOrbs then
+		task.spawn(processOrbBatch)
 	end
 end
 
@@ -250,7 +286,7 @@ local function createSegmentChunks(segments, snakeLength)
 
 	-- Use larger chunks for ultra-long snakes
 	local chunkSize = snakeLength > ULTRA_LENGTH_THRESHOLD and SEGMENT_CHUNK_SIZE * 1.5 or SEGMENT_CHUNK_SIZE
-	
+
 	local processedCount = 0
 	for i, seg in ipairs(segments) do
 		local pos = seg.Position or seg.position
@@ -342,7 +378,7 @@ local function interpolateSegments(segmentParts, snakeLength)
 				if dist > interpStep then
 					local numInterp = math.ceil(dist / interpStep)
 					numInterp = math.min(numInterp, 2) -- Max 2 interpolated segments
-					
+
 					for j = 1, numInterp do
 						local alpha = j / (numInterp + 1)
 						local interpPos = a.Position:Lerp(b.Position, alpha)
@@ -392,7 +428,7 @@ local function getActualSnakeSegments(player)
 			return segments
 		end
 	end
-	
+
 	-- Try the global snake system
 	local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
 	if snakeInstance and snakeInstance.segments then
@@ -409,7 +445,7 @@ local function getActualSnakeSegments(player)
 			return segments
 		end
 	end
-	
+
 	-- Try from cache
 	local cacheData = CollisionCache.playerSegments[player]
 	if cacheData and cacheData.realSegments then
@@ -426,7 +462,7 @@ local function getActualSnakeSegments(player)
 			return segments
 		end
 	end
-	
+
 	if DEBUG_COLLISIONS then
 		warn(string.format("[ORB DEBUG] No segments found for player %s", player.Name))
 	end
@@ -445,7 +481,7 @@ local function getPlayerSegments(player)
 	-- Get actual segments
 	local segmentParts = getActualSnakeSegments(player) or {}
 	local snakeLength = #segmentParts
-	
+
 	-- Also check length from leaderstats
 	if player:FindFirstChild("leaderstats") then
 		local lengthValue = player.leaderstats:FindFirstChild("Length")
@@ -453,7 +489,7 @@ local function getPlayerSegments(player)
 			snakeLength = math.max(snakeLength, lengthValue.Value or snakeLength)
 		end
 	end
-	
+
 	if #segmentParts == 0 then return nil end
 
 	-- Use direct segments for ultra-long snakes
@@ -621,6 +657,12 @@ task.spawn(function()
 				if character then
 					local humanoid = character:FindFirstChild("Humanoid")
 					if humanoid and humanoid.Health > 0 then
+						-- Store death position for spawn protection avoidance
+						local deathPosition = nil
+						if character:FindFirstChild("HumanoidRootPart") then
+							deathPosition = character.HumanoidRootPart.Position
+						end
+
 						-- Get snake length from leaderstats
 						local snakeLength = 55
 						if player:FindFirstChild("leaderstats") then
@@ -632,7 +674,7 @@ task.spawn(function()
 
 						-- FIXED: Get actual snake segments properly
 						local segments = getActualSnakeSegments(player)
-						
+
 						-- IMPORTANT: Store segment positions BEFORE the snake gets destroyed
 						local segmentPositions = {}
 						if segments and #segments > 0 then
@@ -642,112 +684,184 @@ task.spawn(function()
 								end
 							end
 						end
-						
-						-- Get actual snake segments (V7.0 style)
-						local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
-						if snakeInstance and snakeInstance.segments then
-							local segments = snakeInstance.segments
-							local totalLength = #segments
-							
-							-- IMPORTANT: Store positions BEFORE snake is destroyed
-							local segmentPositions = {}
-							for i, seg in ipairs(segments) do
-								if seg and seg.Parent and seg.Position then
-									segmentPositions[i] = seg.Position -- Vector3 values are copied
-								end
-							end
-							
+
+						if segments and #segments > 0 then
+							local totalSegments = #segments
+
 							-- Calculate orb distribution
-							local orbsPerSegment = 1 / 2.5 -- One orb every 2.5 segments
-							local totalOrbs = math.clamp(math.floor(totalLength * orbsPerSegment), 3, 30)
-							
-							-- Dynamic value calculation based on snake length
+							local orbsPerSegment = 1 / 2.5
+							local totalOrbs = math.clamp(math.floor(snakeLength * orbsPerSegment), 3, 40)
+
+							-- Dynamic value calculation
 							local baseValue = 1
-							if totalLength <= 50 then
-								-- Small snakes: give back 60% of length
-								local totalValue = math.floor(totalLength * 0.6)
+							if snakeLength <= 50 then
+								local totalValue = math.floor(snakeLength * 0.6)
 								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							elseif totalLength <= 200 then
-								-- Medium snakes: give back 45% of length
-								local totalValue = math.floor(totalLength * 0.45)
+							elseif snakeLength <= 200 then
+								local totalValue = math.floor(snakeLength * 0.45)
 								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							elseif totalLength <= 500 then
-								-- Large snakes: give back 35% of length
-								local totalValue = math.floor(totalLength * 0.35)
+							elseif snakeLength <= 500 then
+								local totalValue = math.floor(snakeLength * 0.35)
 								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
 							else
-								-- Very large snakes: give back 25% of length with cap
-								local totalValue = math.min(math.floor(totalLength * 0.25), 200)
+								local totalValue = math.min(math.floor(snakeLength * 0.25), 200)
 								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
 							end
-							
-							local valuePerOrb = baseValue
-							
-							-- Mark player as dead IMMEDIATELY
-							deadPlayers[player] = true
-							
-							-- Store the death position
-							local deathPos = character:FindFirstChild("HumanoidRootPart") and character.HumanoidRootPart.Position
-							
-							-- Kill the humanoid
-							humanoid.Health = 0
-							
-							-- Spawn orbs in a separate task with delay
-							task.spawn(function()
-								-- Wait for spawn protection to FULLY clear
-								task.wait(0.8) -- Increased from 0.5 to ensure spawn protection is gone
-								
-								-- Spawn orbs along the snake path using STORED positions
-								local spawnedOrbs = 0
-								for i = 1, totalLength do
-									if math.random() < orbsPerSegment then
-										local pos = segmentPositions[i]
-										if pos then
-											-- Skip positions too close to death location (first 5 segments)
-											if deathPos and i <= 5 and (pos - deathPos).Magnitude < 15 then
-												continue
+
+							-- Spawn orbs distributed along snake
+							local spawnedOrbs = 0
+							local skipInterval = math.max(1, math.floor(totalSegments / totalOrbs))
+
+							if DEBUG_COLLISIONS then
+								print(string.format("[ORB SPAWN] Player %s died - Length: %d, Segments: %d, TotalOrbs: %d, Skip: %d", 
+									player.Name, snakeLength, totalSegments, totalOrbs, skipInterval))
+							end
+
+							-- Start from segment 5 to completely avoid head spawn protection
+							local startSegment = 5
+							for i = startSegment, totalSegments, skipInterval do
+								if spawnedOrbs >= totalOrbs then break end
+
+								-- Use stored positions instead of segment positions
+								local pos = segmentPositions[i]
+								if pos then
+									-- Skip segments too close to death position
+									if deathPosition and (pos - deathPosition).Magnitude < 50 then
+										if DEBUG_COLLISIONS then
+											print(string.format("[ORB DEBUG] Skipping segment %d - too close to death position (%.1f studs)", i, (pos - deathPosition).Magnitude))
+										end
+										continue -- Skip this segment
+									end
+
+									-- Check if this is near head or tail
+									local isNearHead = (i <= 10) -- Expanded head zone
+									local isTail = (i >= totalSegments - 3)
+
+									-- For near-head segments, spawn with massive delay and offset
+									if isNearHead then
+										task.spawn(function()
+											-- LONG delay for near-head orbs
+											local waitTime = 1.5 -- 1.5 seconds!
+											if DEBUG_COLLISIONS then
+												print(string.format("[ORB DEBUG] Waiting %s seconds before spawning near-head orb at segment %d", waitTime, i))
 											end
-											
-											-- Small random offset to prevent perfect stacking
+											task.wait(waitTime)
+
+											-- HUGE offset to escape spawn protection
+											local angle = math.random() * math.pi * 2
+											local distance = 50 -- 50 studs away!
 											local offset = Vector3.new(
-												(math.random() - 0.5) * 2,
+												math.cos(angle) * distance,
 												0,
-												(math.random() - 0.5) * 2
+												math.sin(angle) * distance
 											)
-											
-											-- Spawn at stored position with small offset
-											local success = pcall(function()
-												spawnOrbDirect(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), valuePerOrb)
-												spawnedOrbs = spawnedOrbs + 1
-											end)
-											
-											if not success then
-												warn("Failed to spawn orb for player death")
+
+											-- Calculate final position
+											local orbPosition = pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 5, 0)
+
+											-- Double-check it's far from death position
+											if deathPosition and (orbPosition - deathPosition).Magnitude < 45 then
+												-- Push even further away
+												offset = offset * 1.5
+												orbPosition = pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 5, 0)
+												if DEBUG_COLLISIONS then
+													print("[ORB DEBUG] Pushed orb further from death position")
+												end
+											end
+
+											spawnOrbBatched(orbPosition, baseValue)
+										end)
+									elseif isTail then
+										-- Tail segments with moderate delay
+										task.spawn(function()
+											task.wait(0.1)
+											local offset = Vector3.new(
+												(math.random() - 0.5) * 10,
+												0,
+												(math.random() - 0.5) * 10
+											)
+											spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 3, 0), baseValue)
+										end)
+									else
+										-- Normal middle segments spawn immediately
+										local offset = Vector3.new(
+											(math.random() - 0.5) * 3,
+											0,
+											(math.random() - 0.5) * 3
+										)
+
+										spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), baseValue)
+									end
+
+									spawnedOrbs = spawnedOrbs + 1
+								end
+							end
+
+							-- Ensure minimum orbs (but spawn them far from head)
+							if spawnedOrbs < 3 and #segmentPositions >= 10 then
+								task.spawn(function()
+									-- VERY LONG delay to ensure spawn protection is completely gone
+									task.wait(2.0) -- 2 full seconds!
+
+									-- Use segment 10 position instead of head
+									local basePos = segmentPositions[10] or segmentPositions[math.min(5, #segmentPositions)]
+									if basePos and (not deathPosition or (basePos - deathPosition).Magnitude > 30) then
+										for j = 1, 3 - spawnedOrbs do
+											-- Massive circular spread
+											local angle = (j - 1) * 120 * math.pi / 180
+											local distance = 60 -- 60 studs away!
+											local offset = Vector3.new(
+												math.cos(angle) * distance,
+												0,
+												math.sin(angle) * distance
+											)
+
+											-- Add randomness
+											offset = offset + Vector3.new(
+												(math.random() - 0.5) * 10,
+												0,
+												(math.random() - 0.5) * 10
+											)
+
+											local orbPos = basePos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 8, 0)
+
+											-- Final check against death position
+											if not deathPosition or (orbPos - deathPosition).Magnitude > 50 then
+												spawnOrbBatched(orbPos, baseValue)
 											end
 										end
 									end
-								end
-								
-								-- Ensure at least some orbs spawn
-								if spawnedOrbs == 0 and #segmentPositions > 3 then
-									-- Use a segment away from the head
-									local safePos = segmentPositions[math.min(5, #segmentPositions)]
-									if safePos then
-										pcall(function()
-											spawnOrbDirect(safePos + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), valuePerOrb)
-										end)
-									end
-								end
-							end)
-							
-							-- Clear dead flag after respawn time
-							task.spawn(function()
-								task.wait(5)
-								deadPlayers[player] = nil
-							end)
+								end)
+								spawnedOrbs = math.max(spawnedOrbs, 3)
+							end
+
+							if DEBUG_COLLISIONS then
+								print(string.format("[ORB SPAWN] Spawned %d orbs for %s", spawnedOrbs, player.Name))
+							end
 						else
-							-- No fallback needed - V7.0 style
+							-- Fallback: spawn orbs at death position
+							warn(string.format("No segments found for %s, spawning orbs at death position", player.Name))
+							local rootPart = character:FindFirstChild("HumanoidRootPart")
+							if rootPart then
+								local orbCount = math.min(math.floor(snakeLength / 10), 20)
+								for i = 1, orbCount do
+									local offset = Vector3.new(
+										(math.random() - 0.5) * 10,
+										0,
+										(math.random() - 0.5) * 10
+									)
+									spawnOrbBatched(rootPart.Position + offset + Vector3.new(0, ORB_SPAWN_HEIGHT, 0), 1)
+								end
+							end
 						end
+
+						deadPlayers[player] = true
+						humanoid.Health = 0
+
+						task.spawn(function()
+							task.wait(5)
+							deadPlayers[player] = nil
+						end)
 					end
 				end
 			elseif death.type == "ai" then
@@ -797,52 +911,43 @@ task.spawn(function()
 									groundY = groundRay.Position.Y
 								end
 
-																-- Spawn orbs along the snake path with error handling
+								-- Spawn orbs with batching
 								local spawnedOrbs = 0
-								for i = 1, totalLength do
-									if math.random() < orbsPerSegment then
-										local seg = segments[i]
-										if seg and seg.Parent and seg.Position then
-											local pos = seg.Position
-											
-											-- Small random offset
-											local offset = Vector3.new(
-												(math.random() - 0.5) * 2,
-												0,
-												(math.random() - 0.5) * 2
-											)
-											
-											-- Ensure proper height
-											local spawnPos = Vector3.new(
-												pos.X + offset.X,
-												math.max(groundY + ORB_SPAWN_HEIGHT, pos.Y),
-												pos.Z + offset.Z
-											)
-											
-											local success = pcall(function()
-												spawnOrbDirect(spawnPos, valuePerOrb)
-												spawnedOrbs = spawnedOrbs + 1
-											end)
-											
-											if not success then
-												warn("Failed to spawn orb for AI death")
-											end
-										end
+								local skipInterval = math.max(1, math.floor(totalLength / totalOrbs))
+
+								for i = 1, totalLength, skipInterval do
+									if spawnedOrbs >= totalOrbs then break end
+
+									local seg = segments[i]
+									if seg and seg.Parent and seg.Position then
+										local pos = seg.Position
+										local offset = Vector3.new(
+											(math.random() - 0.5) * 2,
+											0,
+											(math.random() - 0.5) * 2
+										)
+
+										local spawnPos = Vector3.new(
+											pos.X + offset.X,
+											math.max(groundY + ORB_SPAWN_HEIGHT, pos.Y),
+											pos.Z + offset.Z
+										)
+
+										spawnOrbBatched(spawnPos, valuePerOrb)
+										spawnedOrbs = spawnedOrbs + 1
 									end
 								end
-								
-								-- Ensure at least some orbs spawn
-								if spawnedOrbs == 0 and totalLength > 0 then
+
+								-- Ensure minimum orbs
+								if spawnedOrbs < 3 and segments[1] then
 									local firstSeg = segments[1]
 									if firstSeg and firstSeg.Parent and firstSeg.Position then
-										pcall(function()
-											local spawnPos = Vector3.new(
-												firstSeg.Position.X,
-												math.max(groundY + ORB_SPAWN_HEIGHT, firstSeg.Position.Y),
-												firstSeg.Position.Z
-											)
-											spawnOrbDirect(spawnPos, valuePerOrb)
-										end)
+										local spawnPos = Vector3.new(
+											firstSeg.Position.X,
+											math.max(groundY + ORB_SPAWN_HEIGHT, firstSeg.Position.Y),
+											firstSeg.Position.Z
+										)
+										spawnOrbBatched(spawnPos, valuePerOrb)
 									end
 								end
 							end
@@ -865,9 +970,9 @@ end)
 local function checkBoundsOverlap(bounds1, bounds2, margin)
 	return not (
 		bounds1.max.X + margin < bounds2.min.X or
-		bounds1.min.X - margin > bounds2.max.X or
-		bounds1.max.Z + margin < bounds2.min.Z or
-		bounds1.min.Z - margin > bounds2.max.Z
+			bounds1.min.X - margin > bounds2.max.X or
+			bounds1.max.Z + margin < bounds2.min.Z or
+			bounds1.min.Z - margin > bounds2.max.Z
 	)
 end
 
@@ -950,7 +1055,7 @@ local function findCollisionInSegments(headPos, segments, collisionDist, useGrid
 		-- Direct iteration
 		local checked = 0
 		local maxCheck = math.min(#segments, 300) -- Limit segments checked
-		
+
 		for i = 1, maxCheck do
 			local seg = segments[i]
 			if seg then
@@ -966,7 +1071,7 @@ local function findCollisionInSegments(headPos, segments, collisionDist, useGrid
 					end
 				end
 			end
-			
+
 			checked = checked + 1
 			if checked % 50 == 0 then
 				-- Brief yield for very long checks
@@ -1002,7 +1107,7 @@ RunService.Stepped:Connect(function()
 	end
 
 	-- === ALL COLLISION CHECKS FROM V7 (UNCHANGED LOGIC) ===
-	
+
 	-- Player vs AI body collisions
 	for _, headData in ipairs(playerHeads) do
 		local player = headData.player
@@ -1028,10 +1133,10 @@ RunService.Stepped:Connect(function()
 								{min = headPos - Vector3.new(5,5,5), max = headPos + Vector3.new(5,5,5)},
 								segmentData.bounds,
 								BODY_COLLISION_DISTANCE
-							) then
+								) then
 								continue
 							end
-							
+
 							local collision = false
 							if segmentData.chunks then
 								collision = findCollisionInChunks(headPos, segmentData.chunks, BODY_COLLISION_DISTANCE)
@@ -1080,10 +1185,10 @@ RunService.Stepped:Connect(function()
 							{min = headPosA - Vector3.new(5,5,5), max = headPosA + Vector3.new(5,5,5)},
 							segmentData.bounds,
 							BODY_COLLISION_DISTANCE
-						) then
+							) then
 							continue
 						end
-						
+
 						local collision = false
 						if segmentData.chunks then
 							collision = findCollisionInChunks(headPosA, segmentData.chunks, BODY_COLLISION_DISTANCE)
@@ -1125,10 +1230,10 @@ RunService.Stepped:Connect(function()
 							{min = aiPos - Vector3.new(5,5,5), max = aiPos + Vector3.new(5,5,5)},
 							segmentData.bounds,
 							BODY_COLLISION_DISTANCE
-						) then
+							) then
 							continue
 						end
-						
+
 						local collision = false
 						if segmentData.chunks then
 							collision = findCollisionInChunks(aiPos, segmentData.chunks, BODY_COLLISION_DISTANCE)
@@ -1313,10 +1418,10 @@ RunService.Stepped:Connect(function()
 							{min = aiHead.Position - Vector3.new(5,5,5), max = aiHead.Position + Vector3.new(5,5,5)},
 							segmentData.bounds,
 							BODY_COLLISION_DISTANCE
-						) then
+							) then
 							continue
 						end
-						
+
 						local collision = false
 						if segmentData.chunks then
 							collision = findCollisionInChunks(aiHead.Position, segmentData.chunks, BODY_COLLISION_DISTANCE)
@@ -1349,7 +1454,7 @@ task.spawn(function()
 		task.wait(45) -- Less frequent cleanup
 
 		local currentTime = tick()
-		
+
 		-- Clean player cache
 		for player, cache in pairs(CollisionCache.playerSegments) do
 			if currentTime - cache.lastUpdate > 10 or not player.Parent then
@@ -1370,7 +1475,7 @@ task.spawn(function()
 				deadAISnakes[aiHead] = nil
 			end
 		end
-		
+
 		for player, _ in pairs(deadPlayers) do
 			if not player or not player.Parent then
 				deadPlayers[player] = nil
@@ -1383,14 +1488,14 @@ end)
 task.spawn(function()
 	while true do
 		task.wait(60) -- Check memory every minute
-		
+
 		-- Use gcinfo() instead of collectgarbage("count")
 		local memoryMB = gcinfo() / 1024
-		
+
 		if DEBUG_COLLISIONS and memoryMB > 500 then
 			warn(string.format("[MEMORY] High memory usage: %.1f MB", memoryMB))
 		end
-		
+
 		-- Process any remaining orb spawns
 		if #orbSpawnBuffer > 50 then
 			warn("[ORB BUFFER] Large orb spawn buffer:", #orbSpawnBuffer)
@@ -1398,13 +1503,15 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - V7.0 DEATH ORB SYSTEM")
+print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - AGGRESSIVE SPAWN PROTECTION FIX")
 print("🚀 All V7 functionality preserved with performance optimizations")
-print("💎 DEATH ORBS: Using exact V7.0 spawning (no shrinking/disappearing)")
-print("   - Direct spawning along entire snake")
-print("   - No delays or batching")
-print("   - 2 stud random offset")
-print("🔧 Optimizations: Aggressive LOD, bounds checking, spatial grid")
+print("💎 FIXED: Death orbs properly spawn along snake segments")
+print("🛡️ SPAWN PROTECTION AVOIDANCE:")
+print("   - Skips first 4 segments (starts from segment 5)")
+print("   - 1.5s delay for near-head segments (segments 5-10)")
+print("   - 50-stud minimum distance from death position")
+print("   - Fallback orbs: 2s delay, 60 studs away")
+print("🔧 Optimizations: Batched spawning, aggressive LOD, bounds checking")
 print("📊 Performance: 12Hz checks, 96 chunk size, 1.5s cache")
 
 -- Debug command (unchanged from V7)
