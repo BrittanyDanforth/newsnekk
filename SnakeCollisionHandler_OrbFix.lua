@@ -669,7 +669,7 @@ task.spawn(function()
 						if segments and #segments > 0 then
 							for i, seg in ipairs(segments) do
 								if seg and seg:IsA("BasePart") and seg.Parent and seg.Position then
-									segmentPositions[i] = seg.Position:Clone() -- Store position
+									segmentPositions[i] = seg.Position -- Vector3 values are copied by value
 								end
 							end
 						end
