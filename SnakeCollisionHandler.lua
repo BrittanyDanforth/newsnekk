@@ -1,15 +1,15 @@
--- SnakeCollisionHandler V7.0 OPTIMIZED: SIMPLE SPAWN PROTECTION FIX
+-- SnakeCollisionHandler V7.0 OPTIMIZED: CHARACTER CLEANUP FIX
 -- All V7 functionality preserved with performance optimizations
 -- FIXED: Death orb spawning now properly distributes orbs along snake path
--- FIXED: ALL death orbs spawn with 1-second delay to avoid spawn protection
+-- FIXED: Character moved far away before death to prevent spawn protection
 -- FIXED: No attributes or complex checks that can interfere with the game
 -- 
 -- Spawn Protection Avoidance Strategy:
+--   - Character moved to Y=-1000 before death (prevents spawn protection)
 --   - Simple 1-second delay for ALL death orbs
+--   - Death orbs named 'DeathOrb' for special LOD handling
 --   - Start from segment 5 (skip head segments)
 --   - Near-head segments get 15-stud offset
---   - Direct spawning (no batching delays)
---   - No attributes that could trigger unwanted behavior
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -809,6 +809,13 @@ task.spawn(function()
 						end
 
 						deadPlayers[player] = true
+						
+						-- IMPORTANT: Move character far away BEFORE killing to prevent spawn protection issues
+						local rootPart = character:FindFirstChild("HumanoidRootPart")
+						if rootPart then
+							rootPart.CFrame = CFrame.new(0, -1000, 0) -- Move far below the map
+						end
+						
 						humanoid.Health = 0
 
 						task.spawn(function()
@@ -1456,16 +1463,16 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - FINAL FIX (NO INTERFERENCE)")
+print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - CHARACTER CLEANUP FIX")
 print("🚀 All V7 functionality preserved with performance optimizations")
 print("💎 FIXED: Death orbs properly spawn along snake segments")
-print("✅ FIXED: NO distance checks that could affect normal orbs")
+print("✅ FIXED: Character moved to Y=-1000 before death")
 print("🛡️ SPAWN PROTECTION AVOIDANCE:")
+print("   - Character teleported far away to prevent spawn protection")
 print("   - Simple 1-second delay for ALL death orbs")
 print("   - Death orbs named 'DeathOrb' for special LOD handling")
 print("   - Skips first 4 segments (starts from segment 5)")
 print("   - Near-head segments get extra 15-stud offset")
-print("   - NO attributes or distance checks that interfere with other orbs")
 print("🔧 Optimizations: Batched spawning, aggressive LOD, bounds checking")
 print("📊 Performance: 12Hz checks, 96 chunk size, 1.5s cache")
 
