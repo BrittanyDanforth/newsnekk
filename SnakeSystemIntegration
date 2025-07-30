@@ -301,7 +301,7 @@ local function onCharacterAdded(character)
 		end)
 	end
 
-	-- Update loop
+	-- Update loop (V10 handles its own updates internally)
 	local updateConnection
 	updateConnection = RunService.Heartbeat:Connect(function(dt)
 		if not character.Parent or humanoid.Health <= 0 then
@@ -309,8 +309,10 @@ local function onCharacterAdded(character)
 			return
 		end
 
-		if snake and activeSnakes[player] == snake then
-			snake:update(dt)
+		-- V10 uses internal update loop, no need to call update
+		-- Just check if snake still exists
+		if not snake or activeSnakes[player] ~= snake then
+			updateConnection:Disconnect()
 		end
 	end)
 
@@ -329,20 +331,24 @@ local function onCharacterAdded(character)
 		end
 	end)
 
-	-- Store connections on snake object for cleanup
-	snake.updateConnection = updateConnection
-	snake.skinConnection = skinConnection
+	-- Store connections separately to avoid conflicts with V10's internal connections
+	snake._integrationConnections = {
+		update = updateConnection,
+		skin = skinConnection
+	}
 
 	-- Handle death
 	local deathConnection
 	deathConnection = humanoid.Died:Connect(function()
 		if activeSnakes[player] then
 			-- Disconnect all connections immediately
-			if updateConnection then
-				updateConnection:Disconnect()
-			end
-			if skinConnection then
-				skinConnection:Disconnect()
+			if snake._integrationConnections then
+				if snake._integrationConnections.update then
+					snake._integrationConnections.update:Disconnect()
+				end
+				if snake._integrationConnections.skin then
+					snake._integrationConnections.skin:Disconnect()
+				end
 			end
 			if deathConnection then
 				deathConnection:Disconnect()
