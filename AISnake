@@ -1368,14 +1368,41 @@ function AISnake:_determineAction()
 		local toCenter = mapCenter - headPos
 		local distFromCenter = toCenter.Magnitude
 
-		-- Smoother wandering
+		-- Smoother, more natural wandering
 		if (now - (self.LastTurn or 0) > p.RandomTurnInterval) then
-			local maxTurn = 45
-			self.TargetYaw = self.TargetYaw + mathRad(mathRandom(-maxTurn, maxTurn))
-			self.LastTurn = now
+			-- Check if we're constantly changing direction (wiggling)
+			local currentDir = self.Direction
+			local dirChange = (currentDir - (self.LastDirection or currentDir)).Magnitude
+			
+			if dirChange > 1.5 and (now - (self.DirectionChangeTime or 0)) < 2 then
+				-- We're wiggling too much, force straight movement
+				self.LastTurn = now + 2  -- Don't turn for 2 seconds
+			else
+				-- Normal turning
+				local maxTurn = 25  -- Reduced from 45
+				-- Bias towards smaller turns for more natural movement
+				local turnAmount = mathRandom(-maxTurn, maxTurn)
+				if mathAbs(turnAmount) > 15 then
+					-- Make large turns less likely
+					turnAmount = turnAmount * 0.6
+				end
+				self.TargetYaw = self.TargetYaw + mathRad(turnAmount)
+				self.LastTurn = now
+				
+				if dirChange > 0.5 then
+					self.LastDirection = currentDir
+					self.DirectionChangeTime = now
+				end
+			end
 		end
 
-		local baseSteer = Vector3new(mathSin(self.TargetYaw), 0, mathCos(self.TargetYaw))
+		-- Add subtle continuous drift for more organic movement
+		local driftAmount = mathSin(now * 0.5) * 0.02  -- Gentle sine wave drift
+		local baseSteer = Vector3new(
+			mathSin(self.TargetYaw + driftAmount), 
+			0, 
+			mathCos(self.TargetYaw + driftAmount)
+		)
 
 		-- Check if wander direction is safe
 		if not self:isPathSafe(headPos + baseSteer * 30, 30) then
@@ -1450,6 +1477,8 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self.LastTurn = tick()
 	self.TargetYaw = 0
 	self.CurrentYaw = 0
+	self.LastDirection = self.Direction  -- Track momentum
+	self.DirectionChangeTime = 0
 
 	self.FollowSpeed = self.Config.FollowSpeed or 0.95
 	self.BoostFollowSpeed = self.Config.BoostFollowSpeed or 0.98
