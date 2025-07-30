@@ -11,6 +11,7 @@ local SPAWN_HEIGHT = 5
 
 -- === AI SNAKE MANAGEMENT ===
 local aiSnakes = {}
+local spawnZones = {}  -- Track spawn zones for better distribution
 
 -- Function to clean up orphaned snake parts (run periodically)
 local function cleanupOrphanedParts()
@@ -31,32 +32,106 @@ local function cleanupOrphanedParts()
 	end
 end
 
--- Function to get random spawn position with map compatibility
-local function getRandomSpawnPosition()
-	-- Check for actual map bounds
+-- Initialize spawn zones for better distribution
+local function initializeSpawnZones()
+	spawnZones = {}
+	
+	-- Create a grid of spawn zones
+	local zonesPerSide = math.ceil(math.sqrt(NUM_SNAKES * 2))  -- More zones than snakes
 	local ground = Workspace:FindFirstChild("SlitherIOGround")
-	local spawnRadius = 250  -- Default radius
+	local mapSizeX = 700  -- Default
+	local mapSizeZ = 700
 	
 	if ground and ground:IsA("BasePart") then
-		-- Use 70% of the smaller map dimension
-		local halfX = ground.Size.X / 2
-		local halfZ = ground.Size.Z / 2
-		spawnRadius = math.min(halfX, halfZ) * 0.7
+		mapSizeX = ground.Size.X * 0.8  -- Use 80% of map size
+		mapSizeZ = ground.Size.Z * 0.8
 	end
 	
-	-- Random position within radius
-	local angle = math.random() * 2 * math.pi
-	local distance = math.random() * spawnRadius
-	local x = math.cos(angle) * distance
-	local z = math.sin(angle) * distance
+	local zoneWidth = mapSizeX / zonesPerSide
+	local zoneHeight = mapSizeZ / zonesPerSide
+	
+	-- Create zones
+	for x = 0, zonesPerSide - 1 do
+		for z = 0, zonesPerSide - 1 do
+			local centerX = (x - (zonesPerSide - 1) / 2) * zoneWidth
+			local centerZ = (z - (zonesPerSide - 1) / 2) * zoneHeight
+			
+			-- Skip zones too close to center (to encourage edge spawning)
+			local distFromCenter = math.sqrt(centerX * centerX + centerZ * centerZ)
+			if distFromCenter > 50 then  -- Minimum distance from center
+				table.insert(spawnZones, {
+					x = centerX,
+					z = centerZ,
+					width = zoneWidth,
+					height = zoneHeight,
+					occupied = false
+				})
+			end
+		end
+	end
+	
+	-- Shuffle zones for random selection
+	for i = #spawnZones, 2, -1 do
+		local j = math.random(i)
+		spawnZones[i], spawnZones[j] = spawnZones[j], spawnZones[i]
+	end
+end
+
+-- Function to get random spawn position with better distribution
+local function getRandomSpawnPosition()
+	-- Try to find an unoccupied zone first
+	local zone = nil
+	for _, z in ipairs(spawnZones) do
+		if not z.occupied then
+			zone = z
+			z.occupied = true
+			break
+		end
+	end
+	
+	-- If all zones occupied, pick a random one
+	if not zone then
+		zone = spawnZones[math.random(#spawnZones)]
+		-- Reset all zones periodically
+		if math.random() < 0.1 then
+			for _, z in ipairs(spawnZones) do
+				z.occupied = false
+			end
+		end
+	end
+	
+	-- Random position within the zone
+	local x = zone.x + (math.random() - 0.5) * zone.width * 0.8
+	local z = zone.z + (math.random() - 0.5) * zone.height * 0.8
+	
+	-- Ensure we're within map bounds
+	local ground = Workspace:FindFirstChild("SlitherIOGround")
+	if ground and ground:IsA("BasePart") then
+		local halfX = ground.Size.X / 2 * 0.9
+		local halfZ = ground.Size.Z / 2 * 0.9
+		x = math.clamp(x, -halfX, halfX)
+		z = math.clamp(z, -halfZ, halfZ)
+	end
 	
 	return Vector3.new(x, SPAWN_HEIGHT, z)
 end
 
--- Initial spawn
+-- Initialize spawn zones
+initializeSpawnZones()
+
+-- Initial spawn with better distribution
 for i = 1, NUM_SNAKES do
 	local pos = getRandomSpawnPosition()
 	aiSnakes[i] = AISnake.new(pos)
+	
+	-- Give each snake a random initial direction to spread them out
+	if aiSnakes[i] then
+		local randomAngle = math.random() * 2 * math.pi
+		aiSnakes[i].Direction = Vector3.new(math.sin(randomAngle), 0, math.cos(randomAngle))
+		aiSnakes[i].CurrentYaw = randomAngle
+		aiSnakes[i].TargetYaw = randomAngle
+	end
+	
 	task.wait(0.1) -- Small delay between spawns
 end
 
