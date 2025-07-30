@@ -1,12 +1,10 @@
--- SnakeCollisionHandler V7.0 OPTIMIZED: AGGRESSIVE SPAWN PROTECTION FIX
+-- SnakeCollisionHandler V7.0 OPTIMIZED: SIMPLE SPAWN PROTECTION FIX
 -- All V7 functionality preserved with performance optimizations
 -- FIXED: Death orb spawning now properly distributes orbs along snake path
--- FIXED: Head orbs completely avoid spawn protection zones:
---   - Starts spawning from segment 5 (skips first 4 segments)
---   - 1.5 second delay for near-head segments
---   - 50+ stud offset from death position
---   - Checks and skips segments within 50 studs of death location
---   - Fallback orbs spawn after 2 seconds, 60 studs away
+-- FIXED: Head orbs avoid spawn protection with simple approach:
+--   - Skips first 3 segments entirely
+--   - 1 second delay for segments 4-8
+--   - No complex distance checks that might affect other orbs
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -657,12 +655,6 @@ task.spawn(function()
 				if character then
 					local humanoid = character:FindFirstChild("Humanoid")
 					if humanoid and humanoid.Health > 0 then
-						-- Store death position for spawn protection avoidance
-						local deathPosition = nil
-						if character:FindFirstChild("HumanoidRootPart") then
-							deathPosition = character.HumanoidRootPart.Position
-						end
-						
 						-- Get snake length from leaderstats
 						local snakeLength = 55
 						if player:FindFirstChild("leaderstats") then
@@ -717,73 +709,34 @@ task.spawn(function()
 									player.Name, snakeLength, totalSegments, totalOrbs, skipInterval))
 							end
 							
-							-- Start from segment 5 to completely avoid head spawn protection
-							local startSegment = 5
-							for i = startSegment, totalSegments, skipInterval do
+							-- Simple fix: just skip first few segments and add delay
+							for i = 1, totalSegments, skipInterval do
 								if spawnedOrbs >= totalOrbs then break end
 
 								-- Use stored positions instead of segment positions
 								local pos = segmentPositions[i]
 								if pos then
-									-- Skip segments too close to death position
-									if deathPosition and (pos - deathPosition).Magnitude < 50 then
-										if DEBUG_COLLISIONS then
-											print(string.format("[ORB DEBUG] Skipping segment %d - too close to death position (%.1f studs)", i, (pos - deathPosition).Magnitude))
-										end
-										continue -- Skip this segment
+									-- Skip first 3 segments entirely
+									if i <= 3 then
+										continue
 									end
 									
-									-- Check if this is near head or tail
-									local isNearHead = (i <= 10) -- Expanded head zone
-									local isTail = (i >= totalSegments - 3)
-									
-									-- For near-head segments, spawn with massive delay and offset
-									if isNearHead then
+									-- For segments 4-8, add a delay
+									if i <= 8 then
 										task.spawn(function()
-											-- LONG delay for near-head orbs
-											local waitTime = 1.5 -- 1.5 seconds!
-											if DEBUG_COLLISIONS then
-												print(string.format("[ORB DEBUG] Waiting %s seconds before spawning near-head orb at segment %d", waitTime, i))
-											end
-											task.wait(waitTime)
+											-- Wait to avoid spawn protection
+											task.wait(1.0)
 											
-											-- HUGE offset to escape spawn protection
-											local angle = math.random() * math.pi * 2
-											local distance = 50 -- 50 studs away!
 											local offset = Vector3.new(
-												math.cos(angle) * distance,
+												(math.random() - 0.5) * 8,
 												0,
-												math.sin(angle) * distance
+												(math.random() - 0.5) * 8
 											)
 											
-											-- Calculate final position
-											local orbPosition = pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 5, 0)
-											
-											-- Double-check it's far from death position
-											if deathPosition and (orbPosition - deathPosition).Magnitude < 45 then
-												-- Push even further away
-												offset = offset * 1.5
-												orbPosition = pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 5, 0)
-												if DEBUG_COLLISIONS then
-													print("[ORB DEBUG] Pushed orb further from death position")
-												end
-											end
-											
-											spawnOrbBatched(orbPosition, baseValue)
-										end)
-									elseif isTail then
-										-- Tail segments with moderate delay
-										task.spawn(function()
-											task.wait(0.1)
-											local offset = Vector3.new(
-												(math.random() - 0.5) * 10,
-												0,
-												(math.random() - 0.5) * 10
-											)
-											spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 3, 0), baseValue)
+											spawnOrbBatched(pos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 2, 0), baseValue)
 										end)
 									else
-										-- Normal middle segments spawn immediately
+										-- Normal segments spawn immediately
 										local offset = Vector3.new(
 											(math.random() - 0.5) * 3,
 											0,
@@ -797,38 +750,21 @@ task.spawn(function()
 								end
 							end
 							
-							-- Ensure minimum orbs (but spawn them far from head)
-							if spawnedOrbs < 3 and #segmentPositions >= 10 then
+							-- Ensure minimum orbs
+							if spawnedOrbs < 3 and segmentPositions[5] then
 								task.spawn(function()
-									-- VERY LONG delay to ensure spawn protection is completely gone
-									task.wait(2.0) -- 2 full seconds!
+									task.wait(1.2) -- Wait for spawn protection
 									
-									-- Use segment 10 position instead of head
-									local basePos = segmentPositions[10] or segmentPositions[math.min(5, #segmentPositions)]
-									if basePos and (not deathPosition or (basePos - deathPosition).Magnitude > 30) then
+									local basePos = segmentPositions[5] or segmentPositions[math.max(4, #segmentPositions)]
+									if basePos then
 										for j = 1, 3 - spawnedOrbs do
-											-- Massive circular spread
-											local angle = (j - 1) * 120 * math.pi / 180
-											local distance = 60 -- 60 studs away!
 											local offset = Vector3.new(
-												math.cos(angle) * distance,
-												0,
-												math.sin(angle) * distance
-											)
-											
-											-- Add randomness
-											offset = offset + Vector3.new(
 												(math.random() - 0.5) * 10,
 												0,
 												(math.random() - 0.5) * 10
 											)
 											
-											local orbPos = basePos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 8, 0)
-											
-											-- Final check against death position
-											if not deathPosition or (orbPos - deathPosition).Magnitude > 50 then
-												spawnOrbBatched(orbPos, baseValue)
-											end
+											spawnOrbBatched(basePos + offset + Vector3.new(0, ORB_SPAWN_HEIGHT + 2, 0), baseValue)
 										end
 									end
 								end)
@@ -1503,14 +1439,10 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - AGGRESSIVE SPAWN PROTECTION FIX")
+print("⚡ SnakeCollisionHandler V7.0 OPTIMIZED - SIMPLE SPAWN PROTECTION FIX")
 print("🚀 All V7 functionality preserved with performance optimizations")
 print("💎 FIXED: Death orbs properly spawn along snake segments")
-print("🛡️ SPAWN PROTECTION AVOIDANCE:")
-print("   - Skips first 4 segments (starts from segment 5)")
-print("   - 1.5s delay for near-head segments (segments 5-10)")
-print("   - 50-stud minimum distance from death position")
-print("   - Fallback orbs: 2s delay, 60 studs away")
+print("🛡️ SIMPLE FIX: Skips first 3 segments, 1s delay for segments 4-8")
 print("🔧 Optimizations: Batched spawning, aggressive LOD, bounds checking")
 print("📊 Performance: 12Hz checks, 96 chunk size, 1.5s cache")
 
