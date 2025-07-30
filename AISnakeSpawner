@@ -87,9 +87,18 @@ RunService.Stepped:Connect(function()
 				pcall(function() snake:Destroy() end)
 			end
 			
-			-- Respawn at random position
-			local pos = getRandomSpawnPosition()
-			aiSnakes[i] = AISnake.new(pos)
+			-- Clear the slot immediately
+			aiSnakes[i] = nil
+			
+			-- Respawn on next frame to ensure clean state
+			local index = i
+			task.defer(function()
+				task.wait(0.5) -- Wait half a second for full cleanup
+				if not aiSnakes[index] then -- Double check slot is still empty
+					local pos = getRandomSpawnPosition()
+					aiSnakes[index] = AISnake.new(pos)
+				end
+			end)
 		end
 	end
 end)

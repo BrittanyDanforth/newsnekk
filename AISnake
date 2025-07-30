@@ -1569,6 +1569,10 @@ function AISnake.new(startPosition)
 	for i = 1, self.MaxHistorySize do
 		self.PositionHistory[i] = initialHistoryPoint
 	end
+	
+	-- Extra safety: Clear any leftover position data
+	self._lastPositions = {}
+	self.HistoryHead = 1
 
 	function self:addToHistory(data)
 		self.PositionHistory[self.HistoryHead] = data
@@ -1601,8 +1605,14 @@ function AISnake.new(startPosition)
 		segment.CanTouch = false
 		segment.CanQuery = false
 
-		-- ADDED: Ensure segments are anchored during spawn
+		-- ADDED: Ensure segments are anchored and properly positioned during spawn
 		segment.Anchored = true
+		segment.CFrame = CFramenew(segmentPos)
+		segment.Position = segmentPos
+		
+		-- Clear any physics velocities
+		segment.AssemblyLinearVelocity = Vector3.zero
+		segment.AssemblyAngularVelocity = Vector3.zero
 	end
 
 	-- Enhanced spawn protection
@@ -1726,9 +1736,10 @@ function AISnake:setConfidenceBuff()
 end
 
 function AISnake:Destroy()
+	if self._destroyed then return end -- Already destroyed
 	if not self._active then return end
 	self._active = false
-	
+
 	-- Immediately mark as destroyed to prevent any updates
 	self._destroyed = true
 	
