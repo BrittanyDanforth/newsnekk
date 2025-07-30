@@ -764,7 +764,7 @@ function AISnake:findBestOrb()
 
 	-- First check spatial grid for regular orbs
 	local nearbyEntities = SpatialGrid.QueryRadius(headPos, minDist)
-	
+
 	-- Prioritize untargeted orbs
 	local targetedOrbs = {}
 	for ai, orb in AISnake._orbTargets do
@@ -775,6 +775,8 @@ function AISnake:findBestOrb()
 
 	-- ALWAYS check workspace for orbs directly as backup
 	local orbsFound = 0
+	local deathOrbFound = nil
+	local deathOrbDist = math.huge
 
 	-- Check OrbFolder
 	local orbFolder = Workspace:FindFirstChild("OrbFolder") or Workspace:FindFirstChild("Orbs")
@@ -784,7 +786,12 @@ function AISnake:findBestOrb()
 				local dist = (orb.Position - headPos).Magnitude
 				if dist < minDist * 1.5 then -- Slightly larger radius for backup check
 					orbsFound = orbsFound + 1
-					if dist < minDist then
+					
+					-- PRIORITIZE DEATH ORBS!
+					if orb.Name == "DeathOrb" and dist < deathOrbDist then
+						deathOrbDist = dist
+						deathOrbFound = orb
+					elseif not deathOrbFound and dist < minDist then
 						minDist = dist
 						nearest = orb
 					end
@@ -793,13 +800,20 @@ function AISnake:findBestOrb()
 		end
 	end
 
-	-- Also check workspace directly for any loose orbs (including DeathOrbs!)
+	-- Also check workspace directly for any loose orbs (ESPECIALLY DEATH ORBS!)
 	for _, obj in pairs(Workspace:GetChildren()) do
 		if obj:IsA("BasePart") and (obj.Name == "Orb" or obj.Name == "UpgradeOrb" or obj.Name == "DeathOrb") and not targetedOrbs[obj] then
 			local dist = (obj.Position - headPos).Magnitude
-			if dist < minDist * 1.5 then
+			if dist < self.Personality.OrbSeekRadius * 2 then -- Double radius for death orbs
 				orbsFound = orbsFound + 1
-				if dist < minDist then
+				
+				-- ALWAYS PRIORITIZE DEATH ORBS!
+				if obj.Name == "DeathOrb" then
+					if dist < deathOrbDist then
+						deathOrbDist = dist
+						deathOrbFound = obj
+					end
+				elseif not deathOrbFound and dist < minDist then
 					minDist = dist
 					nearest = obj
 				end
@@ -808,7 +822,7 @@ function AISnake:findBestOrb()
 	end
 
 	-- If no orbs from direct search, check spatial grid
-	if not nearest and #nearbyEntities > 0 then
+	if not nearest and not deathOrbFound and #nearbyEntities > 0 then
 		for _, entity in nearbyEntities do
 			if entity.type == "ORB" and entity.part and entity.part.Parent then
 				local dist = (entity.part.Position - headPos).Magnitude
@@ -818,6 +832,12 @@ function AISnake:findBestOrb()
 				end
 			end
 		end
+	end
+
+	-- ALWAYS RETURN DEATH ORB IF FOUND!
+	if deathOrbFound then
+		print("🎯 AI Snake", self._personalityType, "found DEATH ORB at distance:", math.floor(deathOrbDist))
+		return deathOrbFound, deathOrbDist
 	end
 
 	return nearest, minDist
@@ -1334,30 +1354,29 @@ function AISnake:_determineAction()
 			self._lastOrbTime = now
 		end
 
-		-- SUPER aggressive orb targeting for DeathOrbs
+		-- SUPER AGGRESSIVE ORB TARGETING - ESPECIALLY FOR DEATH ORBS!
 		if orb then
 			local isDeathOrb = orb.Name == "DeathOrb"
-			local effectiveRadius = isDeathOrb and p.OrbSeekRadius * 3 or p.OrbSeekRadius * 2
+			local effectiveRadius = isDeathOrb and p.OrbSeekRadius * 4 or p.OrbSeekRadius * 2
 			
-			if dist < effectiveRadius then
-				-- Always switch to DeathOrbs or closer orbs
-				local shouldSwitch = false
-				if isDeathOrb and (not self.TargetOrb or self.TargetOrb.Name ~= "DeathOrb") then
-					shouldSwitch = true -- Always prioritize DeathOrbs
-				elseif not self.TargetOrb or dist < (self.TargetOrb.Position - headPos).Magnitude * 0.7 then
-					shouldSwitch = true -- Switch to closer orb
-				end
+			-- Death orbs override EVERYTHING!
+			if isDeathOrb then
+				-- Clear all other targets immediately
+				self.TargetSnake = nil
+				self.Avoiding = false
+				self.FleeReason = ""
 				
-				if shouldSwitch then
+				-- Set death orb as target no matter what
+				self.TargetOrb = orb
+				self.TargetOrbExpire = now + 10  -- Longer expire for death orbs
+				AISnake._orbTargets[self] = orb
+				state = "SEEK_DEATH_ORB"
+			elseif dist < effectiveRadius then
+				-- Regular orb logic
+				if not self.TargetOrb or dist < (self.TargetOrb.Position - headPos).Magnitude * 0.7 then
 					self.TargetOrb = orb
-					self.TargetOrbExpire = now + mathRandom(30, 50) / 10  -- Shorter expire time
+					self.TargetOrbExpire = now + mathRandom(30, 50) / 10
 					AISnake._orbTargets[self] = orb
-					
-					-- Clear combat targets when going for DeathOrbs
-					if isDeathOrb then
-						self.TargetSnake = nil
-						self.Avoiding = false
-					end
 				end
 			end
 		end
@@ -1369,19 +1388,27 @@ function AISnake:_determineAction()
 		end
 
 		if self.TargetOrb and self.TargetOrb.Parent then
-			state = "SEEK_ORB"
+			local isDeathOrb = self.TargetOrb.Name == "DeathOrb"
+			state = isDeathOrb and "SEEK_DEATH_ORB" or "SEEK_ORB"
 			local toOrb = self.TargetOrb.Position - headPos
 			local orbDist = toOrb.Magnitude
-			local isDeathOrb = self.TargetOrb.Name == "DeathOrb"
 
-			-- More direct orb approach, especially for DeathOrbs
-			if orbDist < 10 then
+			-- DIRECT APPROACH FOR DEATH ORBS!
+			if isDeathOrb then
+				-- Go straight at death orbs, no fancy turning
+				steer = toOrb.Unit
+				
+				-- Boost towards death orbs if far
+				if orbDist > 30 and not self.Boosting then
+					self:startBoost(1.0)
+				end
+			elseif orbDist < 10 then
 				-- Very close - go straight
 				steer = toOrb.Unit
-			elseif orbDist < 25 or isDeathOrb then
-				-- Close or DeathOrb - slight prediction with more direct approach
+			elseif orbDist < 25 then
+				-- Close - slight prediction
 				local orbVel = self.TargetOrb.AssemblyLinearVelocity or Vector3.zero
-				local predictTime = mathMin(orbDist / self.Speed, isDeathOrb and 0.1 or 0.3)
+				local predictTime = mathMin(orbDist / self.Speed, 0.3)
 				local predictedPos = self.TargetOrb.Position + orbVel * predictTime
 				steer = (predictedPos - headPos).Unit
 			else
@@ -1695,7 +1722,7 @@ function AISnake:setConfidenceBuff()
 
 	-- REMOVED: Debug yellow outline - keep it invisible
 	-- if self.HeadParts and self.HeadParts.headOutline then
-	--	self.HeadParts.headOutline.Color3 = Color3.fromRGB(255, 255, 0)
+	--	head.HeadParts.headOutline.Color3 = Color3.fromRGB(255, 255, 0)
 	--	self.HeadParts.headOutline.LineThickness = 0.3
 	--	self.HeadParts.headOutline.Transparency = 0.3
 	-- end
@@ -1846,7 +1873,7 @@ function AISnake:updateMovement(dt)
 
 	-- BALANCED TURN SPEED - Good for orb collection but still fair
 	local turnSpeed = self.TurnSpeed
-	
+
 	-- Special case for orb seeking - need better turning to actually collect them!
 	if state == "SEEK_ORB" and self.TargetOrb then
 		-- Calculate angle to orb
@@ -1856,6 +1883,9 @@ function AISnake:updateMovement(dt)
 			-- Close to orb - allow sharper turns to grab it
 			turnSpeed = turnSpeed * 1.5
 		end
+	elseif state == "SEEK_DEATH_ORB" then
+		-- MAXIMUM TURN SPEED FOR DEATH ORBS!
+		turnSpeed = turnSpeed * 2.0  -- Double turn speed for death orbs
 	elseif state == "AVOID_WALL" then
 		-- Still need to avoid walls effectively
 		turnSpeed = turnSpeed * 1.3
@@ -1969,7 +1999,10 @@ function AISnake:updateMovement(dt)
 	-- Speed calculation - NO SLOWING DOWN!
 	local speedMultiplier = p.SpeedMultiplier or 1
 
-	-- No speed boost for orb seeking - they need control, not extra speed
+	-- DEATH ORB SPEED BOOST!
+	if state == "SEEK_DEATH_ORB" then
+		speedMultiplier = speedMultiplier * 1.3  -- 30% speed boost when chasing death orbs
+	end
 
 	-- Always maintain at least normal speed
 	if self.Boosting then
@@ -2114,7 +2147,7 @@ function AISnake:updateMovement(dt)
 					end
 				elseif orb.Name == "DeathOrb" then
 					-- Death orb - grow the snake more!
-					print("💀 AI Snake collecting DEATH ORB! Value:", orbValue)
+					print("💀 AI Snake", self._personalityType, "collecting DEATH ORB! Value:", orbValue)
 					self:grow(orbValue)
 				else
 					-- Regular orb - grow the snake
