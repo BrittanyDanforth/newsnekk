@@ -694,8 +694,8 @@ task.spawn(function()
 							
 							-- Spawn orbs in a separate task with delay
 							task.spawn(function()
-								-- Wait for spawn protection to clear
-								task.wait(0.5)
+								-- Wait for spawn protection to FULLY clear
+								task.wait(0.8) -- Increased from 0.5 to ensure spawn protection is gone
 								
 								-- Spawn orbs along the snake path using STORED positions
 								local spawnedOrbs = 0
@@ -703,8 +703,8 @@ task.spawn(function()
 									if math.random() < orbsPerSegment then
 										local pos = segmentPositions[i]
 										if pos then
-											-- Skip positions too close to death location (first few segments)
-											if deathPos and i <= 3 and (pos - deathPos).Magnitude < 10 then
+											-- Skip positions too close to death location (first 5 segments)
+											if deathPos and i <= 5 and (pos - deathPos).Magnitude < 15 then
 												continue
 											end
 											
