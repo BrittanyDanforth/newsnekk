@@ -1831,13 +1831,13 @@ RunService.Stepped:Connect(function()
 		return
 	end
 
-	-- Player vs AI body collisions
+	-- Player vs AI body collisions (Player head hits AI body = AI dies)
 	for _, headData in ipairs(playerHeads) do
 		local player = headData.player
 		local head = headData.part
 
-		-- Check player invincibility FIRST - skip if player is invincible
-		if isPlayerInvincible(player) then
+		-- Skip if player is already dead
+		if deadPlayers[player] then
 			continue
 		end
 
@@ -1847,6 +1847,54 @@ RunService.Stepped:Connect(function()
 			-- Validate player position
 			if headPos.Y < -5 or headPos.Y > 50 then
 				continue -- Skip if player is out of bounds
+			end
+
+			-- Check against all AI snake bodies
+			if AISnakeModule._activeSnakes then
+				for _, aiSnake in AISnakeModule._activeSnakes do
+					if aiSnake and aiSnake._active and aiSnake.HeadParts and aiSnake.HeadParts.head then
+						-- Skip if AI is protected or already dead
+						if isAIProtected(aiSnake.HeadParts.head) or deadAISnakes[aiSnake.HeadParts.head] then
+							continue
+						end
+
+						local aiSegmentData = getAISnakeSegments(aiSnake)
+						if aiSegmentData and aiSegmentData.segments then
+							local collision = false
+
+							-- Check if player head hits AI body
+							if aiSegmentData.chunks then
+								collision = findCollisionInChunks(headPos, aiSegmentData.chunks, BODY_COLLISION_DISTANCE, aiSegmentData.length)
+							else
+								collision = findCollisionInSegments(
+									headPos,
+									aiSegmentData.segments,
+									BODY_COLLISION_DISTANCE,
+									aiSegmentData.length > 200,
+									aiSegmentData.length
+								)
+							end
+
+							if collision then
+								-- AI dies when player hits its body
+								queueAIDeath(aiSnake.HeadParts.head)
+								-- Give player confidence buff if they have the method
+								if _G.PlayerSnakes and _G.PlayerSnakes[player] then
+									local playerSnake = _G.PlayerSnakes[player]
+									if playerSnake.setConfidenceBuff then
+										playerSnake:setConfidenceBuff()
+									end
+								end
+								break
+							end
+						end
+					end
+				end
+			end
+
+			-- Check player invincibility for wall/death checks
+			if isPlayerInvincible(player) then
+				continue
 			end
 
 			-- Get player's snake length for adaptive collision
