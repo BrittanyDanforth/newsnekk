@@ -1650,14 +1650,19 @@ function AISnake.new(startPosition)
 	
 	-- CRITICAL FIX: Initialize all history at the same spawn position
 	-- This prevents segments from being stretched out on spawn
-	local initialHistoryPoint = { position = self.Position, lookVector = self.Direction }
+	-- IMPORTANT: Create NEW table for each history entry to avoid reference issues
 	for i = 1, self.MaxHistorySize do
-		self.PositionHistory[i] = initialHistoryPoint
+		self.PositionHistory[i] = { 
+			position = self.Position, 
+			lookVector = self.Direction 
+		}
 	end
 	
 	-- Extra safety: Clear any leftover position data
 	self._lastPositions = {}
 	self.HistoryHead = 1
+	self._segmentUpdateFrame = 0  -- Reset frame counter
+	self._lastHistoryPoint = nil  -- Clear cached history
 
 	function self:addToHistory(data)
 		self.PositionHistory[self.HistoryHead] = data
@@ -1706,7 +1711,7 @@ function AISnake.new(startPosition)
 	
 	-- Make segments visible after spawn stabilization
 	task.defer(function()
-		task.wait(0.5)  -- Wait for snake to stabilize
+		task.wait(1.0)  -- Longer wait for snake to fully stabilize
 		
 		-- Only activate if snake still exists
 		if not self._active or self._destroyed then return end
@@ -1917,6 +1922,12 @@ function AISnake:updateMovement(dt)
 		end
 		return
 	end
+	
+	-- Skip ALL movement updates during spawn activation
+	if self._spawnActivating or self._spawnProtection and self._spawnProtection > tick() then
+		return
+	end
+	
 	local now = tick()
 	local p = self.Personality
 	local state = self.State
