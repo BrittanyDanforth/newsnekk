@@ -1706,7 +1706,6 @@ function AISnake.new(startPosition)
 	end
 	
 	-- Enhanced spawn protection
-	self._spawnProtection = tick() + 1.0
 	self._spawnActivating = true
 	
 	-- Make segments visible after spawn stabilization
@@ -1717,6 +1716,14 @@ function AISnake.new(startPosition)
 		if not self._active or self._destroyed then return end
 		
 		self._spawnActivating = false
+		
+		-- Force a random direction to start moving
+		local randomAngle = mathRandom() * 2 * mathPi
+		self.Direction = Vector3new(mathSin(randomAngle), 0, mathCos(randomAngle))
+		self.CurrentYaw = mathAtan2(self.Direction.X, self.Direction.Z)
+		self.TargetYaw = self.CurrentYaw
+		self.State = "WANDER"
+		self._needsRandomTurn = true
 		
 		-- Enable segments with simple fade-in (no movement during fade)
 		for i, segment in ipairs(self.Segments) do
@@ -1924,7 +1931,7 @@ function AISnake:updateMovement(dt)
 	end
 	
 	-- Skip ALL movement updates during spawn activation
-	if self._spawnActivating or self._spawnProtection and self._spawnProtection > tick() then
+	if self._spawnActivating then
 		return
 	end
 	
