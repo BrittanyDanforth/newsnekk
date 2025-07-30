@@ -1504,11 +1504,10 @@ function AISnake.new(startPosition)
 	self.PositionHistory = table.create(self.MaxHistorySize)
 	self.HistoryHead = 1
 
-	-- Initialize history with proper spread to prevent stretching
+	-- Initialize history at spawn position to prevent gaps
 	for i = 1, self.MaxHistorySize do
-		local historyOffset = self.Direction * (-i * 0.5)
-		local historyPos = self.Position + historyOffset
-		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
+		-- All history starts at the same position
+		self.PositionHistory[i] = { position = self.Position, lookVector = self.Direction }
 	end
 
 	function self:addToHistory(data)
@@ -1524,10 +1523,10 @@ function AISnake.new(startPosition)
 		return self.PositionHistory[index]
 	end
 
-	-- FIXED: Create segments at proper positions
+	-- FIXED: Create segments at proper positions WITHOUT GAPS
 	for i = 1, self.CurrentLength do
-		local segmentOffset = self.Direction * (-i * self.SegmentSpacing * 0.15)
-		local pos = self.Position + segmentOffset
+		-- Start ALL segments at the SAME position to prevent gaps
+		local pos = self.Position
 		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
 		local color = self.Config.BodyColors[colorIndex]
 		local segment = createSegment(i, pos, color, self.Config, self.Model, i)
@@ -1535,14 +1534,56 @@ function AISnake.new(startPosition)
 
 		-- Start segments invisible
 		segment.Transparency = 1
+		
+		-- Ensure segment is at exact position
+		segment.CFrame = CFramenew(pos)
 	end
 
-	-- Make segments visible after initialization
+	-- Spawn sequence to prevent gaps
 	task.defer(function()
+		-- Wait for model to be ready
 		task.wait(0.1)
-		for _, segment in ipairs(self.Segments) do
+		
+		-- Gradually move forward to create proper segment spacing
+		local startPos = self.Position
+		for step = 1, 20 do
+			-- Move forward slightly
+			local moveDistance = self.SegmentSpacing * 0.1
+			local newPos = self.Position + self.Direction * moveDistance
+			self.Position = newPos
+			self.RootPart.Position = newPos
+			
+			-- Update head position
+			if self.HeadParts and self.HeadParts.head then
+				local headOffset = self.Direction * 1.5
+				self.HeadParts.head.CFrame = CFramelookAt(self.Position + headOffset, self.Position + headOffset + self.Direction)
+			end
+			
+			-- Add to history
+			self:addToHistory({ position = self.Position, lookVector = self.Direction })
+			
+			-- Small wait
+			task.wait(0.02)
+		end
+		
+		-- Clear spawn stabilization flag
+		self._spawnStabilizing = nil
+		
+		-- Fade in segments
+		for i, segment in ipairs(self.Segments) do
 			if segment and segment.Parent then
-				segment.Transparency = 0
+				task.spawn(function()
+					local fadeSteps = 10
+					for step = 1, fadeSteps do
+						if segment and segment.Parent then
+							segment.Transparency = 1 - (step / fadeSteps)
+						end
+						task.wait(0.02)
+					end
+					if segment and segment.Parent then
+						segment.Transparency = 0
+					end
+				end)
 			end
 		end
 	end)
@@ -1557,6 +1598,7 @@ function AISnake.new(startPosition)
 
 	-- Spawn protection
 	self._spawnProtection = tick() + 3  -- 3 second spawn protection
+	self._spawnStabilizing = tick() + 0.5  -- Half second to let segments arrange
 
 	return self
 end
@@ -1728,6 +1770,11 @@ function AISnake:updateMovement(dt)
 	end
 
 	local now = tick()
+	
+	-- Don't move during spawn stabilization
+	if self._spawnStabilizing and now < self._spawnStabilizing then
+		return
+	end
 	local p = self.Personality
 	local state = self.State
 	local steer = self.SteerDirection
