@@ -301,45 +301,26 @@ Players.PlayerAdded:Connect(function(player)
 
 			print("✨ Applying revive effect to", player.Name)
 
-			-- Get revive position and snake length
-			local revivePositionStr = player:GetAttribute("RevivePosition")
-			local reviveSnakeLength = player:GetAttribute("ReviveSnakeLength") or 500
-
-			-- Parse position from string
-			local revivePosition = nil
-			if revivePositionStr then
-				-- Parse Vector3 from string format
-				local x, y, z = revivePositionStr:match("([%d.-]+), ([%d.-]+), ([%d.-]+)")
-				if x and y and z then
-					revivePosition = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
-				end
-			end
-
-			-- Teleport is handled by SnakeSystemIntegration for instant positioning
-			-- Just verify we have a rootPart for the effect later
+			-- SnakeSystemIntegration handles position and length restoration
+			-- We just need to handle invincibility and effects
+			
 			local rootPart = character:FindFirstChild("HumanoidRootPart")
 
-			-- Set invincibility BEFORE setting snake length
+			-- Set invincibility 
 			player:SetAttribute("ReviveInvincible", true)
 			-- Also set spawn protection
 			player:SetAttribute("SpawnProtection", true)
 
 			-- Wait a frame to ensure attributes are set
 			wait()
-
-			-- Restore snake length AFTER invincibility is set
-			local leaderstats = player:FindFirstChild("leaderstats")
-			if leaderstats then
-				local lengthValue = leaderstats:FindFirstChild("Length")
-				if lengthValue then
-					lengthValue.Value = reviveSnakeLength
-					print("🐍 Restored snake length to", reviveSnakeLength)
-				end
-			end
 			
-			-- Clear attributes AFTER we've used them
-			player:SetAttribute("RevivePosition", nil)
-			player:SetAttribute("ReviveSnakeLength", nil)
+			-- Clear the revive flag after a short delay
+			task.spawn(function()
+				task.wait(5) -- Wait for invincibility period
+				player:SetAttribute("ReviveInvincible", false)
+				player:SetAttribute("SpawnProtection", false)
+				print("🛡️ Revive invincibility ended for", player.Name)
+			end)
 
 			-- Add revive effect
 			if rootPart then
