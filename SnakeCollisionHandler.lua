@@ -654,125 +654,14 @@ local function queuePlayerDeath(player)
 		end
 	end
 	
-	-- Check for revive gamepass BEFORE queuing death
-	local hasRevive = player:GetAttribute("HasRevive")
-	local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
-	
-	print("🔍 Pre-death check - Player:", player.Name, "HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
-	
-	if hasRevive and revivesAvailable > 0 then
-		print("✅ Player has revive! Pausing death and sending prompt...")
-		
-		-- Create revive prompt
-		local reviveRemote = remotes:FindFirstChild("PromptRevive")
-		if not reviveRemote then
-			print("❌ PromptRevive remote not found! This shouldn't happen")
-			-- Queue death if remote is missing
-			table.insert(deathQueue, {
-				type = "player",
-				target = player,
-				timestamp = tick()
-			})
-			return
-		end
-		
-		-- Make player temporarily invincible while deciding
-		invinciblePlayers[player] = os.clock() + 6  -- 5 seconds to decide + 1 buffer
-		
-		-- Fire revive prompt to client
-		reviveRemote:FireClient(player)
-		print("🚀 Revive prompt sent to", player.Name)
-		
-		-- Handle response
-		task.spawn(function()
-			local revived = false
-			local responseReceived = false
-			
-			local reviveConnection
-			reviveConnection = reviveRemote.OnServerEvent:Connect(function(plr, response)
-				if plr == player then
-					responseReceived = true
-					if response == "revive" then
-						revived = true
-						print("✅ Player chose to revive!")
-					else
-						print("❌ Player declined revive")
-					end
-					reviveConnection:Disconnect()
-				end
-			end)
-			
-			-- Wait for response (5 seconds max)
-			local waitTime = 0
-			while waitTime < 5 and not responseReceived do
-				task.wait(0.1)
-				waitTime = waitTime + 0.1
-			end
-			
-			if reviveConnection then
-				reviveConnection:Disconnect()
-			end
-			
-			-- Clear temporary invincibility
-			clearPlayerInvincibility(player)
-			
-			if revived then
-				print("🎉 REVIVING", player.Name)
-				-- Revive the player
-				player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
-				
-				-- Make player invincible for 3 seconds after revive
-				invinciblePlayers[player] = os.clock() + 3
-				
-				-- Add revive effect
-				local character = player.Character
-				if character then
-					local rootPart = character:FindFirstChild("HumanoidRootPart")
-					if rootPart then
-						local reviveEffect = Instance.new("PointLight")
-						reviveEffect.Brightness = 3
-						reviveEffect.Color = Color3.fromRGB(255, 255, 0)
-						reviveEffect.Range = 20
-						reviveEffect.Parent = rootPart
-						
-						-- Add particles
-						local attachment = Instance.new("Attachment")
-						attachment.Parent = rootPart
-						
-						local particles = Instance.new("ParticleEmitter")
-						particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-						particles.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
-						particles.LightEmission = 1
-						particles.Rate = 100
-						particles.Lifetime = NumberRange.new(1)
-						particles.Speed = NumberRange.new(10)
-						particles.SpreadAngle = Vector2.new(360, 360)
-						particles.Parent = attachment
-						
-						task.wait(3)
-						if reviveEffect then reviveEffect:Destroy() end
-						if attachment then attachment:Destroy() end
-					end
-				end
-			else
-				-- Player didn't revive, queue death
-				print("💀 No revive, queuing death for", player.Name)
-				table.insert(deathQueue, {
-					type = "player",
-					target = player,
-					timestamp = tick()
-				})
-			end
-		end)
-	else
-		-- No revive available, queue death immediately
-		print("💀 No revive gamepass/uses, queuing death for", player.Name)
-		table.insert(deathQueue, {
-			type = "player",
-			target = player,
-			timestamp = tick()
-		})
-	end
+	-- Queue death immediately - player should die right away
+	print("💀 Queuing death for", player.Name)
+	table.insert(deathQueue, {
+		type = "player",
+		target = player,
+		timestamp = tick(),
+		checkRevive = true  -- Flag to check for revive after death
+	})
 end
 
 local function queueAIDeath(head)
@@ -950,6 +839,31 @@ task.spawn(function()
 						player:SetAttribute("TempMagnetRange", 1) -- Clear any temporary boost
 						player:SetAttribute("ActiveMagnet", false) -- Clear active state
 						
+						-- CRITICAL: Destroy snake controls immediately so player can't move
+						-- This prevents the "still moving while dead" bug
+						local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
+						if not snakeInstance and character:FindFirstChild("__SnakeInstance") then
+							snakeInstance = character.__SnakeInstance.Value
+						end
+						
+						if snakeInstance then
+							-- Disable snake movement immediately
+							if snakeInstance.destroy then
+								print("🐍 Destroying snake controls for", player.Name)
+								snakeInstance:destroy()
+							end
+							-- Remove from global table
+							if _G.PlayerSnakes then
+								_G.PlayerSnakes[player] = nil
+							end
+						end
+						
+						-- Also set humanoid health to 0 to stop movement
+						local humanoid = character:FindFirstChild("Humanoid")
+						if humanoid then
+							humanoid.Health = 0
+						end
+						
 						-- Smooth death handling - disable character without teleporting
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
 						if rootPart then
@@ -1029,50 +943,31 @@ task.spawn(function()
 							end
 							
 							if revived then
+								print("🎉 REVIVING", player.Name)
 								-- Revive the player
 								player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+								
+								-- Remove from dead players FIRST
+								deadPlayers[player] = nil
 								
 								-- Make player invincible for 3 seconds
 								invinciblePlayers[player] = os.clock() + 3
 								
-								-- Restore character
-								if rootPart then
-									rootPart.Anchored = false
-									rootPart.CanCollide = true
-									rootPart.CanTouch = true
-									rootPart.CanQuery = true
-									rootPart:SetAttribute("Dead", false)
-									rootPart.CFrame = rootPart.CFrame * CFrame.new(0, 10, 0) -- Move back up
-									
-									-- Restore visibility
-									for _, part in pairs(character:GetDescendants()) do
-										if part:IsA("BasePart") then
-											part.CanCollide = true
-											part.CanTouch = true
-											part.CanQuery = true
-											part.Transparency = 0
-										elseif part:IsA("Decal") or part:IsA("Texture") then
-											part.Transparency = 0
-										end
-									end
+								-- Respawn the player properly
+								-- Fire respawn event to recreate snake
+								local respawnRemote = remotes:FindFirstChild("RespawnSnake")
+								if respawnRemote then
+									print("🔄 Respawning player after revive")
+									respawnRemote:FireClient(player)
+								else
+									-- Fallback: force respawn
+									player:LoadCharacter()
 								end
 								
-								-- Remove from dead players
-								deadPlayers[player] = nil
+								-- Add revive effect will be applied when they respawn
+								player:SetAttribute("JustRevived", true)
 								
-								-- Add revive effect
-								local reviveEffect = Instance.new("PointLight")
-								reviveEffect.Brightness = 3
-								reviveEffect.Color = Color3.fromRGB(255, 255, 0)
-								reviveEffect.Range = 20
-								reviveEffect.Parent = rootPart
-								
-								task.wait(3)
-								if reviveEffect then
-									reviveEffect:Destroy()
-								end
-								
-								return -- Don't proceed with death
+								return -- Don't proceed with normal death
 							end
 						end
 						

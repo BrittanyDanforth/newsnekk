@@ -293,6 +293,49 @@ Players.PlayerAdded:Connect(function(player)
 				end
 			end)
 		end
+		
+		-- Check if player just revived
+		if player:GetAttribute("JustRevived") then
+			player:SetAttribute("JustRevived", false)
+			
+			print("✨ Applying revive effect to", player.Name)
+			
+			-- Add revive effect
+			local rootPart = character:FindFirstChild("HumanoidRootPart")
+			if rootPart then
+				local reviveEffect = Instance.new("PointLight")
+				reviveEffect.Name = "ReviveEffect"
+				reviveEffect.Brightness = 3
+				reviveEffect.Color = Color3.fromRGB(255, 215, 0)
+				reviveEffect.Range = 20
+				reviveEffect.Parent = rootPart
+				
+				-- Add golden particles
+				local attachment = Instance.new("Attachment")
+				attachment.Parent = rootPart
+				
+				local particles = Instance.new("ParticleEmitter")
+				particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+				particles.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
+				particles.LightEmission = 1
+				particles.Rate = 100
+				particles.Lifetime = NumberRange.new(1, 2)
+				particles.Speed = NumberRange.new(10)
+				particles.SpreadAngle = Vector2.new(360, 360)
+				particles.Parent = attachment
+				
+				-- Remove after 3 seconds
+				task.spawn(function()
+					wait(3)
+					if reviveEffect and reviveEffect.Parent then
+						reviveEffect:Destroy()
+					end
+					if attachment and attachment.Parent then
+						attachment:Destroy()
+					end
+				end)
+			end
+		end
 	end)
 end)
 
