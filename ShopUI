@@ -1066,7 +1066,7 @@ local GAMEPASS_DATA = {
 		gradient = {Color3.fromRGB(237, 66, 69), Color3.fromRGB(255, 100, 100)}
 	},
 	["Magnet"] = {
-		id = 1335069823, -- Real gamepass ID!
+		id = 1335069823, -- ⚠️ REPLACE WITH YOUR ACTUAL GAMEPASS ID!
 		price = 150,
 		icon = "🧲",  -- Keeping magnet emoji as requested
 		description = "Attract orbs from further away!",
@@ -2234,18 +2234,6 @@ local function createGamepassCard(passName, index)
 		return 
 	end
 	print("📦 Creating gamepass card for:", passName, "with ID:", passData.id)
-	
-	-- Check if player owns this gamepass
-	local isOwned = false
-	local checkGamepass = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CheckGamepass", 5)
-	if checkGamepass then
-		local success, result = pcall(function()
-			return checkGamepass:InvokeServer(passName)
-		end)
-		if success then
-			isOwned = result
-		end
-	end
 
 	-- Main card container
 	local card = Instance.new("TextButton")
@@ -2382,48 +2370,28 @@ local function createGamepassCard(passName, index)
 	local priceButton = Instance.new("Frame")
 	priceButton.Size = UDim2.new(0.8, 0, 0.13, 0)
 	priceButton.Position = UDim2.new(0.1, 0, 0.82, 0)
-	priceButton.BackgroundColor3 = isOwned and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(0, 255, 127)
+	priceButton.BackgroundColor3 = Color3.fromRGB(0, 255, 127)
 	priceButton.Parent = card
 	createCorner(priceButton, 10)
 
 	local priceGradient = Instance.new("UIGradient")
 	priceGradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, isOwned and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(0, 255, 127)),
-		ColorSequenceKeypoint.new(1, isOwned and Color3.fromRGB(80, 160, 80) or Color3.fromRGB(0, 200, 100))
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 255, 127)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 200, 100))
 	})
 	priceGradient.Rotation = 90
 	priceGradient.Parent = priceButton
 
-	local priceStroke = createStroke(priceButton, isOwned and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(0, 255, 127), 1.5, 0.5)
+	local priceStroke = createStroke(priceButton, Color3.fromRGB(0, 255, 127), 1.5, 0.5)
 
 	local priceLabel = Instance.new("TextLabel")
 	priceLabel.Size = UDim2.new(1, 0, 1, 0)
 	priceLabel.BackgroundTransparency = 1
-	priceLabel.Text = isOwned and "✓ OWNED" or ("R$ " .. tostring(passData.price))
-	priceLabel.TextColor3 = isOwned and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(0, 0, 0)
+	priceLabel.Text = "R$ " .. tostring(passData.price)
+	priceLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
 	priceLabel.TextScaled = true
 	priceLabel.Font = Enum.Font.SourceSansBold
 	priceLabel.Parent = priceButton
-	
-	-- Add owned badge overlay
-	if isOwned then
-		local ownedBadge = Instance.new("Frame")
-		ownedBadge.Size = UDim2.new(0, 80, 0, 30)
-		ownedBadge.Position = UDim2.new(1, -85, 0, 5)
-		ownedBadge.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-		ownedBadge.ZIndex = 2
-		ownedBadge.Parent = card
-		createCorner(ownedBadge, 8)
-		
-		local ownedText = Instance.new("TextLabel")
-		ownedText.Size = UDim2.new(1, 0, 1, 0)
-		ownedText.BackgroundTransparency = 1
-		ownedText.Text = "OWNED"
-		ownedText.TextColor3 = Color3.fromRGB(255, 255, 255)
-		ownedText.TextScaled = true
-		ownedText.Font = Enum.Font.SourceSansBold
-		ownedText.Parent = ownedBadge
-	end
 
 	-- Hover effects
 	card.MouseEnter:Connect(function()
@@ -2474,28 +2442,7 @@ local function createGamepassCard(passName, index)
 	-- Click to purchase
 	card.MouseButton1Click:Connect(function()
 		playSound("SELECT")
-		if isOwned then
-			-- Show owned notification
-			local notify = Instance.new("TextLabel")
-			notify.Size = UDim2.new(0, 300, 0, 60)
-			notify.Position = UDim2.new(0.5, -150, 0.9, -70)
-			notify.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-			notify.Text = "You already own this gamepass!"
-			notify.TextColor3 = Color3.fromRGB(255, 255, 255)
-			notify.TextScaled = true
-			notify.Font = Enum.Font.SourceSansBold
-			notify.Parent = ShopUI.uiElements.screenGui
-			createCorner(notify, 12)
-			
-			TweenService:Create(notify, TweenInfo.new(0.3), {
-				Position = UDim2.new(0.5, -150, 0.85, -70)
-			}):Play()
-			
-			wait(2)
-			notify:Destroy()
-		else
-			createGamepassPurchasePopup(passName, passData)
-		end
+		createGamepassPurchasePopup(passName, passData)
 	end)
 end
 
@@ -3853,7 +3800,7 @@ function ShopUI.open()
 			warn("Failed to initialize shop GUI")
 			return
 		end
-		
+
 		gui.Enabled = true
 
 		local contentWindow = ShopUI.uiElements.contentWindow
@@ -3861,7 +3808,7 @@ function ShopUI.open()
 			warn("Content window not found!")
 			return
 		end
-		
+
 		-- FIXED: Ensure window is visible and not using GroupTransparency
 		contentWindow.Visible = true
 		contentWindow.Position = UDim2.new(0.5, 0, 1.5, 0)
