@@ -301,8 +301,46 @@ Players.PlayerAdded:Connect(function(player)
 			
 			print("✨ Applying revive effect to", player.Name)
 			
-			-- Add revive effect
+			-- Get revive position and snake length
+			local revivePositionStr = player:GetAttribute("RevivePosition")
+			local reviveSnakeLength = player:GetAttribute("ReviveSnakeLength") or 500
+			
+			-- Parse position from string
+			local revivePosition = nil
+			if revivePositionStr then
+				-- Parse Vector3 from string format
+				local x, y, z = revivePositionStr:match("([%d.-]+), ([%d.-]+), ([%d.-]+)")
+				if x and y and z then
+					revivePosition = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
+				end
+			end
+			
+			-- Clear attributes
+			player:SetAttribute("RevivePosition", nil)
+			player:SetAttribute("ReviveSnakeLength", nil)
+			
+			-- Teleport to death position if available
 			local rootPart = character:FindFirstChild("HumanoidRootPart")
+			if rootPart and revivePosition then
+				wait(0.1) -- Small delay to ensure character is loaded
+				rootPart.CFrame = CFrame.new(revivePosition)
+				print("📍 Teleported to revive position:", revivePosition)
+			end
+			
+			-- Set invincibility
+			player:SetAttribute("ReviveInvincible", true)
+			
+			-- Restore snake length
+			local leaderstats = player:FindFirstChild("leaderstats")
+			if leaderstats then
+				local lengthValue = leaderstats:FindFirstChild("Length")
+				if lengthValue then
+					lengthValue.Value = reviveSnakeLength
+					print("🐍 Restored snake length to", reviveSnakeLength)
+				end
+			end
+			
+			-- Add revive effect
 			if rootPart then
 				local reviveEffect = Instance.new("PointLight")
 				reviveEffect.Name = "ReviveEffect"
@@ -325,14 +363,23 @@ Players.PlayerAdded:Connect(function(player)
 				particles.SpreadAngle = Vector2.new(360, 360)
 				particles.Parent = attachment
 				
-				-- Remove after 3 seconds
+				-- Add invincibility visual
+				local forceField = Instance.new("ForceField")
+				forceField.Visible = true
+				forceField.Parent = character
+				
+				-- Remove after 5 seconds
 				task.spawn(function()
-					wait(3)
+					wait(5)
+					player:SetAttribute("ReviveInvincible", false)
 					if reviveEffect and reviveEffect.Parent then
 						reviveEffect:Destroy()
 					end
 					if attachment and attachment.Parent then
 						attachment:Destroy()
+					end
+					if forceField and forceField.Parent then
+						forceField:Destroy()
 					end
 				end)
 			end

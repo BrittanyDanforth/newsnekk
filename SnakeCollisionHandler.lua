@@ -87,6 +87,11 @@ local function isPlayerInvincible(player)
 		return true
 	end
 	
+	-- Check revive invincibility
+	if player:GetAttribute("ReviveInvincible") then
+		return true
+	end
+	
 	return false
 end
 
@@ -945,25 +950,101 @@ task.spawn(function()
 									-- Revive the player
 									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
 									
+									-- Store current position and snake length before respawn
+									local deathPosition = rootPart and rootPart.Position or Vector3.new(0, 10, 0)
+									local currentSnakeLength = player:GetAttribute("SnakeLength") or 500
+									local leaderstats = player:FindFirstChild("leaderstats")
+									if leaderstats then
+										local lengthValue = leaderstats:FindFirstChild("Length")
+										if lengthValue then
+											currentSnakeLength = lengthValue.Value
+										end
+									end
+									
+									print("📍 Revive at position:", deathPosition, "with length:", currentSnakeLength)
+									
 									-- Remove from dead players FIRST
 									deadPlayers[player] = nil
 									
-									-- Make player invincible for 3 seconds
-									invinciblePlayers[player] = os.clock() + 3
-									
-									-- Respawn the player properly
-									-- Fire respawn event to recreate snake
-									local respawnRemote = remotes:FindFirstChild("RespawnSnake")
-									if respawnRemote then
-										print("🔄 Respawning player after revive")
-										respawnRemote:FireClient(player)
-									else
-										-- Fallback: force respawn
-										player:LoadCharacter()
+									-- Clear the Dead attribute
+									if rootPart then
+										rootPart:SetAttribute("Dead", false)
 									end
 									
-									-- Add revive effect will be applied when they respawn
+									-- Make player invincible for 5 seconds
+									invinciblePlayers[player] = os.clock() + 5
+									player:SetAttribute("ReviveInvincible", true)
+									
+									-- Store revive data for after respawn
 									player:SetAttribute("JustRevived", true)
+									player:SetAttribute("RevivePosition", tostring(deathPosition))
+									player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
+									
+									-- Force respawn the character
+									player:LoadCharacter()
+									
+									-- Wait for character to spawn
+									task.spawn(function()
+										local newCharacter = player.Character or player.CharacterAdded:Wait()
+										local newRootPart = newCharacter:WaitForChild("HumanoidRootPart", 5)
+										
+										if newRootPart then
+											-- Teleport to death position
+											task.wait(0.1)
+											newRootPart.CFrame = CFrame.new(deathPosition)
+											
+											-- Restore snake length
+											local newLeaderstats = player:FindFirstChild("leaderstats")
+											if newLeaderstats then
+												local lengthValue = newLeaderstats:FindFirstChild("Length")
+												if lengthValue then
+													lengthValue.Value = currentSnakeLength
+													print("✅ Restored snake length to", currentSnakeLength)
+												end
+											end
+											
+											-- Add visual effects
+											local reviveEffect = Instance.new("PointLight")
+											reviveEffect.Name = "ReviveEffect"
+											reviveEffect.Brightness = 3
+											reviveEffect.Color = Color3.fromRGB(255, 215, 0)
+											reviveEffect.Range = 20
+											reviveEffect.Parent = newRootPart
+											
+											-- Add golden particles
+											local attachment = Instance.new("Attachment")
+											attachment.Parent = newRootPart
+											
+											local particles = Instance.new("ParticleEmitter")
+											particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+											particles.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
+											particles.LightEmission = 1
+											particles.Rate = 100
+											particles.Lifetime = NumberRange.new(1, 2)
+											particles.Speed = NumberRange.new(10)
+											particles.SpreadAngle = Vector2.new(360, 360)
+											particles.Parent = attachment
+											
+											-- Add invincibility visual
+											local forceField = Instance.new("ForceField")
+											forceField.Visible = true
+											forceField.Parent = newCharacter
+											
+											-- Remove effects after 5 seconds
+											task.wait(5)
+											player:SetAttribute("ReviveInvincible", false)
+											invinciblePlayers[player] = nil
+											if reviveEffect and reviveEffect.Parent then
+												reviveEffect:Destroy()
+											end
+											if attachment and attachment.Parent then
+												attachment:Destroy()
+											end
+											if forceField and forceField.Parent then
+												forceField:Destroy()
+											end
+										end
+									end)
 									
 									return -- Don't proceed with normal death
 								end
