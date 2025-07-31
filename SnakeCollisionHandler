@@ -978,11 +978,22 @@ task.spawn(function()
 
 									print("📍 Revive at position:", deathPosition, "with length:", currentSnakeLength)
 
-									-- Clear dead state
-									deadPlayers[player] = nil
-									if rootPart then
-										rootPart:SetAttribute("Dead", false)
-									end
+														-- Clear dead state
+					deadPlayers[player] = nil
+					if rootPart then
+						rootPart:SetAttribute("Dead", false)
+					end
+					
+					-- CRITICAL: Clear collision caches for fresh start
+					if CollisionCache then
+						CollisionCache.playerSegments[player] = nil
+						CollisionCache.aiSegments = {} -- Clear AI cache too
+						CollisionCache.lastAIUpdate = 0
+					end
+					-- Also clear head cache to force refresh
+					headCache.lastUpdate = 0
+					headCache.players = {}
+					print("🧹 Cleared collision caches for", player.Name)
 
 									-- Store revive data
 									player:SetAttribute("RevivePosition", tostring(deathPosition))
@@ -1011,6 +1022,11 @@ task.spawn(function()
 
 						-- ONLY mark as dead if NOT reviving
 						deadPlayers[player] = true
+						
+						-- Clear collision caches when dying
+						if CollisionCache and CollisionCache.playerSegments then
+							CollisionCache.playerSegments[player] = nil
+						end
 
 						-- Clean death with proper timing for menu
 						humanoid.Health = 0
