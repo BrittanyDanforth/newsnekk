@@ -25,6 +25,9 @@ local AISnakeModule = require(ReplicatedStorage:WaitForChild("AISnake"))
 local SnakeConfig = require(ReplicatedStorage:WaitForChild("SnakeConfig"))
 local OrbUtils = require(ReplicatedStorage:WaitForChild("OrbUtils"))
 
+-- Get remotes folder
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+
 -- === OPTIMIZED PERFORMANCE CONSTANTS ===
 local SEGMENT_CHUNK_SIZE = 96 -- Increased from 64 for better batching
 local COLLISION_GRID_SIZE = 120 -- Slightly larger cells
