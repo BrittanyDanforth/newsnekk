@@ -52,7 +52,7 @@ local ORB_BATCH_SIZE = 8 -- Spawn orbs in smaller batches
 local ORB_SPAWN_DELAY = 0.03 -- Small delay between batches
 
 -- === DEBUG SYSTEM ===
-local DEBUG_COLLISIONS = true
+local DEBUG_COLLISIONS = false
 local collisionDebugData = {}
 
 -- === DEATH PROCESSING QUEUE ===
@@ -657,7 +657,10 @@ end
 
 -- === DEATH HANDLERS (UNCHANGED LOGIC) ===
 local function queuePlayerDeath(player)
-	if deadPlayers[player] then return end
+	-- Allow queueing if player has a valid character (might have revived)
+	if deadPlayers[player] and not (player.Character and player.Character:FindFirstChild("Humanoid")) then 
+		return 
+	end
 
 	-- Check if already in queue
 	for _, death in ipairs(deathQueue) do
@@ -710,7 +713,8 @@ task.spawn(function()
 				local character = player.Character
 				if character then
 					local humanoid = character:FindFirstChild("Humanoid")
-					if humanoid then
+					-- Only process death if player is actually alive
+					if humanoid and humanoid.Health > 0 and not deadPlayers[player] then
 						-- Get snake length from leaderstats
 						local snakeLength = 55
 						if player:FindFirstChild("leaderstats") then
