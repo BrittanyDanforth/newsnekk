@@ -911,63 +911,62 @@ task.spawn(function()
 						if hasRevive and revivesAvailable > 0 then
 							print("✅ Player has revive! Sending prompt to", player.Name)
 							
-							-- Create revive prompt
-							local reviveRemote = ReplicatedStorage:FindFirstChild("PromptRevive")
+							-- Get revive prompt from remotes folder
+							local reviveRemote = remotes:FindFirstChild("PromptRevive")
 							if not reviveRemote then
-								reviveRemote = Instance.new("RemoteEvent")
-								reviveRemote.Name = "PromptRevive"
-								reviveRemote.Parent = ReplicatedStorage
-							end
-							
-							-- Fire revive prompt to client
-							reviveRemote:FireClient(player)
-							print("🚀 Revive prompt sent to client!")
-							
-							-- Wait for response (5 seconds max)
-							local revived = false
-							local reviveConnection
-							reviveConnection = reviveRemote.OnServerEvent:Connect(function(plr, response)
-								if plr == player and response == "revive" then
-									revived = true
+								print("❌ PromptRevive remote not found in Remotes folder!")
+								-- Continue with normal death
+							else
+								-- Fire revive prompt to client
+								reviveRemote:FireClient(player)
+								print("🚀 Revive prompt sent to client!")
+								
+								-- Wait for response (5 seconds max)
+								local revived = false
+								local reviveConnection
+								reviveConnection = reviveRemote.OnServerEvent:Connect(function(plr, response)
+									if plr == player and response == "revive" then
+										revived = true
+										reviveConnection:Disconnect()
+										print("✅ Player chose to revive!")
+									elseif plr == player and response == "decline" then
+										reviveConnection:Disconnect()
+										print("❌ Player declined revive")
+									end
+								end)
+								
+								task.wait(5) -- Give player 5 seconds to decide
+								if reviveConnection then
 									reviveConnection:Disconnect()
-									print("✅ Player chose to revive!")
-								elseif plr == player and response == "decline" then
-									reviveConnection:Disconnect()
-									print("❌ Player declined revive")
-								end
-							end)
-							
-							task.wait(5) -- Give player 5 seconds to decide
-							if reviveConnection then
-								reviveConnection:Disconnect()
-							end
-							
-							if revived then
-								print("🎉 REVIVING", player.Name)
-								-- Revive the player
-								player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
-								
-								-- Remove from dead players FIRST
-								deadPlayers[player] = nil
-								
-								-- Make player invincible for 3 seconds
-								invinciblePlayers[player] = os.clock() + 3
-								
-								-- Respawn the player properly
-								-- Fire respawn event to recreate snake
-								local respawnRemote = remotes:FindFirstChild("RespawnSnake")
-								if respawnRemote then
-									print("🔄 Respawning player after revive")
-									respawnRemote:FireClient(player)
-								else
-									-- Fallback: force respawn
-									player:LoadCharacter()
 								end
 								
-								-- Add revive effect will be applied when they respawn
-								player:SetAttribute("JustRevived", true)
-								
-								return -- Don't proceed with normal death
+								if revived then
+									print("🎉 REVIVING", player.Name)
+									-- Revive the player
+									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+									
+									-- Remove from dead players FIRST
+									deadPlayers[player] = nil
+									
+									-- Make player invincible for 3 seconds
+									invinciblePlayers[player] = os.clock() + 3
+									
+									-- Respawn the player properly
+									-- Fire respawn event to recreate snake
+									local respawnRemote = remotes:FindFirstChild("RespawnSnake")
+									if respawnRemote then
+										print("🔄 Respawning player after revive")
+										respawnRemote:FireClient(player)
+									else
+										-- Fallback: force respawn
+										player:LoadCharacter()
+									end
+									
+									-- Add revive effect will be applied when they respawn
+									player:SetAttribute("JustRevived", true)
+									
+									return -- Don't proceed with normal death
+								end
 							end
 						end
 						

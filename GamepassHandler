@@ -227,9 +227,10 @@ local function applyGamepassBenefits(player)
 
 	-- Check for Revive gamepass
 	if hasGamepass(player, "Revive") then
-		local currentRevives = player:GetAttribute("RevivesAvailable") or 0
-		player:SetAttribute("RevivesAvailable", currentRevives + 1)
+		-- Set to 2 revives per life (not cumulative)
+		player:SetAttribute("RevivesAvailable", 2)
 		player:SetAttribute("HasRevive", true)
+		print("✅ Player has Revive gamepass! Set RevivesAvailable to 2")
 	end
 
 	-- Check for Pet Ally gamepass
