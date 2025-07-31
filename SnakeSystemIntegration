@@ -156,29 +156,58 @@ local function onCharacterAdded(character)
 	if player:GetAttribute("RevivingNow") then
 		local revivePos = player:GetAttribute("RevivePosition")
 		if revivePos then
-			-- Parse the position string
-			local x, y, z = revivePos:match("([^,]+),%s*([^,]+),%s*([^,]+)")
+			-- Parse the position string (tostring() format: "X, Y, Z")
+			local x, y, z = revivePos:match("([%d.-]+),%s*([%d.-]+),%s*([%d.-]+)")
 			if x and y and z then
 				local deathPos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
 				
-				-- Wait for HumanoidRootPart to exist
-				local rootPart = character:WaitForChild("HumanoidRootPart", 2)
+				-- INSTANT teleport - don't wait for HumanoidRootPart
+				-- Set position immediately on spawn
+				local rootPart = character:FindFirstChild("HumanoidRootPart")
 				if rootPart then
 					-- IMMEDIATE teleport before any frame renders
-					character:SetPrimaryPartCFrame(CFrame.new(deathPos))
 					rootPart.CFrame = CFrame.new(deathPos)
+					rootPart.Position = deathPos
+					character:SetPrimaryPartCFrame(CFrame.new(deathPos))
 					
 					-- Force physics update to prevent any drift
 					rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 					rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+					rootPart.Velocity = Vector3.new(0, 0, 0)
 					
-					-- Double-ensure position (sometimes needed for network sync)
+					-- Double-ensure position with multiple methods
 					task.defer(function()
-						rootPart.CFrame = CFrame.new(deathPos)
+						if rootPart and rootPart.Parent then
+							rootPart.CFrame = CFrame.new(deathPos)
+							rootPart.Position = deathPos
+						end
+					end)
+					
+					-- Triple-ensure after a tiny delay for network sync
+					task.spawn(function()
+						task.wait(0.03)
+						if rootPart and rootPart.Parent then
+							rootPart.CFrame = CFrame.new(deathPos)
+						end
 					end)
 					
 					print("⚡ Instant revive teleport to:", deathPos)
+				else
+					-- If no rootPart yet, wait for it and teleport ASAP
+					task.spawn(function()
+						local root = character:WaitForChild("HumanoidRootPart", 2)
+						if root then
+							root.CFrame = CFrame.new(deathPos)
+							root.Position = deathPos
+							character:SetPrimaryPartCFrame(CFrame.new(deathPos))
+							root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+							root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+							print("⚡ Delayed instant revive teleport to:", deathPos)
+						end
+					end)
 				end
+			else
+				warn("❌ Failed to parse RevivePosition:", revivePos)
 			end
 		end
 	end
