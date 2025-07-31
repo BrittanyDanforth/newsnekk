@@ -7,7 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
 
 -- CONFIGURABLE MAP SIZE
-local MAP_SIZE = 800      -- Map is MAP_SIZE x MAP_SIZE studs
+local MAP_SIZE = 1600      -- Map is MAP_SIZE x MAP_SIZE studs
 local MAP_HEIGHT = 1      -- Height of the ground
 local WALL_THICKNESS = 20  -- Thickness of invisible walls (increased)
 local WALL_HEIGHT = 200    -- Height of invisible walls (much taller)
