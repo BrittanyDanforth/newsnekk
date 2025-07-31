@@ -704,7 +704,7 @@ task.spawn(function()
 				local character = player.Character
 				if character then
 					local humanoid = character:FindFirstChild("Humanoid")
-					if humanoid and humanoid.Health > 0 then
+					if humanoid then
 						-- Get snake length from leaderstats
 						local snakeLength = 55
 						if player:FindFirstChild("leaderstats") then
@@ -867,6 +867,7 @@ task.spawn(function()
 						-- Also set humanoid health to 0 to stop movement
 						local humanoid = character:FindFirstChild("Humanoid")
 						if humanoid then
+							print("💀 Setting health to 0 for", player.Name, "- Current health:", humanoid.Health)
 							humanoid.Health = 0
 						end
 
