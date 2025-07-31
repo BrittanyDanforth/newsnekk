@@ -714,6 +714,7 @@ task.spawn(function()
 				if character then
 					local humanoid = character:FindFirstChild("Humanoid")
 					-- Only process death if player is actually alive
+					print("🔍 Death check for", player.Name, "- Health:", humanoid and humanoid.Health or "nil", "DeadPlayers:", deadPlayers[player])
 					if humanoid and humanoid.Health > 0 and not deadPlayers[player] then
 						-- Get snake length from leaderstats
 						local snakeLength = 55
@@ -1024,6 +1025,9 @@ task.spawn(function()
 							task.wait(5)
 							deadPlayers[player] = nil
 						end)
+					else
+						-- Player is already dead or has no humanoid, skip this death
+						print("⚠️ Skipping death for", player.Name, "- Already dead or no humanoid")
 					end
 				end
 			elseif death.type == "ai" then
