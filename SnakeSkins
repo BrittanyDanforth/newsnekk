@@ -1,6 +1,7 @@
 -- IMPROVED SNAKE SKINS WITH UNIQUE VISUALS
 -- Each skin has distinct colors and patterns to avoid looking similar
 
+
 return {
 	-- CLASSIC TIER (Simple but clean)
 	["Default"] = {
