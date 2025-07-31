@@ -1324,8 +1324,7 @@ RunService.Stepped:Connect(function()
 									print(string.format("[COLLISION] Player %s hit AI snake body!", player.Name))
 									print("  - isPlayerInvincible:", isPlayerInvincible(player))
 									print("  - deadPlayers[player]:", deadPlayers[player])
-									print("  - RevivingNow:", player:GetAttribute("RevivingNow"))
-									print("  - ReviveInvincible:", player:GetAttribute("ReviveInvincible"))
+									print("  - Using part:", head.Name, "at", head.Position)
 								end
 								queuePlayerDeath(player)
 								break
