@@ -9,6 +9,7 @@ local STUDIO_OVERRIDE_GAMEPASSES = {
 	["Magnet"] = true,  -- Test magnet in studio
 	["2x Coins"] = false,
 	["2x Growth"] = false,
+	["Revive"] = true,  -- Test revive in studio
 	-- Add more as needed
 }
 
@@ -23,15 +24,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- GAMEPASS IDs (Replace with your actual IDs)
 local GAMEPASS_IDS = {
-	["Lifeline Boost"] = 123456789,
-	["Mega Speed"] = 123456790,
-	["2x Growth"] = 123456791,
-	["2x Coins"] = 123456792,
-	["Magnet"] = 1335069823,  -- Real gamepass ID
-	["Ghost Mode"] = 123456794,
-	["VIP Access"] = 123456795,
-	["Pet Ally"] = 123456796,
-	["Revive"] = 123456797
+	["Lifeline Boost"] = 123456789, -- TODO: Replace with real ID
+	["Mega Speed"] = 123456790, -- TODO: Replace with real ID
+	["2x Growth"] = 123456791, -- TODO: Replace with real ID
+	["2x Coins"] = 123456792, -- TODO: Replace with real ID
+	["Magnet"] = 1335069823,  -- Real gamepass ID - WORKING!
+	["Ghost Mode"] = 123456794, -- TODO: Replace with real ID
+	["VIP Access"] = 123456795, -- TODO: Replace with real ID
+	["Pet Ally"] = 123456796, -- TODO: Replace with real ID (skipping for now)
+	["Revive"] = 123456797 -- TODO: Replace with real ID
 }
 
 -- Create RemoteEvents
@@ -50,6 +51,11 @@ gamepassPurchasedRemote.Parent = remotes
 local useBoostRemote = remotes:FindFirstChild("UseBoost") or Instance.new("RemoteEvent")
 useBoostRemote.Name = "UseBoost"
 useBoostRemote.Parent = remotes
+
+-- Create PromptRevive remote early so ReviveUI doesn't have infinite yield
+local promptReviveRemote = remotes:FindFirstChild("PromptRevive") or Instance.new("RemoteEvent")
+promptReviveRemote.Name = "PromptRevive"
+promptReviveRemote.Parent = remotes
 
 local boostStatusRemote = remotes:FindFirstChild("BoostStatus") or Instance.new("RemoteEvent")
 boostStatusRemote.Name = "BoostStatus"
@@ -102,9 +108,9 @@ local function hasGamepass(player, gamepassName)
 		warn("Gamepass not found:", gamepassName)
 		return false 
 	end
-	
+
 	print("Checking gamepass:", gamepassName, "ID:", gamepassId, "for player:", player.Name)
-	
+
 	-- Studio testing override
 	if STUDIO_TESTING and STUDIO_OVERRIDE_GAMEPASSES[gamepassName] ~= nil then
 		local override = STUDIO_OVERRIDE_GAMEPASSES[gamepassName]
@@ -172,8 +178,8 @@ local function applyGamepassBenefits(player)
 
 	if hasGamepass(player, "Magnet") then
 		hasMagnet = true
-		player:SetAttribute("MagnetRange", 2.5)  -- 2.5x collection range
-		print("✅ Player has Magnet gamepass! MagnetRange set to 2.5")
+		player:SetAttribute("MagnetRange", 5)  -- 5x collection range (MUCH MORE POWERFUL!)
+		print("✅ Player has Magnet gamepass! MagnetRange set to 5")
 	else
 		player:SetAttribute("MagnetRange", 1)  -- Default range
 		print("❌ Player does not have Magnet gamepass. MagnetRange set to 1")
@@ -221,9 +227,10 @@ local function applyGamepassBenefits(player)
 
 	-- Check for Revive gamepass
 	if hasGamepass(player, "Revive") then
-		local currentRevives = player:GetAttribute("RevivesAvailable") or 0
-		player:SetAttribute("RevivesAvailable", currentRevives + 1)
+		-- Set to 2 revives per life (not cumulative)
+		player:SetAttribute("RevivesAvailable", 2)
 		player:SetAttribute("HasRevive", true)
+		print("✅ Player has Revive gamepass! Set RevivesAvailable to 2")
 	end
 
 	-- Check for Pet Ally gamepass
@@ -248,38 +255,148 @@ Players.PlayerAdded:Connect(function(player)
 
 		-- Apply ghost mode if they have it
 		if player:GetAttribute("HasGhostMode") then
-			-- Make player semi-transparent and non-collidable for 5 seconds
-			local function applyGhostMode()
-				for _, part in pairs(character:GetDescendants()) do
-					if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-						part.Transparency = 0.5
-						part.CanCollide = false
-					end
-				end
+			-- Set a temporary ghost mode attribute for 5 seconds on spawn
+			player:SetAttribute("SpawnGhostMode", true)
 
-				-- Add ghost effect
-				local ghostEffect = Instance.new("PointLight")
-				ghostEffect.Brightness = 2
-				ghostEffect.Color = Color3.fromRGB(150, 150, 255)
-				ghostEffect.Range = 10
-				ghostEffect.Parent = character:FindFirstChild("HumanoidRootPart")
+			-- Add visual ghost effect to character
+			local ghostEffect = Instance.new("PointLight")
+			ghostEffect.Name = "GhostEffect"
+			ghostEffect.Brightness = 2
+			ghostEffect.Color = Color3.fromRGB(150, 150, 255)
+			ghostEffect.Range = 10
+			ghostEffect.Parent = character:FindFirstChild("HumanoidRootPart")
 
-				-- Remove after 5 seconds
+			-- Add particle effect for extra visibility
+			local attachment = Instance.new("Attachment")
+			attachment.Parent = character:FindFirstChild("HumanoidRootPart")
+
+			local particles = Instance.new("ParticleEmitter")
+			particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+			particles.Color = ColorSequence.new(Color3.fromRGB(150, 150, 255))
+			particles.LightEmission = 1
+			particles.Rate = 30
+			particles.Lifetime = NumberRange.new(0.5, 1)
+			particles.Speed = NumberRange.new(3)
+			particles.SpreadAngle = Vector2.new(360, 360)
+			particles.Parent = attachment
+
+			-- Remove after 5 seconds
+			task.spawn(function()
 				wait(5)
+				player:SetAttribute("SpawnGhostMode", false)
 
-				for _, part in pairs(character:GetDescendants()) do
-					if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-						part.Transparency = 0
-						part.CanCollide = true
-					end
+				if ghostEffect and ghostEffect.Parent then
+					ghostEffect:Destroy()
 				end
 
-				if ghostEffect then
-					ghostEffect:Destroy()
+				if attachment and attachment.Parent then
+					attachment:Destroy()
+				end
+			end)
+		end
+
+		-- Check if player just revived
+		if player:GetAttribute("JustRevived") then
+			player:SetAttribute("JustRevived", false)
+
+			print("✨ Applying revive effect to", player.Name)
+
+			-- Get revive position and snake length
+			local revivePositionStr = player:GetAttribute("RevivePosition")
+			local reviveSnakeLength = player:GetAttribute("ReviveSnakeLength") or 500
+
+			-- Parse position from string
+			local revivePosition = nil
+			if revivePositionStr then
+				-- Parse Vector3 from string format
+				local x, y, z = revivePositionStr:match("([%d.-]+), ([%d.-]+), ([%d.-]+)")
+				if x and y and z then
+					revivePosition = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
 				end
 			end
 
-			spawn(applyGhostMode)
+			-- Clear attributes
+			player:SetAttribute("RevivePosition", nil)
+			player:SetAttribute("ReviveSnakeLength", nil)
+
+			-- Teleport to death position if available
+			local rootPart = character:FindFirstChild("HumanoidRootPart")
+			if rootPart and revivePosition then
+				wait(0.2) -- Slightly longer delay to ensure character is fully loaded
+				rootPart.CFrame = CFrame.new(revivePosition)
+				-- Ensure we're above ground
+				if rootPart.Position.Y < 5 then
+					rootPart.CFrame = rootPart.CFrame + Vector3.new(0, 5 - rootPart.Position.Y, 0)
+				end
+				print("📍 Teleported to revive position:", revivePosition)
+			end
+
+			-- Set invincibility BEFORE setting snake length
+			player:SetAttribute("ReviveInvincible", true)
+			-- Also set spawn protection
+			player:SetAttribute("SpawnProtection", true)
+
+			-- Wait a frame to ensure attributes are set
+			wait()
+
+			-- Restore snake length AFTER invincibility is set
+			local leaderstats = player:FindFirstChild("leaderstats")
+			if leaderstats then
+				local lengthValue = leaderstats:FindFirstChild("Length")
+				if lengthValue then
+					lengthValue.Value = reviveSnakeLength
+					print("🐍 Restored snake length to", reviveSnakeLength)
+				end
+			end
+
+			-- Add revive effect
+			if rootPart then
+				local reviveEffect = Instance.new("PointLight")
+				reviveEffect.Name = "ReviveEffect"
+				reviveEffect.Brightness = 3
+				reviveEffect.Color = Color3.fromRGB(255, 215, 0)
+				reviveEffect.Range = 20
+				reviveEffect.Parent = rootPart
+
+				-- Add golden particles
+				local attachment = Instance.new("Attachment")
+				attachment.Parent = rootPart
+
+				local particles = Instance.new("ParticleEmitter")
+				particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+				particles.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
+				particles.LightEmission = 1
+				particles.Rate = 100
+				particles.Lifetime = NumberRange.new(1, 2)
+				particles.Speed = NumberRange.new(10)
+				particles.SpreadAngle = Vector2.new(360, 360)
+				particles.Parent = attachment
+
+				-- Add invincibility visual
+				local forceField = Instance.new("ForceField")
+				forceField.Visible = true
+				forceField.Parent = character
+
+				-- Remove after 5 seconds
+				task.spawn(function()
+					-- Clear spawn protection after 1 second
+					wait(1)
+					player:SetAttribute("SpawnProtection", false)
+
+					-- Remove visual effects after 5 seconds
+					wait(4)
+					player:SetAttribute("ReviveInvincible", false)
+					if reviveEffect and reviveEffect.Parent then
+						reviveEffect:Destroy()
+					end
+					if attachment and attachment.Parent then
+						attachment:Destroy()
+					end
+					if forceField and forceField.Parent then
+						forceField:Destroy()
+					end
+				end)
+			end
 		end
 	end)
 end)
@@ -297,7 +414,7 @@ end
 -- Handle gamepass purchases
 MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamepassId, wasPurchased)
 	print("🛒 Gamepass purchase finished - ID:", gamepassId, "Purchased:", wasPurchased)
-	
+
 	if wasPurchased then
 		-- Find which gamepass was purchased
 		local gamepassName = nil
@@ -310,7 +427,7 @@ MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamep
 
 		if gamepassName then
 			print("✅ Purchased gamepass:", gamepassName)
-			
+
 			-- Update cache
 			if not playerGamepasses[player.UserId] then
 				playerGamepasses[player.UserId] = {}
@@ -322,7 +439,7 @@ MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamep
 
 			-- Notify client
 			gamepassPurchasedRemote:FireClient(player, gamepassName)
-			
+
 			print("✅ Benefits applied for:", gamepassName)
 		else
 			warn("⚠️ Unknown gamepass ID purchased:", gamepassId)
@@ -506,6 +623,34 @@ Players.PlayerRemoving:Connect(function(player)
 	playerBoostInventory[player] = nil
 	activeBoosts[player] = nil
 	playerGamepasses[player.UserId] = nil
+end)
+
+-- Handle magnet toggle
+local toggleMagnetRemote = remotes:FindFirstChild("ToggleMagnet")
+if not toggleMagnetRemote then
+	toggleMagnetRemote = Instance.new("RemoteEvent")
+	toggleMagnetRemote.Name = "ToggleMagnet"
+	toggleMagnetRemote.Parent = remotes
+end
+
+toggleMagnetRemote.OnServerEvent:Connect(function(player, state)
+	-- Verify player has magnet gamepass
+	if not hasGamepass(player, "Magnet") then
+		warn("Player trying to toggle magnet without gamepass:", player.Name)
+		return
+	end
+
+	-- Update magnet state
+	if state then
+		player:SetAttribute("MagnetRange", 5)  -- Turn on with 5x power
+		print("🧲 Magnet activated for", player.Name)
+	else
+		player:SetAttribute("MagnetRange", 1)  -- Turn off (default range)
+		print("🧲 Magnet deactivated for", player.Name)
+	end
+
+	-- Also set the active state
+	player:SetAttribute("MagnetActive", state)
 end)
 
 print("GamepassHandler loaded successfully with boost system!")
