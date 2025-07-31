@@ -920,15 +920,15 @@ local function updateMagnetEffect(player)
 		-- Show actual magnet range
 		local searchRange = 20 * totalRange  -- Match the actual search range
 		
-		effect.Size = Vector3.new(0.5, searchRange * 2, searchRange * 2)  -- Diameter
-		effect.CFrame = hrp.CFrame * CFrame.Angles(0, 0, math.rad(90))
-		effect.Position = Vector3.new(effect.Position.X, 0.5, effect.Position.Z)
+		-- Make it a flat horizontal ring on the ground
+		effect.Size = Vector3.new(searchRange * 2, 0.2, searchRange * 2)  -- Very thin, wide circle
+		effect.CFrame = CFrame.new(hrp.Position.X, 1, hrp.Position.Z) -- Position at ground level
 		
-		-- Rotate the effect for visual appeal
+		-- Rotate horizontally and spin
 		effect.CFrame = effect.CFrame * CFrame.Angles(0, math.rad(tick() * 50), 0)
 		
 		-- Pulse effect
-		local pulse = math.sin(tick() * 3) * 0.1 + 0.7
+		local pulse = math.sin(tick() * 3) * 0.1 + 0.8
 		effect.Transparency = pulse
 		
 		-- Update particle rate based on power

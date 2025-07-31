@@ -27,7 +27,7 @@ local function createReviveUI()
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "RevivePrompt"
 	screenGui.ResetOnSpawn = false
-	screenGui.DisplayOrder = 999
+	screenGui.DisplayOrder = 9999  -- Very high to show above everything
 	screenGui.Enabled = false
 	screenGui.Parent = playerGui
 	

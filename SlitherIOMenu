@@ -642,12 +642,25 @@ local function onCharacterAdded(character)
 	local humanoid = character:FindFirstChild("Humanoid")
 	if humanoid then
 		humanoid.Died:Connect(function()
-			-- Wait a moment before showing the menu
-			task.wait(1.5)
-			-- Show the menu again for respawn
-			createMenu(function()
-				requestRespawn()
-			end)
+			-- Check if player has revive gamepass and revives available
+			local hasRevive = LocalPlayer:GetAttribute("HasRevive")
+			local revivesAvailable = LocalPlayer:GetAttribute("RevivesAvailable") or 0
+			
+			if hasRevive and revivesAvailable > 0 then
+				-- Wait longer for revive prompt to appear
+				task.wait(6) -- Give 5 seconds for revive prompt + 1 second buffer
+			else
+				-- Normal death - show menu after short delay
+				task.wait(1.5)
+			end
+			
+			-- Only show menu if revive wasn't used (check if still dead)
+			if humanoid.Health <= 0 then
+				-- Show the menu again for respawn
+				createMenu(function()
+					requestRespawn()
+				end)
+			end
 		end)
 	end
 end
