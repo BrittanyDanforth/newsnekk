@@ -259,7 +259,7 @@ local function onCharacterAdded(character)
 		end
 
 		if snake and activeSnakes[player] == snake then
-			snake:update(dt)
+                -- snake:update() -- Not needed, OptimizedSnakeSystemV9 handles updates internally
 		end
 	end)
 
