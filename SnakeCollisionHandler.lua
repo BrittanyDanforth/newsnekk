@@ -975,13 +975,22 @@ task.spawn(function()
 									invinciblePlayers[player] = os.clock() + 5
 									player:SetAttribute("ReviveInvincible", true)
 									
-									-- Store revive data for after respawn
+									-- Set flags to prevent menu from showing
+									player:SetAttribute("RevivingNow", true)
 									player:SetAttribute("JustRevived", true)
+									
+									-- Store revive data for after respawn
 									player:SetAttribute("RevivePosition", tostring(deathPosition))
 									player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
 									
 									-- Force respawn the character
 									player:LoadCharacter()
+									
+									-- Clear the RevivingNow flag after a short delay
+									task.spawn(function()
+										task.wait(0.5)
+										player:SetAttribute("RevivingNow", false)
+									end)
 									
 									-- Wait for character to spawn
 									task.spawn(function()
