@@ -153,20 +153,12 @@ local reviveUI, yesButton, noButton, timerBar = createReviveUI()
 
 -- Handle revive prompt
 promptReviveRemote.OnClientEvent:Connect(function()
-	-- Show UI
+	print("🎮 REVIVE PROMPT RECEIVED! Showing UI...")
+	
+	-- Enable UI
 	reviveUI.Enabled = true
 	
-	-- Play sound effect
-	local sound = Instance.new("Sound")
-	sound.SoundId = "rbxasset://sounds/uuhhh.mp3"
-	sound.Volume = 0.5
-	sound.Parent = workspace
-	sound:Play()
-	sound.Ended:Connect(function()
-		sound:Destroy()
-	end)
-	
-	-- Animate entrance
+	-- Reset and animate in
 	local container = reviveUI.Container
 	container.Size = UDim2.new(0, 0, 0, 0)
 	TweenService:Create(container, TweenInfo.new(0.3, Enum.EasingStyle.Back), {

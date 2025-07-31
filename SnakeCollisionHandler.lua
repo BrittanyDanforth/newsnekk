@@ -642,21 +642,134 @@ end
 
 -- === DEATH HANDLERS (UNCHANGED LOGIC) ===
 local function queuePlayerDeath(player)
-	if not player or not player.Parent then return end
 	if deadPlayers[player] then return end
-	if isPlayerInvincible(player) then return end
-
+	
+	-- Check if already in queue
 	for _, death in ipairs(deathQueue) do
 		if death.type == "player" and death.target == player then
 			return
 		end
 	end
-
-	table.insert(deathQueue, {
-		type = "player",
-		target = player,
-		timestamp = tick()
-	})
+	
+	-- Check for revive gamepass BEFORE queuing death
+	local hasRevive = player:GetAttribute("HasRevive")
+	local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
+	
+	print("🔍 Pre-death check - Player:", player.Name, "HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
+	
+	if hasRevive and revivesAvailable > 0 then
+		print("✅ Player has revive! Pausing death and sending prompt...")
+		
+		-- Create revive prompt
+		local reviveRemote = remotes:FindFirstChild("PromptRevive")
+		if not reviveRemote then
+			print("❌ PromptRevive remote not found! This shouldn't happen")
+			-- Queue death if remote is missing
+			table.insert(deathQueue, {
+				type = "player",
+				target = player,
+				timestamp = tick()
+			})
+			return
+		end
+		
+		-- Make player temporarily invincible while deciding
+		invinciblePlayers[player] = os.clock() + 6  -- 5 seconds to decide + 1 buffer
+		
+		-- Fire revive prompt to client
+		reviveRemote:FireClient(player)
+		print("🚀 Revive prompt sent to", player.Name)
+		
+		-- Handle response
+		task.spawn(function()
+			local revived = false
+			local responseReceived = false
+			
+			local reviveConnection
+			reviveConnection = reviveRemote.OnServerEvent:Connect(function(plr, response)
+				if plr == player then
+					responseReceived = true
+					if response == "revive" then
+						revived = true
+						print("✅ Player chose to revive!")
+					else
+						print("❌ Player declined revive")
+					end
+					reviveConnection:Disconnect()
+				end
+			end)
+			
+			-- Wait for response (5 seconds max)
+			local waitTime = 0
+			while waitTime < 5 and not responseReceived do
+				task.wait(0.1)
+				waitTime = waitTime + 0.1
+			end
+			
+			if reviveConnection then
+				reviveConnection:Disconnect()
+			end
+			
+			-- Clear temporary invincibility
+			clearPlayerInvincibility(player)
+			
+			if revived then
+				print("🎉 REVIVING", player.Name)
+				-- Revive the player
+				player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+				
+				-- Make player invincible for 3 seconds after revive
+				invinciblePlayers[player] = os.clock() + 3
+				
+				-- Add revive effect
+				local character = player.Character
+				if character then
+					local rootPart = character:FindFirstChild("HumanoidRootPart")
+					if rootPart then
+						local reviveEffect = Instance.new("PointLight")
+						reviveEffect.Brightness = 3
+						reviveEffect.Color = Color3.fromRGB(255, 255, 0)
+						reviveEffect.Range = 20
+						reviveEffect.Parent = rootPart
+						
+						-- Add particles
+						local attachment = Instance.new("Attachment")
+						attachment.Parent = rootPart
+						
+						local particles = Instance.new("ParticleEmitter")
+						particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+						particles.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
+						particles.LightEmission = 1
+						particles.Rate = 100
+						particles.Lifetime = NumberRange.new(1)
+						particles.Speed = NumberRange.new(10)
+						particles.SpreadAngle = Vector2.new(360, 360)
+						particles.Parent = attachment
+						
+						task.wait(3)
+						if reviveEffect then reviveEffect:Destroy() end
+						if attachment then attachment:Destroy() end
+					end
+				end
+			else
+				-- Player didn't revive, queue death
+				print("💀 No revive, queuing death for", player.Name)
+				table.insert(deathQueue, {
+					type = "player",
+					target = player,
+					timestamp = tick()
+				})
+			end
+		end)
+	else
+		-- No revive available, queue death immediately
+		print("💀 No revive gamepass/uses, queuing death for", player.Name)
+		table.insert(deathQueue, {
+			type = "player",
+			target = player,
+			timestamp = tick()
+		})
+	end
 end
 
 local function queueAIDeath(head)
@@ -876,17 +989,22 @@ task.spawn(function()
 						local hasRevive = player:GetAttribute("HasRevive")
 						local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
 						
+						print("🔍 Death check - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
+						
 						if hasRevive and revivesAvailable > 0 then
+							print("✅ Player has revive! Sending prompt to", player.Name)
+							
 							-- Create revive prompt
-							local reviveRemote = remotes:FindFirstChild("PromptRevive")
+							local reviveRemote = ReplicatedStorage:FindFirstChild("PromptRevive")
 							if not reviveRemote then
 								reviveRemote = Instance.new("RemoteEvent")
 								reviveRemote.Name = "PromptRevive"
-								reviveRemote.Parent = remotes
+								reviveRemote.Parent = ReplicatedStorage
 							end
 							
 							-- Fire revive prompt to client
 							reviveRemote:FireClient(player)
+							print("🚀 Revive prompt sent to client!")
 							
 							-- Wait for response (5 seconds max)
 							local revived = false
@@ -895,6 +1013,10 @@ task.spawn(function()
 								if plr == player and response == "revive" then
 									revived = true
 									reviveConnection:Disconnect()
+									print("✅ Player chose to revive!")
+								elseif plr == player and response == "decline" then
+									reviveConnection:Disconnect()
+									print("❌ Player declined revive")
 								end
 							end)
 							
