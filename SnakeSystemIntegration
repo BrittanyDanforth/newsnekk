@@ -154,6 +154,11 @@ local function onCharacterAdded(character)
 
 	-- 🎯 INSTANT REVIVE TELEPORT FIX - Eliminates spawn-then-teleport visual
 	if player:GetAttribute("RevivingNow") then
+		-- Debug: Check what revive attributes are set
+		print("🔍 Revive Debug - RevivingNow:", player:GetAttribute("RevivingNow"))
+		print("🔍 Revive Debug - ReviveSnakeLength:", player:GetAttribute("ReviveSnakeLength"))
+		print("🔍 Revive Debug - RevivePosition:", player:GetAttribute("RevivePosition"))
+		
 		local revivePos = player:GetAttribute("RevivePosition")
 		if revivePos then
 			-- Parse the position string (tostring() format: "X, Y, Z")
@@ -222,16 +227,34 @@ local function onCharacterAdded(character)
 	local humanoid = character:WaitForChild("Humanoid")
 	local rootPart = character:WaitForChild("HumanoidRootPart")
 
+	-- Check if player is reviving and has a stored snake length BEFORE any delays
+	local reviveSnakeLength = player:GetAttribute("ReviveSnakeLength")
+	local isReviving = player:GetAttribute("RevivingNow") or player:GetAttribute("JustRevived")
+	
+	if reviveSnakeLength and reviveSnakeLength > 0 then
+		print("🔄 Found revive snake length:", reviveSnakeLength, "for", player.Name)
+	elseif isReviving then
+		-- Fallback: try to get from leaderstats if attribute is missing
+		warn("⚠️ ReviveSnakeLength attribute missing during revive! Checking leaderstats...")
+		local leaderstats = player:FindFirstChild("leaderstats")
+		if leaderstats then
+			local lengthValue = leaderstats:FindFirstChild("Length")
+			if lengthValue and lengthValue.Value > 55 then
+				reviveSnakeLength = lengthValue.Value
+				print("🔄 Using leaderstats length as fallback:", reviveSnakeLength)
+			end
+		end
+	end
+
 	wait(0.5) -- Small delay for stability
 
 	-- Get configuration
 	local config = getSkinConfig(player)
 
-	-- Check if player is reviving and has a stored snake length
-	local reviveSnakeLength = player:GetAttribute("ReviveSnakeLength")
+	-- Apply revive snake length if available
 	if reviveSnakeLength and reviveSnakeLength > 0 then
 		config.InitialLength = reviveSnakeLength
-		print("🔄 Using revive snake length:", reviveSnakeLength)
+		print("✅ Applying revive snake length:", reviveSnakeLength)
 		-- Clear the attribute after using it
 		player:SetAttribute("ReviveSnakeLength", nil)
 	end
