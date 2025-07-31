@@ -10,18 +10,27 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 -- Load the optimized system FIRST to create networking folder
--- Try V4 first, then V3, then V2, then V1
+-- Try V9 first, then V4, then V3, then V2, then V1
 local OptimizedSnakeSystem
 
--- Try V4 (Performance focused)
-local v4Success, v4Result = pcall(function()
-	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV4", 2))
+-- Try V9 (Ultimate version)
+local v9Success, v9Result = pcall(function()
+	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV9", 2))
 end)
 
-if v4Success and v4Result then
-	OptimizedSnakeSystem = v4Result
-	print("✅ Loaded OptimizedSnakeSystemV4 - PERFORMANCE!")
+if v9Success and v9Result then
+	OptimizedSnakeSystem = v9Result
+	print("✅ Loaded OptimizedSnakeSystemV9 - ULTIMATE!")
 else
+	-- Try V4 (Performance focused)
+	local v4Success, v4Result = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV4", 2))
+	end)
+
+	if v4Success and v4Result then
+		OptimizedSnakeSystem = v4Result
+		print("✅ Loaded OptimizedSnakeSystemV4 - PERFORMANCE!")
+	else
 	-- Try V3
 	local v3Success, v3Result = pcall(function()
 		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV3", 2))
@@ -52,6 +61,7 @@ else
 				error("❌ Failed to load any OptimizedSnakeSystem module!")
 			end
 		end
+	end
 	end
 end
 
@@ -142,6 +152,66 @@ local function onCharacterAdded(character)
 		end
 	end
 
+	-- 🎯 INSTANT REVIVE TELEPORT FIX - Eliminates spawn-then-teleport visual
+	if player:GetAttribute("RevivingNow") then
+		local revivePos = player:GetAttribute("RevivePosition")
+		if revivePos then
+			-- Parse the position string (tostring() format: "X, Y, Z")
+			local x, y, z = revivePos:match("([%d.-]+),%s*([%d.-]+),%s*([%d.-]+)")
+			if x and y and z then
+				local deathPos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
+				
+				-- INSTANT teleport - don't wait for HumanoidRootPart
+				-- Set position immediately on spawn
+				local rootPart = character:FindFirstChild("HumanoidRootPart")
+				if rootPart then
+					-- IMMEDIATE teleport before any frame renders
+					rootPart.CFrame = CFrame.new(deathPos)
+					rootPart.Position = deathPos
+					character:SetPrimaryPartCFrame(CFrame.new(deathPos))
+					
+					-- Force physics update to prevent any drift
+					rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+					rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+					rootPart.Velocity = Vector3.new(0, 0, 0)
+					
+					-- Double-ensure position with multiple methods
+					task.defer(function()
+						if rootPart and rootPart.Parent then
+							rootPart.CFrame = CFrame.new(deathPos)
+							rootPart.Position = deathPos
+						end
+					end)
+					
+					-- Triple-ensure after a tiny delay for network sync
+					task.spawn(function()
+						task.wait(0.03)
+						if rootPart and rootPart.Parent then
+							rootPart.CFrame = CFrame.new(deathPos)
+						end
+					end)
+					
+					print("⚡ Instant revive teleport to:", deathPos)
+				else
+					-- If no rootPart yet, wait for it and teleport ASAP
+					task.spawn(function()
+						local root = character:WaitForChild("HumanoidRootPart", 2)
+						if root then
+							root.CFrame = CFrame.new(deathPos)
+							root.Position = deathPos
+							character:SetPrimaryPartCFrame(CFrame.new(deathPos))
+							root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+							root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+							print("⚡ Delayed instant revive teleport to:", deathPos)
+						end
+					end)
+				end
+			else
+				warn("❌ Failed to parse RevivePosition:", revivePos)
+			end
+		end
+	end
+
 	-- Clean up old snake
 	if activeSnakes[player] then
 		activeSnakes[player]:destroy()
@@ -156,6 +226,15 @@ local function onCharacterAdded(character)
 
 	-- Get configuration
 	local config = getSkinConfig(player)
+
+	-- Check if player is reviving and has a stored snake length
+	local reviveSnakeLength = player:GetAttribute("ReviveSnakeLength")
+	if reviveSnakeLength and reviveSnakeLength > 0 then
+		config.InitialLength = reviveSnakeLength
+		print("🔄 Using revive snake length:", reviveSnakeLength)
+		-- Clear the attribute after using it
+		player:SetAttribute("ReviveSnakeLength", nil)
+	end
 
 	print("Creating snake with config - InitialLength:", config.InitialLength, "MaxSegments:", config.MaxSegments)
 
@@ -241,16 +320,16 @@ local function onCharacterAdded(character)
 		end)
 	end
 
-	-- Update loop
-	local updateConnection
-	updateConnection = RunService.Heartbeat:Connect(function(dt)
-		if not character.Parent or humanoid.Health <= 0 then
-			updateConnection:Disconnect()
-			return
-		end
+	-- Note: OptimizedSnakeSystemV9 handles its own update loop internally via RunService.Heartbeat
+	-- We don't need to create an update loop here
 
-		if snake and activeSnakes[player] == snake then
-			snake:update(dt)
+	-- Clean up any connections when character is removed
+	character.AncestryChanged:Connect(function()
+		if not character.Parent then
+			-- Clean up the snake
+			if activeSnakes[player] == snake then
+				activeSnakes[player] = nil
+			end
 		end
 	end)
 
@@ -270,7 +349,6 @@ local function onCharacterAdded(character)
 	end)
 
 	-- Store connections on snake object for cleanup
-	snake.updateConnection = updateConnection
 	snake.skinConnection = skinConnection
 
 	-- Handle death
@@ -278,9 +356,6 @@ local function onCharacterAdded(character)
 	deathConnection = humanoid.Died:Connect(function()
 		if activeSnakes[player] then
 			-- Disconnect all connections immediately
-			if updateConnection then
-				updateConnection:Disconnect()
-			end
 			if skinConnection then
 				skinConnection:Disconnect()
 			end
@@ -293,20 +368,9 @@ local function onCharacterAdded(character)
 				snake._connections.boost:Disconnect()
 			end
 
-			-- Get snake's current position and length for death orbs
-			local deathPos = rootPart.Position
-			local snakeLength = lengthValue and lengthValue.Value or 55
-
-			print("Snake died - spawning", math.floor(snakeLength / 10), "death orbs at", deathPos)
-
-			-- Spawn death orbs using global OrbSpawner
-			if _G.OrbSpawner and _G.OrbSpawner.spawnDeathOrbsForSnake then
-				-- Spawn orbs based on snake length (cap at reasonable amount)
-				local orbCount = math.min(math.floor(snakeLength / 10), 100)
-				_G.OrbSpawner.spawnDeathOrbsForSnake(deathPos, orbCount)
-			else
-				warn("OrbSpawner not loaded yet or missing spawnDeathOrbsForSnake function")
-			end
+			-- NO DEATH ORB SPAWNING HERE - SnakeCollisionHandler handles this!
+			-- The collision handler already spawns death orbs properly distributed along the snake
+			-- Removing duplicate spawning that was causing both red and rainbow orbs to appear
 
 			-- Clean up snake
 			activeSnakes[player]:destroy()

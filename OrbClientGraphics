@@ -5,7 +5,7 @@ Features:
 - Fixed initial load graphics mode application
 - Smooth transitions between graphics modes
 - Performance optimizations with caching
-- Error handling for stability
+- Error handling for stabilit
 - Distance-based snake glow fading
 This goes in StarterPlayerScripts as a LocalScript
 --]]

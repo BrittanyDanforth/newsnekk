@@ -145,7 +145,7 @@ function OrbUtils.attachOrbTouched(orb)
 				local valObj = orb:FindFirstChild("Value")
 				local orbValue = (valObj and valObj.Value) or 5  -- Updated to 5
 				print("Orb touched - Value:", orbValue, "Player:", player.Name)
-				
+
 				if player and _G.PlayerSnakes and _G.PlayerSnakes[player] then
 					local snake = _G.PlayerSnakes[player]
 					print("Found snake in _G.PlayerSnakes, type:", typeof(snake))

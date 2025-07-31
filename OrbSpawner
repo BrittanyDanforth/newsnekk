@@ -166,8 +166,28 @@ end
 local function getPlayerHeads()
 	local heads = {}
 	for _, p in Players:GetPlayers() do
+		-- First check for HumanoidRootPart
 		local root = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-		if root then table.insert(heads, {player = p, part = root}) end
+		if root then 
+			table.insert(heads, {player = p, part = root}) 
+		end
+
+		-- Also check for SnakeHead parts
+		if p.Character then
+			-- Look for SnakeHead in character
+			local snakeHead = p.Character:FindFirstChild("SnakeHead")
+			if snakeHead then
+				table.insert(heads, {player = p, part = snakeHead})
+			end
+
+			-- Also check descendants for SnakeHead
+			for _, desc in pairs(p.Character:GetDescendants()) do
+				if desc:IsA("BasePart") and desc.Name == "SnakeHead" then
+					table.insert(heads, {player = p, part = desc})
+					break -- Only need one head per player
+				end
+			end
+		end
 	end
 	return heads
 end
@@ -256,7 +276,7 @@ local function applyOrbLOD(orb, state, fadeValue)
 	else
 		targetSize = Vector3.new(1,1,1) * (MIN_ORB_SIZE + (MAX_ORB_SIZE - MIN_ORB_SIZE) * fadeValue)
 	end
-	
+
 	-- Special transparency for upgrade orbs
 	local targetTransparency
 	if orb.Name == "UpgradeOrb" then
@@ -331,16 +351,38 @@ end
 
 local function growPlayerSnake(player, value)
 	if not player or not player.Character then return end
-	
+
 	-- Defer the growth to prevent blocking
 	task.defer(function()
 		local snakeInst = _G.PlayerSnakes and _G.PlayerSnakes[player]
 		if not snakeInst and player.Character:FindFirstChild("__SnakeInstance") then
 			snakeInst = player.Character.__SnakeInstance.Value
 		end
-		
+
 		if snakeInst and snakeInst.grow then 
-			snakeInst:grow(value or 10)
+			-- Apply growth multipliers from gamepasses
+			local baseValue = value or 10
+			local growthMultiplier = player:GetAttribute("GrowthMultiplier") or 1
+			local tempGrowthMultiplier = player:GetAttribute("TempGrowthMultiplier") or 1
+			local finalValue = math.floor(baseValue * growthMultiplier * tempGrowthMultiplier)
+
+			snakeInst:grow(finalValue)
+
+			-- Award coins based on growth with multiplier
+			local coinMultiplier = player:GetAttribute("CoinMultiplier") or 1
+			local coinsToAward = math.floor(finalValue * 0.5 * coinMultiplier) -- 0.5 coins per growth point
+
+			-- Give coins through leaderstats
+			if player:FindFirstChild("leaderstats") then
+				local coinsValue = player.leaderstats:FindFirstChild("Coins")
+				if not coinsValue then
+					coinsValue = Instance.new("IntValue")
+					coinsValue.Name = "Coins"
+					coinsValue.Value = 0
+					coinsValue.Parent = player.leaderstats
+				end
+				coinsValue.Value = coinsValue.Value + coinsToAward
+			end
 		end
 	end)
 end
@@ -410,13 +452,13 @@ local function createSafeOrb(position, value, name, color, material)
 	orb.TopSurface = Enum.SurfaceType.Smooth
 	orb.BottomSurface = Enum.SurfaceType.Smooth
 	orb.Transparency = 1  -- Start invisible
-	
+
 	-- Special properties for upgrade orbs
 	if name == "UpgradeOrb" then
 		orb.Size = Vector3.new(5, 5, 5)  -- Bigger than normal orbs
 		orb.Transparency = 0.3  -- Semi-transparent
 	end
-	
+
 	orb.Parent = workspace
 
 	local val = Instance.new("NumberValue")
@@ -514,7 +556,7 @@ local function removeOrb(orb)
 		orbTweens[orb]:Cancel()
 		orbTweens[orb] = nil
 	end
-	
+
 	-- Try to return orb to pool instead of destroying
 	if pooledOrbCount < ORB_POOL_SIZE then
 		-- Reset orb properties for pooling
@@ -606,14 +648,14 @@ local function atomicCollectOrb(orb, collType, collObj)
 	local orbName = orb.Name
 	local valObj = orb:FindFirstChild("Value")
 	local orbValue = (valObj and valObj.Value) or 10
-	
+
 	-- Remove orb immediately to prevent multiple collections
 	orb.Parent = nil
-	
+
 	-- Defer VFX and processing to prevent frame lag
 	task.defer(function()
 		createOrbCollectVFX(orbPos, orbColor)
-		
+
 		if collType == "player" then
 			local p = collObj
 			-- Fire remote event if exists
@@ -622,7 +664,7 @@ local function atomicCollectOrb(orb, collType, collObj)
 					OrbCollectedEvent:FireClient(p, orbPos, orbName)
 				end)
 			end
-			
+
 			if orbName == "UpgradeOrb" then
 				giveUpgradeToPlayerSnake(p)
 			else
@@ -636,7 +678,7 @@ local function atomicCollectOrb(orb, collType, collObj)
 				growAISnake(head, orbValue)
 			end
 		end
-		
+
 		-- Clean up orb tracking
 		removeOrb(orb)
 		if orb and orb.Parent then 
@@ -658,12 +700,12 @@ attachOrbTouched = function(orb)
 		if player then
 			-- COMPLETELY PREVENT eating your own wall collision orbs
 			local spawnedByUserId = orb:GetAttribute("SpawnedByUserId")
-			
+
 			if spawnedByUserId and spawnedByUserId == player.UserId then
 				-- NEVER allow eating your own wall orbs - they're a penalty!
 				return -- Don't collect
 			end
-			
+
 			atomicCollectOrb(orb, "player", player)
 			return
 		end
@@ -720,50 +762,54 @@ task.spawn(function()
 
 		-- OPTIMIZATION: Use spatial grid for efficient proximity checks
 		for _, ph in ipairs(players) do
-			if ph and ph.Parent then
-				local p = getPlayerFromTouchedPart(ph)
+			if ph and ph.part and ph.part.Parent then
+				local p = ph.player
 				if p then
 					-- Get magnet attributes
 					local magnetRange = p:GetAttribute("MagnetRange") or 1
 					local tempMagnetRange = p:GetAttribute("TempMagnetRange") or 1
 					local totalMagnetPower = magnetRange * tempMagnetRange
-					
+
 					-- Extended search range for magnetic attraction
-					local searchRange = 12 * totalMagnetPower
-					local nearbyOrbs = getOrbsNearPosition(ph.Position, searchRange)
-					
+					local searchRange = 20 * totalMagnetPower  -- Increased from 12 to 20 for longer range
+					local nearbyOrbs = getOrbsNearPosition(ph.part.Position, searchRange)
+
 					for _, orb in ipairs(nearbyOrbs) do
 						if orb and orb.Parent and not orbDebounce[orb] then
 							local orbState = orbStates[orb]
 							if orbState and orbState.state ~= "hidden" then
-								local dist = (orb.Position - ph.Position).Magnitude
-								
+								local dist = (orb.Position - ph.part.Position).Magnitude
+
 								-- Collection range
 								local baseRange = orb.Size.X * 0.8 + 3
 								local finalRange = baseRange * totalMagnetPower
-								
+
 								if dist < finalRange then
 									-- COMPLETELY PREVENT eating your own wall collision orbs
 									local spawnedByUserId = orb:GetAttribute("SpawnedByUserId")
-									
+
 									if spawnedByUserId and spawnedByUserId == p.UserId then
 										-- NEVER allow eating your own wall orbs
 										continue -- Skip this orb
 									end
-									
+
 									-- Collect the orb
 									atomicCollectOrb(orb, "player", p)
 								elseif totalMagnetPower > 1 and dist < searchRange then
-									-- Magnetic attraction effect
-									local attractionStrength = (totalMagnetPower - 1) * 0.3
-									local direction = (ph.Position - orb.Position).Unit
-									local pullForce = direction * attractionStrength * (1 - dist / searchRange)
-									
-									-- Smoothly move orb towards player
+									-- SUPER STRONG magnetic attraction effect
+									local attractionStrength = (totalMagnetPower - 1) * 0.8  -- Increased from 0.3 to 0.8
+									local direction = (ph.part.Position - orb.Position).Unit
+									local pullForce = direction * attractionStrength * (1 - dist / searchRange) * 2  -- Added *2 multiplier
+
+									-- Smoothly move orb towards player MUCH FASTER
 									orb.CFrame = orb.CFrame + pullForce
-									
-									-- Add a subtle spin effect
-									orb.CFrame = orb.CFrame * CFrame.Angles(0, math.rad(5), 0)
+
+									-- Add a faster spin effect
+									orb.CFrame = orb.CFrame * CFrame.Angles(0, math.rad(15), 0)  -- Increased from 5 to 15
+
+									-- Add vertical bobbing for visual effect
+									local bobAmount = math.sin(tick() * 10) * 0.1
+									orb.CFrame = orb.CFrame + Vector3.new(0, bobAmount, 0)
 								end
 							end
 						end
@@ -804,54 +850,92 @@ local function updateMagnetEffect(player)
 		end
 		return
 	end
-	
+
 	local magnetRange = player:GetAttribute("MagnetRange") or 1
 	local tempMagnetRange = player:GetAttribute("TempMagnetRange") or 1
 	local totalRange = magnetRange * tempMagnetRange
-	
+
 	if totalRange > 1 then
 		-- Create or update magnet effect
 		if not magnetEffects[player] then
-			-- Create main effect
+			-- Create main effect - a rotating ring
 			local effect = Instance.new("Part")
 			effect.Name = "MagnetEffect"
 			effect.Shape = Enum.PartType.Cylinder
 			effect.Material = Enum.Material.ForceField
 			effect.Color = Color3.fromRGB(147, 51, 234)  -- Purple like the gamepass
-			effect.Transparency = 0.8
+			effect.Transparency = 0.7
 			effect.CanCollide = false
 			effect.CanQuery = false
 			effect.CanTouch = false
 			effect.Anchored = true
 			effect.Parent = workspace
-			
+
+			-- Add inner glow
+			local innerGlow = Instance.new("PointLight")
+			innerGlow.Brightness = 2
+			innerGlow.Color = Color3.fromRGB(147, 51, 234)
+			innerGlow.Range = 20
+			innerGlow.Parent = effect
+
 			-- Add particle effect for extra visual appeal
 			local attachment = Instance.new("Attachment")
 			attachment.Parent = effect
-			
+
 			local particles = Instance.new("ParticleEmitter")
 			particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-			particles.Color = ColorSequence.new(Color3.fromRGB(147, 51, 234))
+			particles.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(147, 51, 234)),
+				ColorSequenceKeypoint.new(0.5, Color3.fromRGB(200, 100, 255)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 100, 255))
+			})
 			particles.LightEmission = 1
-			particles.Rate = 20
+			particles.LightInfluence = 0
+			particles.Rate = 50 * totalRange  -- More particles for stronger magnet
 			particles.Lifetime = NumberRange.new(1, 2)
-			particles.Speed = NumberRange.new(2)
-			particles.SpreadAngle = Vector2.new(180, 180)
+			particles.Speed = NumberRange.new(5)
+			particles.SpreadAngle = Vector2.new(360, 360)
 			particles.VelocityInheritance = 0
 			particles.EmissionDirection = Enum.NormalId.Top
+			particles.Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.5),
+				NumberSequenceKeypoint.new(0.5, 0.3),
+				NumberSequenceKeypoint.new(1, 1)
+			})
+			particles.Size = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.5),
+				NumberSequenceKeypoint.new(0.5, 1),
+				NumberSequenceKeypoint.new(1, 0)
+			})
+			particles.Rotation = NumberRange.new(0, 360)
+			particles.RotSpeed = NumberRange.new(100)
 			particles.Parent = attachment
-			
+
 			magnetEffects[player] = effect
 		end
-		
+
 		local effect = magnetEffects[player]
 		local hrp = player.Character.HumanoidRootPart
-		local baseRange = 3.2 + 3  -- orb.Size.X * 0.8 + 3 (average orb size)
-		local visualRange = baseRange * totalRange * 2  -- Diameter
-		
-		effect.Size = Vector3.new(0.5, visualRange, visualRange)
-		effect.CFrame = hrp.CFrame * CFrame.Angles(0, 0, math.rad(90))
-		effect.Position = Vector3.new(effect.Position.X, 0.5, effect.Position.Z)
+
+		-- Show actual magnet range
+		local searchRange = 20 * totalRange  -- Match the actual search range
+
+		-- Make it a flat horizontal ring on the ground
+		effect.Size = Vector3.new(searchRange * 2, 0.2, searchRange * 2)  -- Very thin, wide circle
+		effect.CFrame = CFrame.new(hrp.Position.X, 1, hrp.Position.Z) -- Position at ground level
+
+		-- Rotate horizontally and spin
+		effect.CFrame = effect.CFrame * CFrame.Angles(0, math.rad(tick() * 50), 0)
+
+		-- Pulse effect
+		local pulse = math.sin(tick() * 3) * 0.1 + 0.8
+		effect.Transparency = pulse
+
+		-- Update particle rate based on power
+		local particles = effect:FindFirstChildOfClass("Attachment"):FindFirstChildOfClass("ParticleEmitter")
+		if particles then
+			particles.Rate = 50 * totalRange
+		end
 	else
 		-- Remove effect if no magnet
 		if magnetEffects[player] then
@@ -906,7 +990,7 @@ end
 
 local function createOrb()
 	local orb
-	
+
 	-- Check if we should spawn an upgrade orb
 	if math.random() < UPGRADE_ORB_CHANCE then
 		-- Try to get orb from pool first
@@ -942,13 +1026,13 @@ local function createOrb()
 			orb.Parent = workspace
 			local val = orb:FindFirstChild("Value")
 			if val then val.Value = 5 end  -- Increased for faster growth
-			
+
 			-- Add to OrbUtils tracking
 			-- OrbUtils.registerOrb(orb) -- Function doesn't exist
 		else
 			orb = OrbUtils.spawnOrbAt(randomPosition(), 1)
 		end
-		
+
 		if orb then
 			-- CRITICAL FIX: Add regular orbs to the orbs array!
 			orbs[#orbs + 1] = orb
@@ -995,20 +1079,20 @@ local function populateOrbPool()
 		orb.TopSurface = Enum.SurfaceType.Smooth
 		orb.BottomSurface = Enum.SurfaceType.Smooth
 		orb.Transparency = 1
-		
+
 		local val = Instance.new("NumberValue")
 		val.Name = "Value"
 		val.Value = 1
 		val.Parent = orb
-		
+
 		local light = Instance.new("PointLight")
 		light.Parent = orb
 		light.Enabled = false
 		light.Shadows = false
-		
+
 		table.insert(orbPool, orb)
 		pooledOrbCount = pooledOrbCount + 1
-		
+
 		-- Yield every 10 orbs to prevent lag spike
 		if i % 10 == 0 then
 			task.wait()
@@ -1028,7 +1112,7 @@ task.spawn(function()
 	while pooledOrbCount < ORB_POOL_SIZE / 2 do
 		task.wait(0.1)
 	end
-	
+
 	-- Spawn initial orbs in batches
 	local batchSize = 50
 	while #orbs < ORB_MAX do
