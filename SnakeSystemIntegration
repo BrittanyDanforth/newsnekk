@@ -156,6 +156,15 @@ local function onCharacterAdded(character)
 
 	-- Get configuration
 	local config = getSkinConfig(player)
+	
+	-- Check if player is reviving and has a stored snake length
+	local reviveSnakeLength = player:GetAttribute("ReviveSnakeLength")
+	if reviveSnakeLength and reviveSnakeLength > 0 then
+		config.InitialLength = reviveSnakeLength
+		print("🔄 Using revive snake length:", reviveSnakeLength)
+		-- Clear the attribute after using it
+		player:SetAttribute("ReviveSnakeLength", nil)
+	end
 
 	print("Creating snake with config - InitialLength:", config.InitialLength, "MaxSegments:", config.MaxSegments)
 

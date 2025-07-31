@@ -92,6 +92,11 @@ local function isPlayerInvincible(player)
 		return true
 	end
 	
+	-- Check spawn protection (for initial spawn and revive)
+	if player:GetAttribute("SpawnProtection") then
+		return true
+	end
+	
 	return false
 end
 
@@ -952,6 +957,11 @@ task.spawn(function()
 									
 									-- Store current position and snake length before respawn
 									local deathPosition = rootPart and rootPart.Position or Vector3.new(0, 10, 0)
+									-- Ensure position is above ground (Y >= 5)
+									if deathPosition.Y < 5 then
+										deathPosition = Vector3.new(deathPosition.X, 5, deathPosition.Z)
+									end
+									
 									local currentSnakeLength = player:GetAttribute("SnakeLength") or 500
 									local leaderstats = player:FindFirstChild("leaderstats")
 									if leaderstats then
@@ -998,60 +1008,10 @@ task.spawn(function()
 										local newRootPart = newCharacter:WaitForChild("HumanoidRootPart", 5)
 										
 										if newRootPart then
-											-- Teleport to death position
-											task.wait(0.1)
-											newRootPart.CFrame = CFrame.new(deathPosition)
+											-- Wait for GamepassHandler to handle position and length restoration
+											task.wait(0.5)
 											
-											-- Restore snake length
-											local newLeaderstats = player:FindFirstChild("leaderstats")
-											if newLeaderstats then
-												local lengthValue = newLeaderstats:FindFirstChild("Length")
-												if lengthValue then
-													lengthValue.Value = currentSnakeLength
-													print("✅ Restored snake length to", currentSnakeLength)
-												end
-											end
-											
-											-- Add visual effects
-											local reviveEffect = Instance.new("PointLight")
-											reviveEffect.Name = "ReviveEffect"
-											reviveEffect.Brightness = 3
-											reviveEffect.Color = Color3.fromRGB(255, 215, 0)
-											reviveEffect.Range = 20
-											reviveEffect.Parent = newRootPart
-											
-											-- Add golden particles
-											local attachment = Instance.new("Attachment")
-											attachment.Parent = newRootPart
-											
-											local particles = Instance.new("ParticleEmitter")
-											particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-											particles.Color = ColorSequence.new(Color3.fromRGB(255, 215, 0))
-											particles.LightEmission = 1
-											particles.Rate = 100
-											particles.Lifetime = NumberRange.new(1, 2)
-											particles.Speed = NumberRange.new(10)
-											particles.SpreadAngle = Vector2.new(360, 360)
-											particles.Parent = attachment
-											
-											-- Add invincibility visual
-											local forceField = Instance.new("ForceField")
-											forceField.Visible = true
-											forceField.Parent = newCharacter
-											
-											-- Remove effects after 5 seconds
-											task.wait(5)
-											player:SetAttribute("ReviveInvincible", false)
-											invinciblePlayers[player] = nil
-											if reviveEffect and reviveEffect.Parent then
-												reviveEffect:Destroy()
-											end
-											if attachment and attachment.Parent then
-												attachment:Destroy()
-											end
-											if forceField and forceField.Parent then
-												forceField:Destroy()
-											end
+											print("✅ Revive complete for", player.Name)
 										end
 									end)
 									
