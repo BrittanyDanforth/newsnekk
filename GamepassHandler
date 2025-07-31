@@ -23,15 +23,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- GAMEPASS IDs (Replace with your actual IDs)
 local GAMEPASS_IDS = {
-	["Lifeline Boost"] = 123456789,
-	["Mega Speed"] = 123456790,
-	["2x Growth"] = 123456791,
-	["2x Coins"] = 123456792,
-	["Magnet"] = 1335069823,  -- Real gamepass ID
-	["Ghost Mode"] = 123456794,
-	["VIP Access"] = 123456795,
-	["Pet Ally"] = 123456796,
-	["Revive"] = 123456797
+	["Lifeline Boost"] = 123456789, -- TODO: Replace with real ID
+	["Mega Speed"] = 123456790, -- TODO: Replace with real ID
+	["2x Growth"] = 123456791, -- TODO: Replace with real ID
+	["2x Coins"] = 123456792, -- TODO: Replace with real ID
+	["Magnet"] = 1335069823,  -- Real gamepass ID - WORKING!
+	["Ghost Mode"] = 123456794, -- TODO: Replace with real ID
+	["VIP Access"] = 123456795, -- TODO: Replace with real ID
+	["Pet Ally"] = 123456796, -- TODO: Replace with real ID (skipping for now)
+	["Revive"] = 123456797 -- TODO: Replace with real ID
 }
 
 -- Create RemoteEvents
@@ -248,38 +248,44 @@ Players.PlayerAdded:Connect(function(player)
 
 		-- Apply ghost mode if they have it
 		if player:GetAttribute("HasGhostMode") then
-			-- Make player semi-transparent and non-collidable for 5 seconds
-			local function applyGhostMode()
-				for _, part in pairs(character:GetDescendants()) do
-					if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-						part.Transparency = 0.5
-						part.CanCollide = false
-					end
-				end
-
-				-- Add ghost effect
-				local ghostEffect = Instance.new("PointLight")
-				ghostEffect.Brightness = 2
-				ghostEffect.Color = Color3.fromRGB(150, 150, 255)
-				ghostEffect.Range = 10
-				ghostEffect.Parent = character:FindFirstChild("HumanoidRootPart")
-
-				-- Remove after 5 seconds
+			-- Set a temporary ghost mode attribute for 5 seconds on spawn
+			player:SetAttribute("SpawnGhostMode", true)
+			
+			-- Add visual ghost effect to character
+			local ghostEffect = Instance.new("PointLight")
+			ghostEffect.Name = "GhostEffect"
+			ghostEffect.Brightness = 2
+			ghostEffect.Color = Color3.fromRGB(150, 150, 255)
+			ghostEffect.Range = 10
+			ghostEffect.Parent = character:FindFirstChild("HumanoidRootPart")
+			
+			-- Add particle effect for extra visibility
+			local attachment = Instance.new("Attachment")
+			attachment.Parent = character:FindFirstChild("HumanoidRootPart")
+			
+			local particles = Instance.new("ParticleEmitter")
+			particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+			particles.Color = ColorSequence.new(Color3.fromRGB(150, 150, 255))
+			particles.LightEmission = 1
+			particles.Rate = 30
+			particles.Lifetime = NumberRange.new(0.5, 1)
+			particles.Speed = NumberRange.new(3)
+			particles.SpreadAngle = Vector2.new(360, 360)
+			particles.Parent = attachment
+			
+			-- Remove after 5 seconds
+			task.spawn(function()
 				wait(5)
-
-				for _, part in pairs(character:GetDescendants()) do
-					if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-						part.Transparency = 0
-						part.CanCollide = true
-					end
-				end
-
-				if ghostEffect then
+				player:SetAttribute("SpawnGhostMode", false)
+				
+				if ghostEffect and ghostEffect.Parent then
 					ghostEffect:Destroy()
 				end
-			end
-
-			spawn(applyGhostMode)
+				
+				if attachment and attachment.Parent then
+					attachment:Destroy()
+				end
+			end)
 		end
 	end)
 end)

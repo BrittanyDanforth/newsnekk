@@ -68,8 +68,23 @@ local function setPlayerInvincible(player)
 end
 
 local function isPlayerInvincible(player)
+	-- Check spawn invincibility
 	local expire = invinciblePlayers[player]
-	return expire and os.clock() < expire
+	if expire and os.clock() < expire then
+		return true
+	end
+	
+	-- Check ghost mode gamepass on spawn
+	if player:GetAttribute("SpawnGhostMode") then
+		return true
+	end
+	
+	-- Check active ghost mode boost
+	if player:GetAttribute("ActiveGhostMode") then
+		return true
+	end
+	
+	return false
 end
 
 local function clearPlayerInvincibility(player)
@@ -854,6 +869,85 @@ task.spawn(function()
 								elseif part:IsA("Decal") or part:IsA("Texture") then
 									part.Transparency = 1
 								end
+							end
+						end
+						
+						-- Check for revive gamepass
+						local hasRevive = player:GetAttribute("HasRevive")
+						local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
+						
+						if hasRevive and revivesAvailable > 0 then
+							-- Create revive prompt
+							local reviveRemote = remotes:FindFirstChild("PromptRevive")
+							if not reviveRemote then
+								reviveRemote = Instance.new("RemoteEvent")
+								reviveRemote.Name = "PromptRevive"
+								reviveRemote.Parent = remotes
+							end
+							
+							-- Fire revive prompt to client
+							reviveRemote:FireClient(player)
+							
+							-- Wait for response (5 seconds max)
+							local revived = false
+							local reviveConnection
+							reviveConnection = reviveRemote.OnServerEvent:Connect(function(plr, response)
+								if plr == player and response == "revive" then
+									revived = true
+									reviveConnection:Disconnect()
+								end
+							end)
+							
+							task.wait(5) -- Give player 5 seconds to decide
+							if reviveConnection then
+								reviveConnection:Disconnect()
+							end
+							
+							if revived then
+								-- Revive the player
+								player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+								
+								-- Make player invincible for 3 seconds
+								invinciblePlayers[player] = os.clock() + 3
+								
+								-- Restore character
+								if rootPart then
+									rootPart.Anchored = false
+									rootPart.CanCollide = true
+									rootPart.CanTouch = true
+									rootPart.CanQuery = true
+									rootPart:SetAttribute("Dead", false)
+									rootPart.CFrame = rootPart.CFrame * CFrame.new(0, 10, 0) -- Move back up
+									
+									-- Restore visibility
+									for _, part in pairs(character:GetDescendants()) do
+										if part:IsA("BasePart") then
+											part.CanCollide = true
+											part.CanTouch = true
+											part.CanQuery = true
+											part.Transparency = 0
+										elseif part:IsA("Decal") or part:IsA("Texture") then
+											part.Transparency = 0
+										end
+									end
+								end
+								
+								-- Remove from dead players
+								deadPlayers[player] = nil
+								
+								-- Add revive effect
+								local reviveEffect = Instance.new("PointLight")
+								reviveEffect.Brightness = 3
+								reviveEffect.Color = Color3.fromRGB(255, 255, 0)
+								reviveEffect.Range = 20
+								reviveEffect.Parent = rootPart
+								
+								task.wait(3)
+								if reviveEffect then
+									reviveEffect:Destroy()
+								end
+								
+								return -- Don't proceed with death
 							end
 						end
 						

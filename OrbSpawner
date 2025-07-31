@@ -340,7 +340,29 @@ local function growPlayerSnake(player, value)
 		end
 		
 		if snakeInst and snakeInst.grow then 
-			snakeInst:grow(value or 10)
+			-- Apply growth multipliers from gamepasses
+			local baseValue = value or 10
+			local growthMultiplier = player:GetAttribute("GrowthMultiplier") or 1
+			local tempGrowthMultiplier = player:GetAttribute("TempGrowthMultiplier") or 1
+			local finalValue = math.floor(baseValue * growthMultiplier * tempGrowthMultiplier)
+			
+			snakeInst:grow(finalValue)
+			
+			-- Award coins based on growth with multiplier
+			local coinMultiplier = player:GetAttribute("CoinMultiplier") or 1
+			local coinsToAward = math.floor(finalValue * 0.5 * coinMultiplier) -- 0.5 coins per growth point
+			
+			-- Give coins through leaderstats
+			if player:FindFirstChild("leaderstats") then
+				local coinsValue = player.leaderstats:FindFirstChild("Coins")
+				if not coinsValue then
+					coinsValue = Instance.new("IntValue")
+					coinsValue.Name = "Coins"
+					coinsValue.Value = 0
+					coinsValue.Parent = player.leaderstats
+				end
+				coinsValue.Value = coinsValue.Value + coinsToAward
+			end
 		end
 	end)
 end
