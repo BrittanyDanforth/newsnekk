@@ -51,7 +51,7 @@ AISnake.__index = AISnake
 -- === OPTIMIZED SETTINGS ===
 local MAX_AI_SNAKES = 10  -- Reduced from 14 for better performance
 local SPATIAL_GRID_UPDATE_RATE = 1.0  -- Increased from 0.5 (update less often)
-local BRAIN_UPDATES_PER_FRAME = 1
+local BRAIN_UPDATES_PER_FRAME = 3  -- Update 3 snakes per frame to prevent freezing
 local DEBUG_UPDATE_RATE = 5.0  -- Increased from 2.0 (debug less often)
 local AI_HEIGHT = 5
 local SEGMENT_UPDATE_SKIP = 2  -- Update every other segment for performance
@@ -163,18 +163,18 @@ end
 
 local function returnSegment(segment)
 	if not segment then return end
-	
+
 	-- Clean up all children first
 	for _, child in ipairs(segment:GetChildren()) do
 		child:Destroy()
 	end
-	
+
 	-- If pool is full or segment is problematic, just destroy it
 	if PoolSize >= MAX_POOL_SIZE then
 		segment:Destroy()
 		return
 	end
-	
+
 	-- Reset segment properties
 	segment.Transparency = 1
 	segment.CanCollide = false
@@ -184,7 +184,7 @@ local function returnSegment(segment)
 	segment.Color = Color3.new()
 	segment.Material = Enum.Material.Neon
 	segment.Size = Vector3.new(3.5, 3.5, 4)
-	
+
 	-- Return to pool
 	segment.Parent = SEGMENT_PARENT
 	PoolSize = PoolSize + 1
@@ -301,7 +301,7 @@ local function createVisualHead(config, parentModel)
 	headPart.TopSurface = Enum.SurfaceType.Smooth
 	headPart.BottomSurface = Enum.SurfaceType.Smooth
 	headPart.Parent = parentModel
-	
+
 	-- MAKE AI SNAKE HEAD COMPLETELY INVISIBLE (like player snakes)
 	headPart.Transparency = 1
 
@@ -422,20 +422,20 @@ end
 local function createSegment(index, position, color, config, parentModel, currentLength)
 	local segment = getSegment(config)
 	segment.Name = "AISegment" .. index
-	
+
 	-- Apply growth factor based on current snake length (same as players)
 	local growthFactor = 1
 	if currentLength and currentLength > 200 then
 		growthFactor = 1 + ((currentLength - 200) / 2800) * 1.0  -- Match moderate growth
 	end
-	
+
 	segment.Size = config.SegmentSize * mathMin(growthFactor, 2.0)  -- Match new max
 	segment.Material = config.BodyMaterial or Enum.Material.Neon
 	segment.Color = color
 	segment.CFrame = CFramenew(position)
 	segment.Parent = parentModel
 	segment.Transparency = 0
-	
+
 	segment:SetAttribute("IsSnakeSegment", true)
 	segment:SetAttribute("SegmentIndex", index)
 	segment:SetAttribute("IsAISnake", true)
@@ -536,7 +536,7 @@ task.spawn(function()
 		if updateMapBounds() then
 			-- Check if bounds changed
 			if oldBounds.minX ~= MAP_BOUNDS.minX or oldBounds.maxX ~= MAP_BOUNDS.maxX or 
-			   oldBounds.minZ ~= MAP_BOUNDS.minZ or oldBounds.maxZ ~= MAP_BOUNDS.maxZ then
+				oldBounds.minZ ~= MAP_BOUNDS.minZ or oldBounds.maxZ ~= MAP_BOUNDS.maxZ then
 				warn("MAP BOUNDS CHANGED! Old:", oldBounds, "New:", MAP_BOUNDS)
 			end
 		end
@@ -546,11 +546,11 @@ end)
 local function getWallAvoidanceVector(headPos)
 	local avoidVec = Vector3new(0, 0, 0)
 	local avoidStrength = 0
-	
+
 	-- Check ground boundaries first (more reliable than walls)
 	local boundaryThreshold = 50
 	local strongThreshold = 25
-	
+
 	-- Check X boundaries
 	if headPos.X < MAP_BOUNDS.minX + boundaryThreshold then
 		local dist = MAP_BOUNDS.minX - headPos.X + boundaryThreshold
@@ -561,7 +561,7 @@ local function getWallAvoidanceVector(headPos)
 		avoidVec = avoidVec + Vector3new(-1, 0, 0) * (dist / boundaryThreshold)
 		avoidStrength = math.max(avoidStrength, dist < strongThreshold and 1 or 0.5)
 	end
-	
+
 	-- Check Z boundaries
 	if headPos.Z < MAP_BOUNDS.minZ + boundaryThreshold then
 		local dist = MAP_BOUNDS.minZ - headPos.Z + boundaryThreshold
@@ -572,7 +572,7 @@ local function getWallAvoidanceVector(headPos)
 		avoidVec = avoidVec + Vector3new(0, 0, -1) * (dist / boundaryThreshold)
 		avoidStrength = math.max(avoidStrength, dist < strongThreshold and 1 or 0.5)
 	end
-	
+
 	-- If we have boundary avoidance, use it
 	if avoidStrength > 0 then
 		return avoidVec.Unit * avoidStrength * 2, avoidStrength
@@ -615,92 +615,150 @@ end
 
 -- === ENHANCED AI PERSONALITIES - STABLE & DISTINCT ===
 AISnake.PersonalityTypes = {
-	"Aggressor", "Scavenger", "Guardian", "Opportunist", "Hunter", "Nomad", "Shadow", "Berserker"
+	"Collector", "Explorer", "Predator", "Opportunist", "Farmer", "Raider", "Guardian", "Nomad"
 }
 
 AISnake.PersonalityDefinitions = {
-	Aggressor = {
-		Type = "Aggressor",
-		TargetPlayers = true,
-		TargetOrbs = true,
-		AvoidOthers = false,
-		SpeedMultiplier = 1.15,
-		TurnBias = 0.03,
-		BoostChance = 0.06,
-		CombatRadius = 45,
-		RandomTurnInterval = 5.0,
-		OrbSeekRadius = 100,
-		Description = "Balanced aggressor - hunts when advantageous",
-		FleeThreshold = 20,  -- Length difference before fleeing
-		AggressionLevel = 0.7,
-		PatrolRadius = 200,
-	},
-	Scavenger = {
-		Type = "Scavenger",
+	-- COMPLETELY REVAMPED PERSONALITIES WITH NATURAL MOVEMENT
+	Collector = {
+		Type = "Collector",
 		TargetPlayers = false,
 		TargetOrbs = true,
 		AvoidOthers = true,
-		SpeedMultiplier = 1.1,
-		TurnBias = 0.05,
+		SpeedMultiplier = 1.05,
+		TurnBias = 0.015,  -- Very smooth turns
 		BoostChance = 0.04,
-		CombatRadius = 25,
-		RandomTurnInterval = 4.0,
-		OrbSeekRadius = 200,  -- Excellent orb vision
-		Description = "Peaceful orb collector - avoids all conflict",
-		FleeThreshold = 5,
+		CombatRadius = 20,
+		RandomTurnInterval = 8.0,  -- Long straight paths
+		OrbSeekRadius = 300,  -- Excellent orb vision
+		Description = "Efficient orb collector - avoids all fights",
+		FleeThreshold = 10,
 		AggressionLevel = 0.0,
-		PatrolRadius = 300,
+		PatrolRadius = 500,  -- Uses entire map
+		MovementPattern = "spiral",  -- New: Spiral outward pattern
+		PreferEdgeOrbs = true,  -- Collects orbs near edges
+		MinStraightDistance = 100,  -- Move at least 100 studs before turning
 	},
-	Guardian = {
-		Type = "Guardian",
+	Explorer = {
+		Type = "Explorer",
+		TargetPlayers = false,
+		TargetOrbs = true,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.15,
+		TurnBias = 0.02,
+		BoostChance = 0.05,
+		CombatRadius = 30,
+		RandomTurnInterval = 12.0,  -- Very long paths
+		OrbSeekRadius = 200,
+		Description = "Map explorer - covers maximum ground",
+		FleeThreshold = 15,
+		AggressionLevel = 0.1,
+		PatrolRadius = 600,  -- Full map coverage
+		MovementPattern = "zigzag",  -- Zigzag across map
+		ExplorationSectors = 8,  -- Divides map into sectors
+		CurrentSector = 1,
+		MinStraightDistance = 150,
+	},
+	Predator = {
+		Type = "Predator",
 		TargetPlayers = true,
 		TargetOrbs = true,
 		AvoidOthers = false,
-		SpeedMultiplier = 1.05,
-		TurnBias = 0.02,
-		BoostChance = 0.03,
+		SpeedMultiplier = 1.2,
+		TurnBias = 0.025,
+		BoostChance = 0.08,
 		CombatRadius = 60,
 		RandomTurnInterval = 6.0,
-		OrbSeekRadius = 120,
-		Description = "Territory defender - patrols specific areas",
-		FleeThreshold = 30,
-		AggressionLevel = 0.5,
-		PatrolRadius = 150,  -- Stays in smaller area
-		TerritoryCenter = Vector3.new(0, 0, 0),  -- Set randomly on spawn
+		OrbSeekRadius = 150,
+		Description = "Smart hunter - ambushes smaller snakes",
+		FleeThreshold = 20,
+		AggressionLevel = 0.8,
+		PatrolRadius = 300,
+		MovementPattern = "patrol",  -- Patrols hunting grounds
+		AmbushPoints = {},  -- Will be populated with good ambush spots
+		PreferCenterHunting = true,
+		MinStraightDistance = 80,
 	},
 	Opportunist = {
 		Type = "Opportunist",
 		TargetPlayers = true,
 		TargetOrbs = true,
 		AvoidOthers = false,
-		SpeedMultiplier = 1.2,
-		TurnBias = 0.04,
-		BoostChance = 0.08,
-		CombatRadius = 40,
-		RandomTurnInterval = 3.5,
-		OrbSeekRadius = 140,
-		Description = "Smart fighter - only attacks smaller snakes",
-		FleeThreshold = 0,  -- Never flees from equal/smaller
-		AggressionLevel = 0.8,
-		PatrolRadius = 250,
-		OnlyAttackSmaller = true,
+		SpeedMultiplier = 1.18,
+		TurnBias = 0.03,
+		BoostChance = 0.07,
+		CombatRadius = 50,
+		RandomTurnInterval = 7.0,
+		OrbSeekRadius = 180,
+		Description = "Adaptive - switches between hunting and collecting",
+		FleeThreshold = 15,
+		AggressionLevel = 0.6,
+		PatrolRadius = 350,
+		MovementPattern = "adaptive",  -- Changes based on situation
+		OpportunityRadius = 100,  -- Looks for opportunities
+		MinStraightDistance = 90,
 	},
-	Hunter = {
-		Type = "Hunter",
+	Farmer = {
+		Type = "Farmer",
+		TargetPlayers = false,
+		TargetOrbs = true,
+		AvoidOthers = true,
+		SpeedMultiplier = 1.0,  -- Slow and steady
+		TurnBias = 0.01,  -- Very smooth
+		BoostChance = 0.02,  -- Rarely boosts
+		CombatRadius = 15,
+		RandomTurnInterval = 10.0,
+		OrbSeekRadius = 400,  -- Sees orbs from far
+		Description = "Peaceful farmer - systematic orb collection",
+		FleeThreshold = 5,
+		AggressionLevel = 0.0,
+		PatrolRadius = 250,
+		MovementPattern = "grid",  -- Moves in grid pattern
+		GridSize = 100,  -- Grid square size
+		CurrentGridX = 0,
+		CurrentGridZ = 0,
+		MinStraightDistance = 120,
+	},
+	Raider = {
+		Type = "Raider",
 		TargetPlayers = true,
 		TargetOrbs = true,
 		AvoidOthers = false,
-		SpeedMultiplier = 1.18,
-		TurnBias = 0.02,
-		BoostChance = 0.07,
-		CombatRadius = 50,
-		RandomTurnInterval = 5.5,
-		OrbSeekRadius = 130,
-		Description = "Persistent hunter - tracks targets",
+		SpeedMultiplier = 1.25,
+		TurnBias = 0.04,
+		BoostChance = 0.1,
+		CombatRadius = 45,
+		RandomTurnInterval = 5.0,
+		OrbSeekRadius = 120,
+		Description = "Aggressive raider - hits and runs",
 		FleeThreshold = 25,
-		AggressionLevel = 0.75,
-		PatrolRadius = 220,
-		TrackingDuration = 10,  -- Seconds to track a target
+		AggressionLevel = 0.9,
+		PatrolRadius = 400,
+		MovementPattern = "hitandrun",  -- Attack then retreat
+		RaidCooldown = 10,  -- Seconds between raids
+		LastRaidTime = 0,
+		MinStraightDistance = 70,
+	},
+	Guardian = {
+		Type = "Guardian",
+		TargetPlayers = true,
+		TargetOrbs = true,
+		AvoidOthers = false,
+		SpeedMultiplier = 1.1,
+		TurnBias = 0.02,
+		BoostChance = 0.05,
+		CombatRadius = 70,
+		RandomTurnInterval = 8.0,
+		OrbSeekRadius = 160,
+		Description = "Area guardian - protects territory",
+		FleeThreshold = 30,
+		AggressionLevel = 0.5,
+		PatrolRadius = 200,
+		MovementPattern = "circular",  -- Circles territory
+		TerritoryCenter = Vector3.new(0, 0, 0),
+		TerritoryRadius = 150,
+		PatrolAngle = 0,
+		MinStraightDistance = 60,
 	},
 	Nomad = {
 		Type = "Nomad",
@@ -708,63 +766,33 @@ AISnake.PersonalityDefinitions = {
 		TargetOrbs = true,
 		AvoidOthers = false,
 		SpeedMultiplier = 1.12,
-		TurnBias = 0.06,
-		BoostChance = 0.05,
-		CombatRadius = 30,
-		RandomTurnInterval = 2.5,  -- Frequent direction changes
-		OrbSeekRadius = 160,
-		Description = "Wanderer - explores the entire map",
-		FleeThreshold = 10,
-		AggressionLevel = 0.2,
-		PatrolRadius = 400,  -- Roams widely
-		ExplorationBias = 0.8,
-	},
-	Shadow = {
-		Type = "Shadow",
-		TargetPlayers = true,
-		TargetOrbs = true,
-		AvoidOthers = false,
-		SpeedMultiplier = 1.22,
-		TurnBias = 0.01,
-		BoostChance = 0.02,  -- Rarely boosts
-		CombatRadius = 55,
-		RandomTurnInterval = 8.0,
-		OrbSeekRadius = 110,
-		Description = "Stealthy assassin - strikes from behind",
-		FleeThreshold = 15,
-		AggressionLevel = 0.6,
-		PatrolRadius = 180,
-		PreferRearAttack = true,
-		StalkDistance = 30,
-	},
-	Berserker = {
-		Type = "Berserker",
-		TargetPlayers = true,
-		TargetOrbs = false,  -- Ignores orbs when hunting
-		AvoidOthers = false,
-		SpeedMultiplier = 1.25,
-		TurnBias = 0.05,
-		BoostChance = 0.12,  -- Boosts frequently
+		TurnBias = 0.025,
+		BoostChance = 0.06,
 		CombatRadius = 35,
-		RandomTurnInterval = 6.0,
-		OrbSeekRadius = 50,  -- Poor orb vision
-		Description = "Reckless fighter - all aggression",
-		FleeThreshold = 40,  -- Only flees from much larger
-		AggressionLevel = 1.0,
-		PatrolRadius = 200,
-		RageMode = true,  -- Gets faster when smaller
+		RandomTurnInterval = 15.0,  -- Very long journeys
+		OrbSeekRadius = 220,
+		Description = "Wandering nomad - never stays in one place",
+		FleeThreshold = 20,
+		AggressionLevel = 0.3,
+		PatrolRadius = 700,  -- Entire map
+		MovementPattern = "wander",  -- True random wandering
+		WanderTargets = {},  -- Random points to visit
+		CurrentWanderTarget = 1,
+		MinStraightDistance = 200,  -- Long straight paths
 	},
 }
 
 -- === AI METHODS ===
 function AISnake:findBestOrb()
-	local minDist = self.Personality.OrbSeekRadius or 50
+	-- ENHANCED: Increase orb seek radius based on personality
+	local baseRadius = self.Personality.OrbSeekRadius or 50
+	local minDist = baseRadius * 1.5  -- 50% more range for better orb finding
 	local nearest = nil
 	local headPos = self.HeadParts and self.HeadParts.head and self.HeadParts.head.Position or self.Position
 
 	-- First check spatial grid for regular orbs
 	local nearbyEntities = SpatialGrid.QueryRadius(headPos, minDist)
-	
+
 	-- Prioritize untargeted orbs
 	local targetedOrbs = {}
 	for ai, orb in AISnake._orbTargets do
@@ -786,7 +814,7 @@ function AISnake:findBestOrb()
 			end
 		end
 	end
-	
+
 	-- If no upgrade orbs, check regular orbs from spatial grid
 	if not nearest and #nearbyEntities > 0 then
 		for _, entity in nearbyEntities do
@@ -986,13 +1014,13 @@ function AISnake:getFleeVector()
 			end
 		end
 	end
-	
-	-- ADD center bias to ALL flee directions if far from center
+
+	-- Only add MINIMAL center bias when VERY far from center
 	local mapCenter = Vector3new(0, headPos.Y, 0)
 	local distFromCenter = (mapCenter - headPos).Magnitude
-	if distFromCenter > 180 and fleeDir then
+	if distFromCenter > 400 and fleeDir then  -- Increased from 180
 		local toCenter = (mapCenter - headPos).Unit
-		fleeDir = (fleeDir + toCenter * 0.4).Unit
+		fleeDir = (fleeDir + toCenter * 0.1).Unit  -- Reduced from 0.4
 	end
 
 	return fleeDir
@@ -1002,21 +1030,21 @@ end
 function AISnake:isPathSafe(targetPos, checkDistance)
 	local myHead = self.HeadParts.head
 	if not myHead then return false end
-	
+
 	local myPos = myHead.Position
 	local toTarget = targetPos - myPos
 	local distance = toTarget.Magnitude
-	
+
 	if distance < 0.1 then return true end
-	
+
 	local direction = toTarget.Unit
 	local checkDist = mathMin(distance, checkDistance or 50)
 	local stepSize = 5
-	
+
 	-- Check points along the path
 	for d = stepSize, checkDist, stepSize do
 		local checkPos = myPos + direction * d
-		
+
 		-- Check for other snakes at this position
 		local nearbyEntities = SpatialGrid.QueryRadius(checkPos, 8)
 		for _, entity in nearbyEntities do
@@ -1032,7 +1060,7 @@ function AISnake:isPathSafe(targetPos, checkDistance)
 					local theirVel = entity.part.AssemblyLinearVelocity or Vector3.zero
 					local timeToReach = d / self.Speed
 					local theirFuturePos = entity.part.Position + theirVel * timeToReach
-					
+
 					if (checkPos - theirFuturePos).Magnitude < 10 then
 						-- Collision likely!
 						return false
@@ -1041,7 +1069,7 @@ function AISnake:isPathSafe(targetPos, checkDistance)
 			end
 		end
 	end
-	
+
 	return true
 end
 
@@ -1051,9 +1079,9 @@ function AISnake:getSmartFleeDirection(threats)
 	if not self.HeadParts or not self.HeadParts.head then
 		return Vector3new(mathRandom(-1, 1), 0, mathRandom(-1, 1)).Unit
 	end
-	
+
 	local myPos = self.HeadParts.head.Position
-	
+
 	-- Calculate danger zones from all threats
 	local dangerVectors = {}
 	for _, threat in ipairs(threats) do
@@ -1062,28 +1090,28 @@ function AISnake:getSmartFleeDirection(threats)
 			local threatPos = threat.part.Position
 			local awayFromThreat = (myPos - threatPos).Unit
 			local weight = 1 / mathMax(threat.distance, 5) -- Closer = more weight
-			
+
 			-- Extra weight for bigger snakes
 			if threat.lengthDiff > 20 then
 				weight = weight * 2
 			end
-			
+
 			table.insert(dangerVectors, {
 				direction = awayFromThreat,
 				weight = weight
 			})
 		end
 	end
-	
+
 	-- Combine all danger vectors
 	local fleeDir = Vector3.zero
 	local totalWeight = 0
-	
+
 	for _, danger in ipairs(dangerVectors) do
 		fleeDir = fleeDir + danger.direction * danger.weight
 		totalWeight = totalWeight + danger.weight
 	end
-	
+
 	-- Add bias towards center if far from it
 	local toCenter = Vector3new(0, myPos.Y, 0) - myPos
 	local distFromCenter = toCenter.Magnitude
@@ -1092,26 +1120,26 @@ function AISnake:getSmartFleeDirection(threats)
 		fleeDir = fleeDir + toCenter.Unit * centerWeight
 		totalWeight = totalWeight + centerWeight
 	end
-	
+
 	if totalWeight > 0 then
 		fleeDir = (fleeDir / totalWeight).Unit
-		
+
 		-- Check if flee direction is safe
 		if not self:isPathSafe(myPos + fleeDir * 30, 30) then
 			-- Try perpendicular directions
 			local perpDir1 = Vector3new(-fleeDir.Z, 0, fleeDir.X)
 			local perpDir2 = Vector3new(fleeDir.Z, 0, -fleeDir.X)
-			
+
 			if self:isPathSafe(myPos + perpDir1 * 30, 30) then
 				fleeDir = perpDir1
 			elseif self:isPathSafe(myPos + perpDir2 * 30, 30) then
 				fleeDir = perpDir2
 			end
 		end
-		
+
 		return fleeDir
 	end
-	
+
 	-- Default: flee towards center
 	return toCenter.Unit
 end
@@ -1151,7 +1179,7 @@ function AISnake:_determineAction()
 	local boundaryBuffer = 80
 	local strongBuffer = 40
 	local edgeSteer = nil
-	
+
 	-- Check X boundaries
 	if headPos.X > MAP_BOUNDS.maxX - boundaryBuffer then
 		local strength = 1 - (MAP_BOUNDS.maxX - headPos.X) / boundaryBuffer
@@ -1160,7 +1188,7 @@ function AISnake:_determineAction()
 		local strength = 1 - (headPos.X - MAP_BOUNDS.minX) / boundaryBuffer
 		edgeSteer = Vector3new(1, 0, 0) * strength
 	end
-	
+
 	-- Check Z boundaries
 	if headPos.Z > MAP_BOUNDS.maxZ - boundaryBuffer then
 		local strength = 1 - (MAP_BOUNDS.maxZ - headPos.Z) / boundaryBuffer
@@ -1171,14 +1199,14 @@ function AISnake:_determineAction()
 		local zSteer = Vector3new(0, 0, 1) * strength
 		edgeSteer = edgeSteer and (edgeSteer + zSteer).Unit or zSteer
 	end
-	
+
 	-- Strong boundary avoidance overrides everything
 	if edgeSteer and (
 		headPos.X > MAP_BOUNDS.maxX - strongBuffer or 
-		headPos.X < MAP_BOUNDS.minX + strongBuffer or
-		headPos.Z > MAP_BOUNDS.maxZ - strongBuffer or 
-		headPos.Z < MAP_BOUNDS.minZ + strongBuffer
-	) then
+			headPos.X < MAP_BOUNDS.minX + strongBuffer or
+			headPos.Z > MAP_BOUNDS.maxZ - strongBuffer or 
+			headPos.Z < MAP_BOUNDS.minZ + strongBuffer
+		) then
 		-- Add some randomness to prevent getting stuck in corners
 		local randomAngle = mathRandom(-30, 30) * mathPi / 180
 		local cosA = mathCos(randomAngle)
@@ -1188,7 +1216,7 @@ function AISnake:_determineAction()
 			0,
 			edgeSteer.X * sinA + edgeSteer.Z * cosA
 		)
-		
+
 		self.TargetSnake = nil
 		self.TargetOrb = nil
 		return "AVOID_BOUNDARY", rotatedSteer.Unit
@@ -1205,34 +1233,34 @@ function AISnake:_determineAction()
 	-- Check for imminent collisions in our current path
 	local lookAheadDist = self.Speed * 1.5 -- Look 1.5 seconds ahead
 	local futurePos = headPos + self.Direction * lookAheadDist
-	
+
 	local nearbyDanger = SpatialGrid.QueryRadius(futurePos, 15)
 	local collisionThreat = nil
 	local minCollisionTime = math.huge
-	
+
 	for _, entity in nearbyDanger do
 		if entity.owner ~= self and (entity.type:match("HEAD") or entity.type:match("SEGMENT")) then
 			-- Calculate time to collision
 			local theirPos = entity.part.Position
 			local relPos = theirPos - headPos
 			local relVel = self.Direction * self.Speed
-			
+
 			if entity.part.AssemblyLinearVelocity then
 				relVel = relVel - entity.part.AssemblyLinearVelocity
 			end
-			
+
 			local timeToCollision = relPos:Dot(relVel) / relVel:Dot(relVel)
-			
+
 			if timeToCollision > 0 and timeToCollision < 2 then
 				local collisionPos = headPos + self.Direction * self.Speed * timeToCollision
 				local theirFuturePos = theirPos
-				
+
 				if entity.part.AssemblyLinearVelocity then
 					theirFuturePos = theirPos + entity.part.AssemblyLinearVelocity * timeToCollision
 				end
-				
+
 				local collisionDist = (collisionPos - theirFuturePos).Magnitude
-				
+
 				if collisionDist < 8 and timeToCollision < minCollisionTime then
 					minCollisionTime = timeToCollision
 					collisionThreat = entity
@@ -1240,19 +1268,19 @@ function AISnake:_determineAction()
 			end
 		end
 	end
-	
+
 	if collisionThreat and minCollisionTime < 1 then
 		-- EMERGENCY AVOIDANCE!
 		local threatPos = collisionThreat.part.Position
 		local avoidDir = (headPos - threatPos).Unit
-		
+
 		-- Try to go perpendicular to avoid head-on collision
 		local perpDir = Vector3new(-avoidDir.Z, 0, avoidDir.X)
-		
+
 		-- Choose direction based on which side is clearer
 		local leftClear = self:isPathSafe(headPos + perpDir * 20, 20)
 		local rightClear = self:isPathSafe(headPos - perpDir * 20, 20)
-		
+
 		if leftClear and not rightClear then
 			steer = perpDir
 		elseif rightClear and not leftClear then
@@ -1261,7 +1289,7 @@ function AISnake:_determineAction()
 			-- Both or neither clear, just avoid directly
 			steer = avoidDir
 		end
-		
+
 		self.TargetOrb = nil  -- Cancel orb seeking
 		return "COLLISION_AVOID", steer
 	end
@@ -1303,9 +1331,9 @@ function AISnake:_determineAction()
 	if shouldFlee or self.Avoiding then
 		self.TargetSnake = nil
 		self.TargetOrb = nil  -- Cancel orb seeking when fleeing
-		
+
 		local fleeDir = self:getSmartFleeDirection(threats)
-		
+
 		self.Avoiding = true
 		self.AvoidDir = fleeDir
 		self.AvoidExpire = now + 2.5
@@ -1313,86 +1341,172 @@ function AISnake:_determineAction()
 		return "FLEE", fleeDir
 	end
 
-	-- Priority 4: Smart orb seeking
-	if p.TargetOrbs then
-		-- Find best orb with path checking
-		if not self.TargetOrb or not self:isPathSafe(self.TargetOrb.Position) then
-			local orb, dist = self:findBestOrb()
-			
-			-- Only target orb if path is safe
-			if orb and dist < p.OrbSeekRadius * 1.5 and self:isPathSafe(orb.Position) then
-				self.TargetOrb = orb
-				self.TargetOrbExpire = now + mathRandom(50, 80) / 10
-				AISnake._orbTargets[self] = orb
+	-- Priority 3.5: Smart orb seeking (HIGHER PRIORITY)
+	if p.TargetOrbs and not shouldFlee then  -- Don't seek orbs when fleeing
+		-- Always look for better orbs
+		local orb, dist = self:findBestOrb()
+
+		-- More aggressive orb targeting
+		if orb and dist < p.OrbSeekRadius * 2 then  -- Double radius for targeting
+			-- Switch to closer orb if significantly better
+			if self.TargetOrb and self.TargetOrb.Parent then
+				local currentDist = (self.TargetOrb.Position - headPos).Magnitude
+				if dist < currentDist * 0.7 then  -- Switch if 30% closer
+					self.TargetOrb = orb
+					self.TargetOrbExpire = now + mathRandom(30, 60) / 10
+					AISnake._orbTargets[self] = orb
+				end
 			else
-				self.TargetOrb = nil
+				-- No current target, take this one
+				self.TargetOrb = orb
+				self.TargetOrbExpire = now + mathRandom(30, 60) / 10
+				AISnake._orbTargets[self] = orb
 			end
 		end
-		
+
 		if self.TargetOrb and self.TargetOrb.Parent then
 			state = "SEEK_ORB"
 			local toOrb = self.TargetOrb.Position - headPos
 			local orbDist = toOrb.Magnitude
-			
-			-- Smart orb approach with collision checking
-			if orbDist < 15 then
+
+			-- More direct orb approach
+			if orbDist < 50 then  -- Increased from 30
 				steer = toOrb.Unit
-			elseif orbDist < 30 then
-				-- Check for obstacles
-				if not self:isPathSafe(self.TargetOrb.Position, 30) then
-					-- Path blocked, find new orb
-					self.TargetOrb = nil
-					AISnake._orbTargets[self] = nil
-				else
-					local leadFactor = mathMin(orbDist / 30, 0.5)
-					steer = toOrb.Unit
+				-- Boost when close to orb for faster collection
+				if orbDist < 20 and not self.Boosting and mathRandom() < 0.3 then
+					self:startBoost(0.5)  -- Short boost to grab orb
 				end
 			else
 				steer = toOrb.Unit
 			end
-			
+
 			-- Clear any combat targets when seeking orbs
 			self.TargetSnake = nil
+
+			-- Return early to prioritize orb collection
+			return state, steer
 		end
 	end
 
-	-- Priority 5: Wandering (SMARTER)
+	-- Priority 5: Advanced Movement Patterns
 	if state == "WANDER" then
-		local mapCenter = Vector3new(0, headPos.Y, 0)
-		local toCenter = mapCenter - headPos
-		local distFromCenter = toCenter.Magnitude
-
-		-- Smoother wandering
-		if (now - (self.LastTurn or 0) > p.RandomTurnInterval) then
-			local maxTurn = 45
-			self.TargetYaw = self.TargetYaw + mathRad(mathRandom(-maxTurn, maxTurn))
-			self.LastTurn = now
+		-- Initialize movement tracking
+		if not self._lastStraightDistance then
+			self._lastStraightDistance = 0
+			self._lastTurnPosition = headPos
 		end
 
-		local baseSteer = Vector3new(mathSin(self.TargetYaw), 0, mathCos(self.TargetYaw))
+		-- Calculate distance traveled since last turn
+		local distanceSinceTurn = (headPos - self._lastTurnPosition).Magnitude
 
-		-- Check if wander direction is safe
-		if not self:isPathSafe(headPos + baseSteer * 30, 30) then
-			-- Find a safe direction
-			for i = 1, 8 do
-				local testAngle = self.TargetYaw + (i * mathPi / 4)
-				local testSteer = Vector3new(mathSin(testAngle), 0, mathCos(testAngle))
-				if self:isPathSafe(headPos + testSteer * 30, 30) then
-					baseSteer = testSteer
-					self.TargetYaw = testAngle
-					break
+		-- Check minimum straight distance requirement
+		local minStraight = p.MinStraightDistance or 100
+
+		-- Movement pattern based on personality
+		local movementPattern = p.MovementPattern or "wander"
+
+		if movementPattern == "spiral" then
+			-- Spiral outward pattern for Collectors
+			if not self._spiralAngle then self._spiralAngle = 0 end
+			if not self._spiralRadius then self._spiralRadius = 50 end
+
+			if distanceSinceTurn > minStraight then
+				self._spiralAngle = self._spiralAngle + mathPi / 4  -- 45 degree turns
+				self._spiralRadius = mathMin(self._spiralRadius + 20, 400)
+				if self._spiralRadius >= 400 then
+					self._spiralRadius = 50  -- Reset spiral
 				end
+				local targetX = mathCos(self._spiralAngle) * self._spiralRadius
+				local targetZ = mathSin(self._spiralAngle) * self._spiralRadius
+				steer = (Vector3new(targetX, headPos.Y, targetZ) - headPos).Unit
+				self._lastTurnPosition = headPos
+			else
+				-- Continue straight
+				steer = self.Direction
+			end
+
+		elseif movementPattern == "zigzag" then
+			-- Zigzag pattern for Explorers
+			if not self._zigzagDirection then self._zigzagDirection = 1 end
+
+			if distanceSinceTurn > minStraight then
+				-- Alternate between left and right turns
+				self._zigzagDirection = -self._zigzagDirection
+				local turnAngle = self.TargetYaw + (mathPi / 6) * self._zigzagDirection  -- 30 degree turns
+				steer = Vector3new(mathSin(turnAngle), 0, mathCos(turnAngle))
+				self.TargetYaw = turnAngle
+				self._lastTurnPosition = headPos
+			else
+				steer = self.Direction
+			end
+
+		elseif movementPattern == "grid" then
+			-- Grid pattern for Farmers
+			local gridSize = p.GridSize or 100
+			if not self._gridDirection then self._gridDirection = 0 end
+
+			if distanceSinceTurn > gridSize then
+				-- Turn 90 degrees
+				self._gridDirection = (self._gridDirection + 1) % 4
+				local angles = {0, mathPi/2, mathPi, -mathPi/2}
+				self.TargetYaw = angles[self._gridDirection + 1]
+				steer = Vector3new(mathSin(self.TargetYaw), 0, mathCos(self.TargetYaw))
+				self._lastTurnPosition = headPos
+			else
+				steer = self.Direction
+			end
+
+		elseif movementPattern == "circular" then
+			-- Circular patrol for Guardians
+			if not p.PatrolAngle then p.PatrolAngle = 0 end
+
+			-- Circle around territory
+			p.PatrolAngle = p.PatrolAngle + 0.02  -- Slow rotation
+			local radius = p.TerritoryRadius or 150
+			local center = p.TerritoryCenter
+			local targetX = center.X + mathCos(p.PatrolAngle) * radius
+			local targetZ = center.Z + mathSin(p.PatrolAngle) * radius
+			local targetPos = Vector3new(targetX, headPos.Y, targetZ)
+			steer = (targetPos - headPos).Unit
+
+		else
+			-- Default wandering with minimum straight distance
+			if (now - (self.LastTurn or 0) > p.RandomTurnInterval) and distanceSinceTurn > minStraight then
+				-- Only turn after traveling minimum distance
+				local maxTurn = 30
+				local turnAmount = mathRandom(-maxTurn, maxTurn)
+
+				-- Prevent 180 degree turns
+				if mathAbs(turnAmount) > 90 then
+					turnAmount = turnAmount * 0.3
+				end
+
+				self.TargetYaw = self.TargetYaw + mathRad(turnAmount)
+				self.LastTurn = now
+				self._lastTurnPosition = headPos
+
+				steer = Vector3new(mathSin(self.TargetYaw), 0, mathCos(self.TargetYaw))
+			else
+				-- Continue straight
+				steer = self.Direction
 			end
 		end
 
-		-- Center bias based on distance
-		if distFromCenter > 250 then
-			steer = toCenter.Unit
-		elseif distFromCenter > 150 then
-			local centerBias = toCenter.Unit * 0.7
-			steer = (baseSteer + centerBias).Unit
-		else
-			steer = baseSteer
+		-- Boundary avoidance (keep from edges)
+		local edgeBuffer = 100
+		if headPos.X > MAP_BOUNDS.maxX - edgeBuffer then
+			steer = steer + Vector3new(-1, 0, 0)
+			steer = steer.Unit
+		elseif headPos.X < MAP_BOUNDS.minX + edgeBuffer then
+			steer = steer + Vector3new(1, 0, 0)
+			steer = steer.Unit
+		end
+		if headPos.Z > MAP_BOUNDS.maxZ - edgeBuffer then
+			steer = steer + Vector3new(0, 0, -1)
+			steer = steer.Unit
+		elseif headPos.Z < MAP_BOUNDS.minZ + edgeBuffer then
+			steer = steer + Vector3new(0, 0, 1)
+			steer = steer.Unit
 		end
 	end
 
@@ -1403,13 +1517,17 @@ function AISnake:updateBrain()
 	if not self._active or not self.HeadParts or not self.HeadParts.head or not self.HeadParts.head.Parent then
 		return
 	end
+
+	-- Update brain tick for debugging
+	self._lastBrainUpdate = tick()
+
 	local state, steer = self:_determineAction()
 	self.State = state
 	self.SteerDirection = steer
 end
 
 -- === AI CONSTRUCTOR ===
-function AISnake.new(startPosition)
+function AISnake.new(startPosition, preservedPersonalityType)
 	if #AISnake._activeSnakes >= MAX_AI_SNAKES then
 		print("AI Snake limit reached:", MAX_AI_SNAKES)
 		return nil
@@ -1417,7 +1535,7 @@ function AISnake.new(startPosition)
 
 	local self = setmetatable({}, AISnake)
 	self.Config = deepCopy(SnakeConfig)
-	
+
 	-- Update map bounds if needed (in case map was created after script started)
 	updateMapBounds()
 
@@ -1438,6 +1556,8 @@ function AISnake.new(startPosition)
 	self.LastTurn = tick()
 	self.TargetYaw = 0
 	self.CurrentYaw = 0
+	self.LastDirection = self.Direction  -- Track momentum
+	self.DirectionChangeTime = 0
 
 	self.FollowSpeed = self.Config.FollowSpeed or 0.95
 	self.BoostFollowSpeed = self.Config.BoostFollowSpeed or 0.98
@@ -1464,10 +1584,18 @@ function AISnake.new(startPosition)
 	self.killCount = 0
 	self.lastKillTime = 0
 
-	local pType = AISnake.PersonalityTypes[mathRandom(1, #AISnake.PersonalityTypes)]
+	-- Use preserved personality or assign random one
+	local pType
+	if preservedPersonalityType and AISnake.PersonalityDefinitions[preservedPersonalityType] then
+		pType = preservedPersonalityType
+		print("🧠 Restoring personality:", pType)
+	else
+		pType = AISnake.PersonalityTypes[mathRandom(1, #AISnake.PersonalityTypes)]
+		print("🎲 Assigning new personality:", pType)
+	end
 	self.Personality = deepCopy(AISnake.PersonalityDefinitions[pType])
 	self._personalityType = pType
-	
+
 	-- Set up Guardian territory if needed
 	if self.Personality.Type == "Guardian" then
 		-- Random territory center within map
@@ -1499,18 +1627,22 @@ function AISnake.new(startPosition)
 	self.Segments = {}
 	self.CurrentLength = self.Config.InitialLength
 
+	-- FIXED: Proper position history initialization
 	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.2) + 20
 	self.PositionHistory = table.create(self.MaxHistorySize)
 	self.HistoryHead = 1
-	local initialHistoryPoint = { position = self.Position, lookVector = self.Direction }
+
+	-- Initialize history at spawn position to prevent gaps
 	for i = 1, self.MaxHistorySize do
-		self.PositionHistory[i] = initialHistoryPoint
+		-- All history starts at the same position
+		self.PositionHistory[i] = { position = self.Position, lookVector = self.Direction }
 	end
 
 	function self:addToHistory(data)
 		self.PositionHistory[self.HistoryHead] = data
 		self.HistoryHead = (self.HistoryHead % self.MaxHistorySize) + 1
 	end
+
 	function self:getFromHistory(stepsBack)
 		local index = self.HistoryHead - stepsBack
 		if index < 1 then
@@ -1519,44 +1651,105 @@ function AISnake.new(startPosition)
 		return self.PositionHistory[index]
 	end
 
-	-- Create all segments at spawn position initially (prevents dragging on respawn)
+	-- FIXED: Create segments at proper positions WITHOUT GAPS
 	for i = 1, self.CurrentLength do
-		-- Start all segments BEHIND the head position
-		local offset = self.Direction * (-i * self.SegmentSpacing)
-		local pos = self.Position + offset
+		-- Start ALL segments at the SAME position to prevent gaps
+		local pos = self.Position
 		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
 		local color = self.Config.BodyColors[colorIndex]
 		local segment = createSegment(i, pos, color, self.Config, self.Model, i)
 		self.Segments[i] = segment
-		
-		-- Make segments invisible initially to prevent visual glitch
+
+		-- Start segments invisible
 		segment.Transparency = 1
+
+		-- Ensure segment is at exact position
+		segment.CFrame = CFramenew(pos)
 	end
-	
-	-- Populate position history with proper spread positions
-	for i = 1, self.MaxHistorySize do
-		local historyOffset = self.Direction * (-i * 0.5) -- Smaller spacing for history
-		local historyPos = self.Position + historyOffset
-		self.PositionHistory[i] = { position = historyPos, lookVector = self.Direction }
-	end
-	
-	-- Make segments visible after a frame
+
+	-- Spawn sequence to prevent gaps
 	task.defer(function()
+		-- Wait for model to be ready
 		task.wait(0.1)
-		for _, segment in ipairs(self.Segments) do
+
+		-- Gradually move forward to create proper segment spacing
+		local startPos = self.Position
+		for step = 1, 20 do
+			-- Move forward slightly
+			local moveDistance = self.SegmentSpacing * 0.1
+			local newPos = self.Position + self.Direction * moveDistance
+			self.Position = newPos
+			self.RootPart.Position = newPos
+
+			-- Update head position
+			if self.HeadParts and self.HeadParts.head then
+				local headOffset = self.Direction * 1.5
+				self.HeadParts.head.CFrame = CFramelookAt(self.Position + headOffset, self.Position + headOffset + self.Direction)
+			end
+
+			-- Add to history
+			self:addToHistory({ position = self.Position, lookVector = self.Direction })
+
+			-- Small wait
+			task.wait(0.02)
+		end
+
+		-- Clear spawn stabilization flag
+		self._spawnStabilizing = nil
+
+		-- CRITICAL: Reset AI state after spawn
+		self.State = "WANDER"
+		self.TargetOrb = nil
+		self.TargetSnake = nil
+		self.Avoiding = false
+		self.AvoidExpire = 0
+
+		-- Force a random initial direction
+		local randomTurn = mathRandom() * mathPi * 2
+		self.TargetYaw = randomTurn
+		self.CurrentYaw = randomTurn
+		self.Direction = Vector3new(mathSin(randomTurn), 0, mathCos(randomTurn))
+
+		-- Reset movement timers
+		self.LastTurn = tick()
+		self.BoostCooldown = tick() + 2  -- Wait before first boost
+
+		-- CRITICAL: Initialize brain update time
+		self._lastBrainUpdate = tick()
+
+		-- Force immediate brain update
+		self:updateBrain()
+
+		-- Fade in segments
+		for i, segment in ipairs(self.Segments) do
 			if segment and segment.Parent then
-				segment.Transparency = 0
+				task.spawn(function()
+					local fadeSteps = 10
+					for step = 1, fadeSteps do
+						if segment and segment.Parent then
+							segment.Transparency = 1 - (step / fadeSteps)
+						end
+						task.wait(0.02)
+					end
+					if segment and segment.Parent then
+						segment.Transparency = 0
+					end
+				end)
 			end
 		end
 	end)
 
 	table.insert(AISnake._activeSnakes, self)
 	self._active = true
-	
+
 	-- Stuck detection
 	self._lastPositions = {}
 	self._stuckCheckTime = 0
 	self._lastStuckCheck = tick()
+
+	-- Spawn protection
+	self._spawnProtection = tick() + 3  -- 3 second spawn protection
+	self._spawnStabilizing = tick() + 0.5  -- Half second to let segments arrange
 
 	return self
 end
@@ -1577,14 +1770,14 @@ function AISnake:grow(amount)
 			-- Match CharacterSetup's segment growth exactly
 			segment.Transparency = 1
 			segment.Size = Vector3new(0.1, 0.1, 0.1)
-			
+
 			-- Apply growth factor for the final size
 			local growthFactor = 1
 			if self.CurrentLength > 200 then
 				growthFactor = 1 + ((self.CurrentLength - 200) / 2800) * 1.0
 			end
 			local finalSize = self.Config.SegmentSize * mathMin(growthFactor, 2.0)
-			
+
 			task.spawn(function()
 				if not segment or not segment.Parent then return end
 				local growTime = 0.18
@@ -1624,10 +1817,10 @@ end
 function AISnake:Destroy()
 	if not self._active then return end
 	self._active = false
-	
+
 	-- Immediately mark as destroyed to prevent any updates
 	self._destroyed = true
-	
+
 	-- Untrack snake from orb pickup system
 	if AISnakeOrbPickup then
 		pcall(function()
@@ -1650,7 +1843,7 @@ function AISnake:Destroy()
 		local head = self.HeadParts.head
 		table.insert(orbSpawnData, {position = head.Position, size = 3.5, color = head.Color})
 	end
-	
+
 	local ORB_SPAWN_DENSITY = 5
 	for i = 1, #self.Segments do
 		if i % ORB_SPAWN_DENSITY == 1 then
@@ -1708,7 +1901,7 @@ function AISnake:Destroy()
 			self.Model:Destroy()
 		end)
 	end
-	
+
 	-- Clear all references
 	self.Model = nil
 	self.HeadParts = nil
@@ -1716,38 +1909,81 @@ function AISnake:Destroy()
 	self.Segments = nil
 end
 
--- === SMOOTHER MOVEMENT ===
+-- === SMOOTHER MOVEMENT (FIXED) ===
 function AISnake:updateMovement(dt)
-	-- Check if destroyed
 	if self._destroyed then return end
-	
+
 	if not self._active or not self.HeadParts or not self.HeadParts.head or not self.HeadParts.head.Parent then
 		if self._active and not self._destroyed then 
 			self:Destroy() 
 		end
 		return
 	end
+
 	local now = tick()
+
+	-- Don't move during spawn stabilization
+	if self._spawnStabilizing and now < self._spawnStabilizing then
+		return
+	end
 	local p = self.Personality
+
+	-- Failsafe: Ensure we have a personality
+	if not p then
+		warn("AI Snake lost personality! Reassigning...")
+		local pType = AISnake.PersonalityTypes[mathRandom(1, #AISnake.PersonalityTypes)]
+		self.Personality = deepCopy(AISnake.PersonalityDefinitions[pType])
+		p = self.Personality
+	end
+
 	local state = self.State
 	local steer = self.SteerDirection
 
-	-- BOUNDARY SAFETY CHECK #1: Validate current position
-	-- If somehow out of bounds, teleport to center
-	if self.Position.X < MAP_BOUNDS.minX - 10 or self.Position.X > MAP_BOUNDS.maxX + 10 or
-	   self.Position.Z < MAP_BOUNDS.minZ - 10 or self.Position.Z > MAP_BOUNDS.maxZ + 10 then
-		-- Teleporting out-of-bounds snake to safe position
-		-- Random safe position near center
-		local safeAngle = mathRandom() * 2 * mathPi
-		local safeRadius = mathRandom(50, 150)
-		self.Position = Vector3new(
-			mathCos(safeAngle) * safeRadius,
-			self.Position.Y,
-			mathSin(safeAngle) * safeRadius
-		)
-		self.Direction = Vector3new(mathRandom() - 0.5, 0, mathRandom() - 0.5).Unit
-		self.State = "WANDER"
-		return -- Skip this frame
+	-- Failsafe: Ensure we have a valid steer direction
+	if not steer or steer.Magnitude < 0.1 then
+		steer = self.Direction
+	end
+
+	-- Failsafe: Check if brain updates have stopped
+	if self._lastBrainUpdate then
+		local timeSinceLastBrain = now - self._lastBrainUpdate
+		if timeSinceLastBrain > 2.0 then  -- Reduced from 5.0 to 2.0 seconds
+			warn("AI Snake brain frozen for", timeSinceLastBrain, "seconds! Forcing update...")
+			self:updateBrain()
+			-- Also ensure it's in the active list
+			local found = false
+			for _, snake in ipairs(AISnake._activeSnakes) do
+				if snake == self then
+					found = true
+					break
+				end
+			end
+			if not found and self._active then
+				table.insert(AISnake._activeSnakes, self)
+				print("🔧 Re-added frozen snake to active list")
+			end
+		end
+	else
+		-- First brain update
+		self:updateBrain()
+		self._lastBrainUpdate = now
+	end
+
+	-- SPAWN PROTECTION - Don't check boundaries for first few seconds
+	local isSpawnProtected = now < (self._spawnProtection or 0)
+
+	-- Validate position (unless spawn protected)
+	if not isSpawnProtected then
+		if self.Position.X < MAP_BOUNDS.minX - 10 or self.Position.X > MAP_BOUNDS.maxX + 10 or
+			self.Position.Z < MAP_BOUNDS.minZ - 10 or self.Position.Z > MAP_BOUNDS.maxZ + 10 then
+			-- Gentle repositioning instead of teleporting
+			local safeX = mathClamp(self.Position.X, MAP_BOUNDS.minX + 50, MAP_BOUNDS.maxX - 50)
+			local safeZ = mathClamp(self.Position.Z, MAP_BOUNDS.minZ + 50, MAP_BOUNDS.maxZ - 50)
+			self.Position = Vector3new(safeX, self.Position.Y, safeZ)
+			self.Direction = Vector3new(mathRandom() - 0.5, 0, mathRandom() - 0.5).Unit
+			self.State = "WANDER"
+			return
+		end
 	end
 
 	-- SMOOTHER turning
@@ -1766,7 +2002,7 @@ function AISnake:updateMovement(dt)
 
 	-- BALANCED TURN SPEED - Good for orb collection but still fair
 	local turnSpeed = self.TurnSpeed
-	
+
 	-- Special case for orb seeking - need better turning to actually collect them!
 	if state == "SEEK_ORB" and self.TargetOrb then
 		-- Calculate angle to orb
@@ -1786,7 +2022,7 @@ function AISnake:updateMovement(dt)
 		-- Emergency collision avoidance needs instant response
 		turnSpeed = turnSpeed * 3.0
 	end
-	
+
 	-- When boosting, turn slightly slower like players do
 	if self.Boosting then
 		turnSpeed = turnSpeed * 0.85
@@ -1805,46 +2041,56 @@ function AISnake:updateMovement(dt)
 	-- Update direction from yaw
 	self.Direction = Vector3new(mathSin(self.CurrentYaw), 0, mathCos(self.CurrentYaw))
 
-	-- BOUNDARY SAFETY CHECK #2: Predictive boundary avoidance
-	-- Check where we'll be in the next second
-	local lookAheadTime = 1.0
-	local futurePos = self.Position + self.Direction * self.Speed * lookAheadTime
-	
-	-- Strong boundary repulsion
-	local boundaryForce = Vector3new(0, 0, 0)
-	local boundaryStrength = 0
-	
-	-- Check each boundary
-	if futurePos.X > MAP_BOUNDS.maxX - 50 then
-		local dist = MAP_BOUNDS.maxX - futurePos.X
-		boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
-		boundaryForce = boundaryForce + Vector3new(-1, 0, 0)
-	elseif futurePos.X < MAP_BOUNDS.minX + 50 then
-		local dist = futurePos.X - MAP_BOUNDS.minX
-		boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
-		boundaryForce = boundaryForce + Vector3new(1, 0, 0)
+	-- Movement variation
+	if self.State == "WANDER" or self.State == "FLEE" then
+		local wobbleTime = tick() * 2
+		local wobbleAmount = 0.1
+		local wobble = Vector3new(
+			math.sin(wobbleTime) * wobbleAmount,
+			0,
+			math.cos(wobbleTime * 1.3) * wobbleAmount
+		)
+		self.Direction = (self.Direction + wobble).Unit
 	end
-	
-	if futurePos.Z > MAP_BOUNDS.maxZ - 50 then
-		local dist = MAP_BOUNDS.maxZ - futurePos.Z
-		boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
-		boundaryForce = boundaryForce + Vector3new(0, 0, -1)
-	elseif futurePos.Z < MAP_BOUNDS.minZ + 50 then
-		local dist = futurePos.Z - MAP_BOUNDS.minZ
-		boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
-		boundaryForce = boundaryForce + Vector3new(0, 0, 1)
-	end
-	
-	-- Apply boundary force if needed
-	if boundaryStrength > 0.1 then
-		boundaryForce = boundaryForce.Unit
-		-- Blend with current direction
-		self.Direction = (self.Direction * (1 - boundaryStrength) + boundaryForce * boundaryStrength).Unit
-		-- Force state change
-		if boundaryStrength > 0.5 then
-			self.State = "AVOID_BOUNDARY"
-			self.TargetOrb = nil
-			self.TargetSnake = nil
+
+	-- REMOVED: Emergency giant snake escape (causes teleporting)
+
+	-- Boundary force (gentler, only when not spawn protected)
+	if not isSpawnProtected then
+		local lookAheadTime = 1.0
+		local futurePos = self.Position + self.Direction * self.Speed * lookAheadTime
+
+		local boundaryForce = Vector3new(0, 0, 0)
+		local boundaryStrength = 0
+
+		if futurePos.X > MAP_BOUNDS.maxX - 50 then
+			local dist = MAP_BOUNDS.maxX - futurePos.X
+			boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
+			boundaryForce = boundaryForce + Vector3new(-1, 0, 0)
+		elseif futurePos.X < MAP_BOUNDS.minX + 50 then
+			local dist = futurePos.X - MAP_BOUNDS.minX
+			boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
+			boundaryForce = boundaryForce + Vector3new(1, 0, 0)
+		end
+
+		if futurePos.Z > MAP_BOUNDS.maxZ - 50 then
+			local dist = MAP_BOUNDS.maxZ - futurePos.Z
+			boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
+			boundaryForce = boundaryForce + Vector3new(0, 0, -1)
+		elseif futurePos.Z < MAP_BOUNDS.minZ + 50 then
+			local dist = futurePos.Z - MAP_BOUNDS.minZ
+			boundaryStrength = mathMax(boundaryStrength, 1 - (dist / 50))
+			boundaryForce = boundaryForce + Vector3new(0, 0, 1)
+		end
+
+		if boundaryStrength > 0.1 then
+			boundaryForce = boundaryForce.Unit
+			self.Direction = (self.Direction * (1 - boundaryStrength) + boundaryForce * boundaryStrength).Unit
+			if boundaryStrength > 0.5 then
+				self.State = "AVOID_BOUNDARY"
+				self.TargetOrb = nil
+				self.TargetSnake = nil
+			end
 		end
 	end
 
@@ -1898,82 +2144,42 @@ function AISnake:updateMovement(dt)
 		self.Speed = mathMax(self.NormalSpeed, self.NormalSpeed * speedMultiplier)
 	end
 
-	-- BOUNDARY SAFETY CHECK #3: Final position update with clamping
-	-- Move the snake
+	-- Position update (with clamping only when not spawn protected)
 	local moveDistance = self.Speed * dt
 	local newPosition = self.Position + self.Direction * moveDistance
-	
-	-- Soft clamp with margin
-	local margin = 20
-	local clampedX = mathClamp(newPosition.X, MAP_BOUNDS.minX + margin, MAP_BOUNDS.maxX - margin)
-	local clampedZ = mathClamp(newPosition.Z, MAP_BOUNDS.minZ + margin, MAP_BOUNDS.maxZ - margin)
-	
-	-- If clamping occurred, we hit a boundary
-	if clampedX ~= newPosition.X or clampedZ ~= newPosition.Z then
-		-- Force a random turn away from edge
-		local escapeAngle = mathRandom() * mathPi - mathPi/2  -- -90 to +90 degrees
-		local currentAngle = mathAtan2(self.Direction.X, self.Direction.Z)
-		local newAngle = currentAngle + escapeAngle
-		
-		self.Direction = Vector3new(mathSin(newAngle), 0, mathCos(newAngle))
-		self.CurrentYaw = newAngle
-		self.TargetYaw = newAngle
-		
-		-- Clear any targets
-		self.TargetOrb = nil
-		self.TargetSnake = nil
-		self.State = "WANDER"
-		
-		-- Boundary clamped silently
-	end
-	
-	-- Update position
-	self.Position = Vector3new(clampedX, newPosition.Y, clampedZ)
-	
-	-- STUCK DETECTION - Check if snake hasn't moved much
-	if now - self._lastStuckCheck > 2 then  -- Check every 2 seconds
-		self._lastStuckCheck = now
-		
-		-- Add current position to history
-		table.insert(self._lastPositions, 1, self.Position)
-		if #self._lastPositions > 5 then
-			table.remove(self._lastPositions)  -- Keep only last 5 positions
+
+	if not isSpawnProtected then
+		local margin = 20
+		local clampedX = mathClamp(newPosition.X, MAP_BOUNDS.minX + margin, MAP_BOUNDS.maxX - margin)
+		local clampedZ = mathClamp(newPosition.Z, MAP_BOUNDS.minZ + margin, MAP_BOUNDS.maxZ - margin)
+
+		if clampedX ~= newPosition.X or clampedZ ~= newPosition.Z then
+			local escapeAngle = mathRandom() * mathPi - mathPi/2
+			local currentAngle = mathAtan2(self.Direction.X, self.Direction.Z)
+			local newAngle = currentAngle + escapeAngle
+
+			self.Direction = Vector3new(mathSin(newAngle), 0, mathCos(newAngle))
+			self.CurrentYaw = newAngle
+			self.TargetYaw = newAngle
+
+			self.TargetOrb = nil
+			self.TargetSnake = nil
+			self.State = "WANDER"
 		end
-		
-		-- If we have enough history, check if stuck
-		if #self._lastPositions >= 5 then
-			local totalMovement = 0
-			for i = 2, #self._lastPositions do
-				totalMovement = totalMovement + (self._lastPositions[i] - self._lastPositions[i-1]).Magnitude
-			end
-			
-			-- If barely moved in 10 seconds (5 checks * 2 seconds)
-			if totalMovement < 50 then
-				-- Snake appears stuck, teleporting to new position
-				-- Teleport to random safe position
-				local safeAngle = mathRandom() * 2 * mathPi
-				local safeRadius = mathRandom(100, 200)
-				self.Position = Vector3new(
-					mathCos(safeAngle) * safeRadius,
-					self.Position.Y,
-					mathSin(safeAngle) * safeRadius
-				)
-				-- Random new direction
-				self.Direction = Vector3new(mathRandom() - 0.5, 0, mathRandom() - 0.5).Unit
-				self.CurrentYaw = mathAtan2(self.Direction.X, self.Direction.Z)
-				self.TargetYaw = self.CurrentYaw
-				self.State = "WANDER"
-				self._lastPositions = {}  -- Clear history
-			end
-		end
+
+		self.Position = Vector3new(clampedX, newPosition.Y, clampedZ)
+	else
+		self.Position = newPosition
 	end
-	
+
+	-- REMOVED: Stuck detection that causes teleporting
+
 	self.RootPart.Position = self.Position
 
 	local headOffset = self.Direction * 1.5
 	local newHeadPos = self.Position + headOffset
 	self.HeadParts.head.CFrame = CFramelookAt(newHeadPos, newHeadPos + self.Direction)
-	
+
 	-- ENSURE AI SNAKE HEAD STAYS INVISIBLE
 	if self.HeadParts.head.Transparency ~= 1 then
 		self.HeadParts.head.Transparency = 1
@@ -1981,22 +2187,22 @@ function AISnake:updateMovement(dt)
 
 	-- Set velocity for collision detection
 	self.HeadParts.head.AssemblyLinearVelocity = self.Direction * self.Speed
-	
+
 	-- CHECK FOR ORB PICKUPS (including upgrade orbs)
 	-- Look for orbs in workspace directly (OrbSpawner puts them there)
 	local headPos = self.HeadParts.head.Position
 	local pickupRadius = 8  -- Increased for better upgrade orb pickup (they're bigger)
-	
+
 	-- Check both workspace and any orb folders
 	local orbsToCheck = {}
-	
+
 	-- Add orbs from workspace
 	for _, obj in pairs(Workspace:GetChildren()) do
 		if obj:IsA("BasePart") and (obj.Name == "Orb" or obj.Name == "UpgradeOrb" or obj.Name == "DeathOrb") then
 			table.insert(orbsToCheck, obj)
 		end
 	end
-	
+
 	-- Also check OrbFolder if it exists
 	local orbFolder = Workspace:FindFirstChild("OrbFolder") or Workspace:FindFirstChild("Orbs")
 	if orbFolder then
@@ -2006,26 +2212,26 @@ function AISnake:updateMovement(dt)
 			end
 		end
 	end
-	
+
 	-- Now check all orbs
 	for _, orb in pairs(orbsToCheck) do
 		if orb:IsA("BasePart") and orb.Parent then
 			local dist = (orb.Position - headPos).Magnitude
-			
+
 			if dist <= pickupRadius then
 				-- Check if orb is already being collected
 				local isBeingCollected = orb:GetAttribute("BeingCollected")
 				if isBeingCollected then
 					continue -- Skip this orb
 				end
-				
+
 				-- Mark orb as being collected to prevent double collection
 				orb:SetAttribute("BeingCollected", true)
-				
+
 				-- Handle all orbs the same way
 				local valueObj = orb:FindFirstChild("Value")
 				local orbValue = valueObj and valueObj.Value or 1
-				
+
 				if orb.Name == "UpgradeOrb" then
 					-- Apply upgrade
 					if SnakeUpgrades then
@@ -2036,7 +2242,7 @@ function AISnake:updateMovement(dt)
 					-- Regular orb - grow the snake
 					self:grow(orbValue)
 				end
-				
+
 				-- Destroy the orb
 				orb:Destroy()
 				break  -- Only pick up one orb per frame
@@ -2067,10 +2273,10 @@ function AISnake:updateMovement(dt)
 
 	-- Segment following (OPTIMIZED)
 	local followSpeed = self.IsBoosting and self.BoostFollowSpeed or self.FollowSpeed
-	
+
 	-- Initialize frame counter if needed
 	self._segmentUpdateFrame = (self._segmentUpdateFrame or 0) + 1
-	
+
 	-- Adaptive segment update skip based on snake length (less aggressive)
 	local segmentSkip = SEGMENT_UPDATE_SKIP
 	if self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
@@ -2078,10 +2284,10 @@ function AISnake:updateMovement(dt)
 	elseif self.CurrentLength > LONG_SNAKE_THRESHOLD then
 		segmentSkip = 1  -- No skipping for medium-long snakes
 	end
-	
+
 	-- Update different segments on different frames to spread the load
 	local updateOffset = self._segmentUpdateFrame % segmentSkip
-	
+
 	-- Update segments with adaptive skipping
 	for i = 1 + updateOffset, self.CurrentLength, segmentSkip do
 		local segment = self.Segments[i]
@@ -2096,7 +2302,7 @@ function AISnake:updateMovement(dt)
 				end
 				local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
 				local currentSegmentPos = segment.Position
-				
+
 				-- Anti-gap check (from CharacterSetup)
 				if i > 1 then
 					local prevSegment = self.Segments[i - 1]
@@ -2109,13 +2315,13 @@ function AISnake:updateMovement(dt)
 						end
 					end
 				end
-				
+
 				local newPos = currentSegmentPos:Lerp(segmentPos, followSpeed)
 				segment.CFrame = CFramenew(newPos)
 			end
 		end
 	end
-	
+
 	-- For very long snakes, use even more aggressive optimization
 	if self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
 		-- Only update tail segments every 10 frames
@@ -2133,7 +2339,7 @@ function AISnake:updateMovement(dt)
 							spacingMultiplier = 0.2
 						end
 						local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
-						
+
 						-- Anti-gap for tail too
 						if i > 300 then
 							local prevSegment = self.Segments[i - 1]
@@ -2145,7 +2351,7 @@ function AISnake:updateMovement(dt)
 								end
 							end
 						end
-						
+
 						segment.Position = segmentPos  -- Direct position set for tail
 					end
 				end
@@ -2157,8 +2363,11 @@ function AISnake:updateMovement(dt)
 	local myHead = self.HeadParts and self.HeadParts.head
 	if not myHead or not myHead.Parent then return end
 
+	-- Skip collision detection during spawn protection
+	if isSpawnProtected then return end
+
 	self._collisionCheckFrame = (self._collisionCheckFrame or 0) + 1
-	if self._collisionCheckFrame % 4 ~= 0 then return end  -- Check less often
+	if self._collisionCheckFrame % 6 ~= 0 then return end  -- Check even less often
 
 	local searchRadius = 3.5
 	local nearbyEntities = SpatialGrid.QueryRadius(myHead.Position, searchRadius)
@@ -2169,6 +2378,11 @@ function AISnake:updateMovement(dt)
 
 		if isPartsColliding(myHead, otherPart) then
 			local otherOwner = data.owner
+
+			-- Add double-check to prevent false positives
+			if (myHead.Position - otherPart.Position).Magnitude > 5 then
+				continue  -- Skip if distance is too far (false positive)
+			end
 
 			if data.type == "AI_HEAD" then
 				if tostring(self) < tostring(otherOwner) then
@@ -2242,9 +2456,12 @@ function AISnake:updateMovement(dt)
 	end
 end
 
--- === UPDATE LOOPS (unchanged) ===
+-- === UPDATE LOOPS ===
 if AISnake._movementConnection then AISnake._movementConnection:Disconnect() end
 if AISnake._brainConnection then AISnake._brainConnection:Disconnect() end
+
+-- Add a simple brain update counter
+local brainUpdateCounter = 0
 
 AISnake._movementConnection = RunService.Heartbeat:Connect(function(dt)
 	local snakesToUpdate = {}
@@ -2252,6 +2469,19 @@ AISnake._movementConnection = RunService.Heartbeat:Connect(function(dt)
 		local snake = AISnake._activeSnakes[i]
 		if snake and snake._active then
 			table.insert(snakesToUpdate, snake)
+		end
+	end
+
+	-- Update brain every 30 frames (0.5 seconds at 60fps)
+	brainUpdateCounter = brainUpdateCounter + 1
+	if brainUpdateCounter >= 30 then
+		brainUpdateCounter = 0
+		-- Update ALL snakes' brains at once
+		for i = 1, #snakesToUpdate do
+			local snake = snakesToUpdate[i]
+			if snake and snake._active then
+				snake:updateBrain()
+			end
 		end
 	end
 
@@ -2266,8 +2496,28 @@ end)
 AISnake._brainUpdateIndex = 1
 AISnake._spatialGridTimer = 0
 
+-- Periodic cleanup of invalid snakes
+local lastCleanup = 0
+local CLEANUP_INTERVAL = 10  -- Clean every 10 seconds
+
 AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 	AISnake._spatialGridTimer = AISnake._spatialGridTimer + deltaTime
+
+	-- Periodic cleanup of dead/invalid snakes
+	if time - lastCleanup > CLEANUP_INTERVAL then
+		lastCleanup = time
+		local removed = 0
+		for i = #AISnake._activeSnakes, 1, -1 do
+			local snake = AISnake._activeSnakes[i]
+			if not snake or not snake._active or snake._destroyed then
+				table.remove(AISnake._activeSnakes, i)
+				removed = removed + 1
+			end
+		end
+		if removed > 0 then
+			print("🧹 Cleaned up", removed, "invalid AI snakes from active list")
+		end
+	end
 
 	if AISnake._spatialGridTimer >= SPATIAL_GRID_UPDATE_RATE then
 		AISnake._spatialGridTimer = 0
@@ -2312,7 +2562,10 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 	end 
 
 	local snakes = AISnake._activeSnakes
-	if #snakes == 0 then return end
+	if #snakes == 0 then 
+		AISnake._brainUpdateIndex = 1  -- Reset index when no snakes
+		return 
+	end
 
 	-- Get nearest player position for LOD
 	local nearestPlayerPos = nil
@@ -2327,7 +2580,8 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 	end
 
 	for i = 1, BRAIN_UPDATES_PER_FRAME do
-		if AISnake._brainUpdateIndex > #snakes then
+		-- Safety check for index bounds
+		if AISnake._brainUpdateIndex > #snakes or AISnake._brainUpdateIndex < 1 then
 			AISnake._brainUpdateIndex = 1
 		end
 
@@ -2345,7 +2599,7 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 					end
 				end
 			end
-			
+
 			if shouldUpdate then
 				snake:updateBrain()
 			end
