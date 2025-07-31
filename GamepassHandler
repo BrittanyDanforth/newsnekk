@@ -172,8 +172,8 @@ local function applyGamepassBenefits(player)
 
 	if hasGamepass(player, "Magnet") then
 		hasMagnet = true
-		player:SetAttribute("MagnetRange", 2.5)  -- 2.5x collection range
-		print("✅ Player has Magnet gamepass! MagnetRange set to 2.5")
+		player:SetAttribute("MagnetRange", 5)  -- 5x collection range (MUCH MORE POWERFUL!)
+		print("✅ Player has Magnet gamepass! MagnetRange set to 5")
 	else
 		player:SetAttribute("MagnetRange", 1)  -- Default range
 		print("❌ Player does not have Magnet gamepass. MagnetRange set to 1")
@@ -512,6 +512,34 @@ Players.PlayerRemoving:Connect(function(player)
 	playerBoostInventory[player] = nil
 	activeBoosts[player] = nil
 	playerGamepasses[player.UserId] = nil
+end)
+
+-- Handle magnet toggle
+local toggleMagnetRemote = remotes:FindFirstChild("ToggleMagnet")
+if not toggleMagnetRemote then
+	toggleMagnetRemote = Instance.new("RemoteEvent")
+	toggleMagnetRemote.Name = "ToggleMagnet"
+	toggleMagnetRemote.Parent = remotes
+end
+
+toggleMagnetRemote.OnServerEvent:Connect(function(player, state)
+	-- Verify player has magnet gamepass
+	if not hasGamepass(player, "Magnet") then
+		warn("Player trying to toggle magnet without gamepass:", player.Name)
+		return
+	end
+	
+	-- Update magnet state
+	if state then
+		player:SetAttribute("MagnetRange", 5)  -- Turn on with 5x power
+		print("🧲 Magnet activated for", player.Name)
+	else
+		player:SetAttribute("MagnetRange", 1)  -- Turn off (default range)
+		print("🧲 Magnet deactivated for", player.Name)
+	end
+	
+	-- Also set the active state
+	player:SetAttribute("MagnetActive", state)
 end)
 
 print("GamepassHandler loaded successfully with boost system!")

@@ -1059,6 +1059,25 @@ function InventoryUI.selectItem(itemData, card)
 			if btnIcon then btnIcon.Text = "⚡" end
 			InventoryUI.uiElements.equipBtn.BackgroundColor3 = INVENTORY_CONFIG.COLORS.SUCCESS
 		end
+	elseif itemData.type == "Gamepass" and itemData.name == "Magnet" then
+		-- Special handling for Magnet gamepass
+		InventoryUI.uiElements.equipBtn.Visible = true
+		local magnetActive = localPlayer:GetAttribute("MagnetActive")
+		if magnetActive == nil then magnetActive = true end -- Default to on
+		
+		if magnetActive then
+			if btnText then btnText.Text = "DEACTIVATE" end
+			if btnIcon then btnIcon.Text = "⏸️" end
+			InventoryUI.uiElements.equipBtn.BackgroundColor3 = INVENTORY_CONFIG.COLORS.ERROR
+			InventoryUI.uiElements.itemDescription.Text = "🧲 Magnet is ACTIVE! Orbs are being pulled towards you!"
+			InventoryUI.uiElements.itemDescription.TextColor3 = INVENTORY_CONFIG.COLORS.SUCCESS
+		else
+			if btnText then btnText.Text = "ACTIVATE" end
+			if btnIcon then btnIcon.Text = "▶️" end
+			InventoryUI.uiElements.equipBtn.BackgroundColor3 = INVENTORY_CONFIG.COLORS.SUCCESS
+			InventoryUI.uiElements.itemDescription.Text = "🧲 Magnet is OFF. Click to activate magnet power!"
+			InventoryUI.uiElements.itemDescription.TextColor3 = INVENTORY_CONFIG.COLORS.TEXT_SECONDARY
+		end
 	else
 		InventoryUI.uiElements.equipBtn.Visible = true
 		if btnText then btnText.Text = "USE" end
@@ -1155,7 +1174,55 @@ function InventoryUI.equipSelectedItem()
 			end
 		end)
 	elseif InventoryUI.selectedItem.type == "Gamepass" then
-		-- Gamepasses are always active, show info message
+		-- Special handling for Magnet gamepass toggle
+		if InventoryUI.selectedItem.name == "Magnet" then
+			-- Check if magnet is currently active
+			local currentMagnet = localPlayer:GetAttribute("MagnetActive")
+			if currentMagnet == nil then currentMagnet = true end -- Default to on
+			
+			-- Toggle magnet
+			local newState = not currentMagnet
+			localPlayer:SetAttribute("MagnetActive", newState)
+			
+			-- Fire remote to update server
+			local remotes = ReplicatedStorage:WaitForChild("Remotes")
+			local toggleRemote = remotes:FindFirstChild("ToggleMagnet")
+			if not toggleRemote then
+				toggleRemote = Instance.new("RemoteEvent")
+				toggleRemote.Name = "ToggleMagnet"
+				toggleRemote.Parent = remotes
+			end
+			toggleRemote:FireServer(newState)
+			
+			-- Update UI
+			local infoText = InventoryUI.uiElements.itemName
+			local btnText = InventoryUI.uiElements.equipBtn:FindFirstChild("Content") and InventoryUI.uiElements.equipBtn.Content:FindFirstChild("Text")
+			local btnIcon = InventoryUI.uiElements.equipBtn:FindFirstChild("Content") and InventoryUI.uiElements.equipBtn.Content:FindFirstChild("Icon")
+			
+			if newState then
+				infoText.Text = "🧲 MAGNET ACTIVATED"
+				infoText.TextColor3 = INVENTORY_CONFIG.COLORS.SUCCESS
+				InventoryUI.uiElements.itemDescription.Text = "Orbs are being pulled towards you!"
+				InventoryUI.uiElements.itemDescription.TextColor3 = INVENTORY_CONFIG.COLORS.SUCCESS
+				
+				if btnText then btnText.Text = "DEACTIVATE" end
+				if btnIcon then btnIcon.Text = "⏸️" end
+				InventoryUI.uiElements.equipBtn.BackgroundColor3 = INVENTORY_CONFIG.COLORS.ERROR
+			else
+				infoText.Text = "🧲 MAGNET DEACTIVATED"
+				infoText.TextColor3 = INVENTORY_CONFIG.COLORS.WARNING
+				InventoryUI.uiElements.itemDescription.Text = "Click to activate magnet power"
+				InventoryUI.uiElements.itemDescription.TextColor3 = INVENTORY_CONFIG.COLORS.TEXT_SECONDARY
+				
+				if btnText then btnText.Text = "ACTIVATE" end
+				if btnIcon then btnIcon.Text = "▶️" end
+				InventoryUI.uiElements.equipBtn.BackgroundColor3 = INVENTORY_CONFIG.COLORS.SUCCESS
+			end
+			
+			return -- Don't run the default gamepass code
+		end
+		
+		-- Default gamepass handling for other gamepasses
 		local infoText = InventoryUI.uiElements.itemName
 		local originalText = infoText.Text
 		local originalDesc = InventoryUI.uiElements.itemDescription.Text

@@ -771,7 +771,7 @@ task.spawn(function()
 					local totalMagnetPower = magnetRange * tempMagnetRange
 					
 					-- Extended search range for magnetic attraction
-					local searchRange = 12 * totalMagnetPower
+					local searchRange = 20 * totalMagnetPower  -- Increased from 12 to 20 for longer range
 					local nearbyOrbs = getOrbsNearPosition(ph.part.Position, searchRange)
 					
 					for _, orb in ipairs(nearbyOrbs) do
@@ -796,16 +796,20 @@ task.spawn(function()
 									-- Collect the orb
 									atomicCollectOrb(orb, "player", p)
 								elseif totalMagnetPower > 1 and dist < searchRange then
-									-- Magnetic attraction effect
-									local attractionStrength = (totalMagnetPower - 1) * 0.3
+									-- SUPER STRONG magnetic attraction effect
+									local attractionStrength = (totalMagnetPower - 1) * 0.8  -- Increased from 0.3 to 0.8
 									local direction = (ph.part.Position - orb.Position).Unit
-									local pullForce = direction * attractionStrength * (1 - dist / searchRange)
+									local pullForce = direction * attractionStrength * (1 - dist / searchRange) * 2  -- Added *2 multiplier
 									
-									-- Smoothly move orb towards player
+									-- Smoothly move orb towards player MUCH FASTER
 									orb.CFrame = orb.CFrame + pullForce
 									
-									-- Add a subtle spin effect
-									orb.CFrame = orb.CFrame * CFrame.Angles(0, math.rad(5), 0)
+									-- Add a faster spin effect
+									orb.CFrame = orb.CFrame * CFrame.Angles(0, math.rad(15), 0)  -- Increased from 5 to 15
+									
+									-- Add vertical bobbing for visual effect
+									local bobAmount = math.sin(tick() * 10) * 0.1
+									orb.CFrame = orb.CFrame + Vector3.new(0, bobAmount, 0)
 								end
 							end
 						end
@@ -854,18 +858,25 @@ local function updateMagnetEffect(player)
 	if totalRange > 1 then
 		-- Create or update magnet effect
 		if not magnetEffects[player] then
-			-- Create main effect
+			-- Create main effect - a rotating ring
 			local effect = Instance.new("Part")
 			effect.Name = "MagnetEffect"
 			effect.Shape = Enum.PartType.Cylinder
 			effect.Material = Enum.Material.ForceField
 			effect.Color = Color3.fromRGB(147, 51, 234)  -- Purple like the gamepass
-			effect.Transparency = 0.8
+			effect.Transparency = 0.7
 			effect.CanCollide = false
 			effect.CanQuery = false
 			effect.CanTouch = false
 			effect.Anchored = true
 			effect.Parent = workspace
+			
+			-- Add inner glow
+			local innerGlow = Instance.new("PointLight")
+			innerGlow.Brightness = 2
+			innerGlow.Color = Color3.fromRGB(147, 51, 234)
+			innerGlow.Range = 20
+			innerGlow.Parent = effect
 			
 			-- Add particle effect for extra visual appeal
 			local attachment = Instance.new("Attachment")
@@ -873,14 +884,31 @@ local function updateMagnetEffect(player)
 			
 			local particles = Instance.new("ParticleEmitter")
 			particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-			particles.Color = ColorSequence.new(Color3.fromRGB(147, 51, 234))
+			particles.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(147, 51, 234)),
+				ColorSequenceKeypoint.new(0.5, Color3.fromRGB(200, 100, 255)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 100, 255))
+			})
 			particles.LightEmission = 1
-			particles.Rate = 20
+			particles.LightInfluence = 0
+			particles.Rate = 50 * totalRange  -- More particles for stronger magnet
 			particles.Lifetime = NumberRange.new(1, 2)
-			particles.Speed = NumberRange.new(2)
-			particles.SpreadAngle = Vector2.new(180, 180)
+			particles.Speed = NumberRange.new(5)
+			particles.SpreadAngle = Vector2.new(360, 360)
 			particles.VelocityInheritance = 0
 			particles.EmissionDirection = Enum.NormalId.Top
+			particles.Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.5),
+				NumberSequenceKeypoint.new(0.5, 0.3),
+				NumberSequenceKeypoint.new(1, 1)
+			})
+			particles.Size = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.5),
+				NumberSequenceKeypoint.new(0.5, 1),
+				NumberSequenceKeypoint.new(1, 0)
+			})
+			particles.Rotation = NumberRange.new(0, 360)
+			particles.RotSpeed = NumberRange.new(100)
 			particles.Parent = attachment
 			
 			magnetEffects[player] = effect
@@ -888,12 +916,26 @@ local function updateMagnetEffect(player)
 		
 		local effect = magnetEffects[player]
 		local hrp = player.Character.HumanoidRootPart
-		local baseRange = 3.2 + 3  -- orb.Size.X * 0.8 + 3 (average orb size)
-		local visualRange = baseRange * totalRange * 2  -- Diameter
 		
-		effect.Size = Vector3.new(0.5, visualRange, visualRange)
+		-- Show actual magnet range
+		local searchRange = 20 * totalRange  -- Match the actual search range
+		
+		effect.Size = Vector3.new(0.5, searchRange * 2, searchRange * 2)  -- Diameter
 		effect.CFrame = hrp.CFrame * CFrame.Angles(0, 0, math.rad(90))
 		effect.Position = Vector3.new(effect.Position.X, 0.5, effect.Position.Z)
+		
+		-- Rotate the effect for visual appeal
+		effect.CFrame = effect.CFrame * CFrame.Angles(0, math.rad(tick() * 50), 0)
+		
+		-- Pulse effect
+		local pulse = math.sin(tick() * 3) * 0.1 + 0.7
+		effect.Transparency = pulse
+		
+		-- Update particle rate based on power
+		local particles = effect:FindFirstChildOfClass("Attachment"):FindFirstChildOfClass("ParticleEmitter")
+		if particles then
+			particles.Rate = 50 * totalRange
+		end
 	else
 		-- Remove effect if no magnet
 		if magnetEffects[player] then
