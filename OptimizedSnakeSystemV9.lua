@@ -1,47 +1,29 @@
 --[[
-	OPTIMIZED SNAKE SYSTEM V9
-	ULTIMATE - SEAMLESS UNIFIED RENDERING (FIXED GROWTH)
+	OPTIMIZED SNAKE SYSTEM V9.0 - ULTIMATE
+	SEAMLESS UNIFIED RENDERING (FIXED GROWTH)
 	
-	Features:
-	- Professional visual effects
-	- Fixed gap issues  
-	- Improved LOD handling
-	- Stable at extreme lengths
+	Professional visual effects with fixed gaps, improved LOD, and stability at extreme lengths
 --]]
 
-local module = {}
-
--- Services
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
+local CollectionService = game:GetService("CollectionService")
+
+local OptimizedSnakeSystemV9 = {}
+OptimizedSnakeSystemV9.__index = OptimizedSnakeSystemV9
 
 -- Constants
-local POSITION_HISTORY_SIZE = 300 -- Increased for smoother trails
-local UPDATE_RATE = 1/60
-local SMOOTH_FACTOR = 0.92
-local MAX_RENDER_DISTANCE = 500
-local MOBILE_MAX_RENDER_DISTANCE = 350
-local PERFORMANCE_CHECK_INTERVAL = 2
+local MIN_SEGMENT_DISTANCE = 0.1
+local BEAM_ATTACHMENT_OFFSET = 0.5
+local POSITION_HISTORY_SIZE = 5000 -- Increased for massive snakes!
+local LOD_DISTANCE_THRESHOLDS = {150, 300, 500}
+local LOD_SEGMENT_SKIP = {1, 2, 4}
 
--- Performance detection
-local IS_MOBILE = game:GetService("UserInputService").TouchEnabled
-local LOW_PERFORMANCE_MODE = false
-
--- Cached references
-local workspace = game.Workspace
-local Vector3new = Vector3.new
-local CFramenew = CFrame.new
-local CFramelookAt = CFrame.lookAt
-local mathmin = math.min
-local mathmax = math.max
-local mathabs = math.abs
-local mathsin = math.sin
-local mathcos = math.cos
-local mathrad = math.rad
-local tabinsert = table.insert
-local tabremove = table.remove
+-- Initialize system
+function OptimizedSnakeSystemV9.init()
+	print("Snake System V9.0 - ULTIMATE SEAMLESS UNIFIED RENDERING initialized")
+end
 
 -- Snake class
 local Snake = {}
@@ -50,560 +32,455 @@ Snake.__index = Snake
 function Snake.new(character, config)
 	local self = setmetatable({}, Snake)
 	
-	-- Core properties
+	-- Basics
 	self.character = character
-	self.humanoid = character:WaitForChild("Humanoid")
-	self.rootPart = character:WaitForChild("HumanoidRootPart")
-	self.player = game.Players:GetPlayerFromCharacter(character)
+	self.humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+	self.humanoid = character:FindFirstChild("Humanoid")
+	
+	if not self.humanoidRootPart or not self.humanoid then
+		warn("Missing required components")
+		return nil
+	end
 	
 	-- Configuration
 	self.config = config or {}
-	self.length = config.InitialLength or 500
-	self.segmentSpacing = config.SegmentSpacing or 3.2
-	self.segmentSize = config.SegmentSize or Vector3new(4, 4, 4)
-	self.headSize = config.HeadSize or Vector3new(4.5, 4.5, 4.5)
-	self.maxSegments = config.MaxSegments or 50000
-	self.growthMultiplier = config.GrowthMultiplier or 1
+	self.length = self.config.InitialLength or 500
+	self.segmentSpacing = self.config.SegmentSpacing or 3.2
+	self.segmentSize = self.config.SegmentSize or Vector3.new(4, 4, 4)
+	self.headSize = self.config.HeadSize or Vector3.new(4.5, 4.5, 4.5)
+	self.maxSegments = self.config.MaxSegments or 50000
+	self.growthRate = self.config.GrowthRate or 15
 	
-	-- Visual configuration
-	self.headColor = config.HeadColor or Color3.fromRGB(76, 217, 100)
-	self.bodyColors = config.BodyColors or {
+	-- Visuals
+	self.headColor = self.config.HeadColor or Color3.fromRGB(76, 217, 100)
+	self.bodyColors = self.config.BodyColors or {
 		Color3.fromRGB(60, 180, 80),
 		Color3.fromRGB(80, 200, 100),
 		Color3.fromRGB(100, 220, 120),
 		Color3.fromRGB(80, 200, 100),
 		Color3.fromRGB(60, 180, 80),
 	}
-	self.headMaterial = config.HeadMaterial or Enum.Material.Neon
-	self.bodyMaterial = config.BodyMaterial or Enum.Material.Neon
-	self.glowIntensity = config.GlowIntensity or 2
-	self.glowRange = config.GlowRange or 6
-	self.isRainbow = config.IsRainbow or false
+	self.material = self.config.BodyMaterial or Enum.Material.Neon
+	self.headMaterial = self.config.HeadMaterial or Enum.Material.Neon
 	
-	-- Movement and physics
-	self.positionHistory = {}
-	self.lastPosition = self.rootPart.Position
-	self.velocity = Vector3new(0, 0, 0)
-	self.smoothedVelocity = Vector3new(0, 0, 0)
-	self.targetBend = 0
-	self.currentBend = 0
-	
-	-- Unified rendering
-	self.unifiedBody = nil
-	self.beams = {}
-	self.segmentCount = 0
-	self.lastLODCheck = 0
-	self.currentLOD = 1
+	-- Performance
+	self.lastLODUpdate = 0
+	self.LODUpdateInterval = 0.5
+	self.currentLOD = 0
 	
 	-- State
-	self.isDestroyed = false
+	self.segments = {}
+	self.positionHistory = {}
+	self.lastPosition = self.humanoidRootPart.Position
+	self.speed = 16
+	self.turnSpeed = 5
+	self.destroyed = false
+	self.targetLength = self.length
+	self.actualSegmentCount = 0
+	self.growing = false
 	self.isBoosting = false
-	self.isGhostMode = false
-	self.connections = {}
-	self.lastUpdateTime = tick()
-	self.frameCount = 0
-	self.lastPerformanceCheck = 0
+	self.rainbowMode = false
 	
-	-- Create snake
-	self:setup()
+	-- Growth animation
+	self.growthStartTime = 0
+	self.growthDuration = 0.5
+	self.startLength = self.length
+	
+	-- Model
+	self.model = Instance.new("Model")
+	self.model.Name = "Snake_" .. character.Name
+	self.model.Parent = workspace
+	
+	-- Create unified rendering
+	self:createUnifiedBody()
+	
+	-- Setup updates
+	self:setupUpdates()
 	
 	return self
 end
 
-function Snake:setup()
-	-- Hide character parts
-	for _, part in ipairs(self.character:GetDescendants()) do
-		if part:IsA("BasePart") and part ~= self.rootPart then
-			part.Transparency = 1
-			part.CanCollide = false
-		elseif part:IsA("Decal") or part:IsA("Texture") then
-			part.Transparency = 1
-		elseif part:IsA("Accessory") then
-			part:Destroy()
-		end
-	end
-	
-	-- Initialize head
+function Snake:createUnifiedBody()
+	-- Create head
 	self.head = Instance.new("Part")
-	self.head.Name = "SnakeHead"
-	self.head.Shape = Enum.PartType.Ball
-	self.head.Material = self.headMaterial
+	self.head.Name = "Head"
 	self.head.Size = self.headSize
+	self.head.Material = self.headMaterial
 	self.head.Color = self.headColor
 	self.head.TopSurface = Enum.SurfaceType.Smooth
 	self.head.BottomSurface = Enum.SurfaceType.Smooth
 	self.head.CanCollide = false
-	self.head.Massless = true
-	self.head.Parent = self.character
+	self.head.CFrame = self.humanoidRootPart.CFrame
+	self.head.Parent = self.model
 	
-	-- Add glow
-	local headGlow = Instance.new("PointLight")
-	headGlow.Brightness = self.glowIntensity
-	headGlow.Range = self.glowRange
-	headGlow.Color = self.headColor
-	headGlow.Parent = self.head
+	-- Head mesh
+	local headMesh = Instance.new("SpecialMesh")
+	headMesh.MeshType = Enum.MeshType.Sphere
+	headMesh.Parent = self.head
 	
-	-- Create unified body
-	self:createUnifiedBody()
+	-- Head glow
+	if self.config.GlowIntensity then
+		local headGlow = Instance.new("PointLight")
+		headGlow.Brightness = self.config.GlowIntensity
+		headGlow.Range = self.config.GlowRange or 6
+		headGlow.Color = self.headColor
+		headGlow.Parent = self.head
+	end
 	
-	-- Start update loop
-	self:startUpdateLoop()
+	-- Create segment pool
+	self.segmentPool = {}
+	self.beamPool = {}
 	
-	-- Performance monitoring
-	self:startPerformanceMonitoring()
+	-- Pre-create segments and beams
+	local preCreateCount = math.min(100, math.ceil(self.length / self.segmentSpacing))
+	for i = 1, preCreateCount do
+		self:createSegmentPair(i)
+	end
+	
+	-- Initialize with full body
+	self:updateUnifiedBody()
 end
 
-function Snake:createUnifiedBody()
-	-- Calculate initial segment count
-	self.segmentCount = math.floor(self.length / self.segmentSpacing)
-	self.segmentCount = mathmin(self.segmentCount, self.maxSegments)
-	
-	-- Create unified body model
-	self.unifiedBody = Instance.new("Model")
-	self.unifiedBody.Name = "SnakeBody"
-	self.unifiedBody.Parent = self.character
-	
-	-- Create segments with LOD in mind
-	local segmentsToCreate = mathmin(self.segmentCount, 100) -- Start with limited segments
-	
-	for i = 1, segmentsToCreate do
-		local segment = Instance.new("Part")
-		segment.Name = "Segment" .. i
-		segment.Shape = Enum.PartType.Ball
-		segment.Material = self.bodyMaterial
-		segment.Size = self.segmentSize
-		segment.TopSurface = Enum.SurfaceType.Smooth
-		segment.BottomSurface = Enum.SurfaceType.Smooth
-		segment.CanCollide = false
-		segment.Massless = true
-		segment.Anchored = true
-		
-		-- Color pattern
-		local colorIndex = ((i - 1) % #self.bodyColors) + 1
-		segment.Color = self.bodyColors[colorIndex]
-		
-		-- Add glow for nearby segments
-		if i <= 20 then
-			local glow = Instance.new("PointLight")
-			glow.Brightness = self.glowIntensity * 0.5
-			glow.Range = self.glowRange * 0.5
-			glow.Color = segment.Color
-			glow.Parent = segment
-		end
-		
-		segment.Parent = self.unifiedBody
-		
-		-- Create beam for segment
-		if i > 1 then
-			local prevSegment = self.unifiedBody:FindFirstChild("Segment" .. (i - 1))
-			if prevSegment then
-				self:createBeam(prevSegment, segment, i)
-			end
-		end
-	end
-	
-	-- Connect head to first segment
-	local firstSegment = self.unifiedBody:FindFirstChild("Segment1")
-	if firstSegment then
-		self:createBeam(self.head, firstSegment, 0)
-	end
-end
-
-function Snake:createBeam(part1, part2, index)
-	local attachment1 = Instance.new("Attachment")
-	attachment1.Parent = part1
-	
-	local attachment2 = Instance.new("Attachment")
-	attachment2.Parent = part2
-	
-	local beam = Instance.new("Beam")
-	beam.Attachment0 = attachment1
-	beam.Attachment1 = attachment2
-	beam.Width0 = self.segmentSize.X
-	beam.Width1 = self.segmentSize.X
-	beam.FaceCamera = true
-	beam.Segments = 1
-	beam.Transparency = NumberSequence.new(0)
-	
-	-- Color based on segment
-	local colorIndex = (index % #self.bodyColors) + 1
-	beam.Color = ColorSequence.new(self.bodyColors[colorIndex])
-	
-	beam.Parent = part1
-	
-	table.insert(self.beams, {
-		beam = beam,
-		attachment1 = attachment1,
-		attachment2 = attachment2,
-		index = index
-	})
-end
-
-function Snake:startUpdateLoop()
-	self.connections.update = RunService.Heartbeat:Connect(function(deltaTime)
-		if self.isDestroyed then return end
-		
-		self.frameCount = self.frameCount + 1
-		
-		-- Update position history
-		self:updatePositionHistory()
-		
-		-- Update unified body
-		self:updateUnifiedBody()
-		
-		-- Handle rainbow effect
-		if self.isRainbow then
-			self:updateRainbowEffect()
-		end
-		
-		-- Check LOD every few frames
-		if self.frameCount % 30 == 0 then
-			self:updateLOD()
-		end
-		
-		self.lastUpdateTime = tick()
-	end)
-end
-
-function Snake:updatePositionHistory()
-	local currentPos = self.rootPart.Position
-	local currentVel = self.rootPart.AssemblyLinearVelocity
-	
-	-- Smooth velocity
-	self.smoothedVelocity = self.smoothedVelocity:Lerp(currentVel, 0.15)
-	
-	-- Add position to history
-	tabinsert(self.positionHistory, 1, {
-		position = currentPos,
-		velocity = self.smoothedVelocity,
-		time = tick()
-	})
-	
-	-- Maintain history size
-	while #self.positionHistory > POSITION_HISTORY_SIZE do
-		tabremove(self.positionHistory)
-	end
-	
-	-- Update head position
-	if self.head then
-		self.head.CFrame = CFramenew(currentPos)
-	end
-end
-
-function Snake:updateUnifiedBody()
-	if not self.unifiedBody or #self.positionHistory < 2 then return end
-	
-	local camera = workspace.CurrentCamera
-	local cameraPos = camera and camera.CFrame.Position or self.rootPart.Position
-	
-	-- Update visible segments based on actual snake length
-	local visibleSegments = math.floor(self.length / self.segmentSpacing)
-	visibleSegments = mathmin(visibleSegments, self.segmentCount)
-	
-	-- LOD calculations
-	local maxRenderDist = IS_MOBILE and MOBILE_MAX_RENDER_DISTANCE or MAX_RENDER_DISTANCE
-	if LOW_PERFORMANCE_MODE then
-		maxRenderDist = maxRenderDist * 0.7
-	end
-	
-	-- Update segments
-	for i = 1, visibleSegments do
-		local segment = self.unifiedBody:FindFirstChild("Segment" .. i)
-		if not segment and i <= 100 then -- Create segments on demand up to 100
-			self:createSegmentOnDemand(i)
-			segment = self.unifiedBody:FindFirstChild("Segment" .. i)
-		end
-		
-		if segment then
-			-- Calculate position along the snake
-			local targetIndex = math.floor(i * self.segmentSpacing / self.segmentSize.X) + 1
-			if targetIndex <= #self.positionHistory then
-				local historyPoint = self.positionHistory[targetIndex]
-				local targetPos = historyPoint.position
-				
-				-- Apply distance-based LOD
-				local distToCam = (targetPos - cameraPos).Magnitude
-				local shouldRender = distToCam < maxRenderDist
-				
-				if shouldRender then
-					-- Smooth position
-					segment.CFrame = segment.CFrame:Lerp(CFramenew(targetPos), SMOOTH_FACTOR)
-					segment.Transparency = 0
-					
-					-- Update beam
-					local beamData = self.beams[i]
-					if beamData and beamData.beam then
-						beamData.beam.Enabled = true
-						
-						-- Smooth beam width based on position
-						local widthMultiplier = 1 - (i / visibleSegments) * 0.2
-						beamData.beam.Width0 = self.segmentSize.X * widthMultiplier
-						beamData.beam.Width1 = self.segmentSize.X * widthMultiplier
-					end
-				else
-					segment.Transparency = 1
-					local beamData = self.beams[i]
-					if beamData and beamData.beam then
-						beamData.beam.Enabled = false
-					end
-				end
-			end
-		end
-	end
-	
-	-- Hide excess segments
-	for i = visibleSegments + 1, self.segmentCount do
-		local segment = self.unifiedBody:FindFirstChild("Segment" .. i)
-		if segment then
-			segment.Transparency = 1
-			local beamData = self.beams[i]
-			if beamData and beamData.beam then
-				beamData.beam.Enabled = false
-			end
-		end
-	end
-end
-
-function Snake:createSegmentOnDemand(index)
+function Snake:createSegmentPair(index)
+	-- Create segment
 	local segment = Instance.new("Part")
 	segment.Name = "Segment" .. index
-	segment.Shape = Enum.PartType.Ball
-	segment.Material = self.bodyMaterial
 	segment.Size = self.segmentSize
+	segment.Material = self.material
 	segment.TopSurface = Enum.SurfaceType.Smooth
 	segment.BottomSurface = Enum.SurfaceType.Smooth
 	segment.CanCollide = false
-	segment.Massless = true
-	segment.Anchored = true
+	segment.CFrame = self.humanoidRootPart.CFrame
+	segment.Parent = self.model
 	
-	-- Color pattern
+	-- Mesh for smoother appearance
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Parent = segment
+	
+	-- Create attachments for beam
+	local attachment0 = Instance.new("Attachment")
+	attachment0.Name = "BeamAttachment0"
+	attachment0.Position = Vector3.new(0, 0, BEAM_ATTACHMENT_OFFSET)
+	attachment0.Parent = segment
+	
+	local attachment1 = Instance.new("Attachment")
+	attachment1.Name = "BeamAttachment1"
+	attachment1.Position = Vector3.new(0, 0, -BEAM_ATTACHMENT_OFFSET)
+	attachment1.Parent = segment
+	
+	-- Create beam to next segment
+	local beam = Instance.new("Beam")
+	beam.Name = "Connector" .. index
+	beam.FaceCamera = true
+	beam.Width0 = self.segmentSize.X
+	beam.Width1 = self.segmentSize.X
+	beam.Segments = 1
+	beam.Transparency = NumberSequence.new(0)
+	beam.LightEmission = 0.5
+	beam.LightInfluence = 0
+	beam.Parent = segment
+	
+	-- Store references
+	self.segmentPool[index] = segment
+	self.beamPool[index] = beam
+	
+	-- Set initial properties
 	local colorIndex = ((index - 1) % #self.bodyColors) + 1
 	segment.Color = self.bodyColors[colorIndex]
+	beam.Color = ColorSequence.new(self.bodyColors[colorIndex])
 	
-	segment.Parent = self.unifiedBody
+	return segment, beam
+end
+
+function Snake:updateUnifiedBody()
+	if self.destroyed then return end
 	
-	-- Create beam connection
-	if index > 1 then
-		local prevSegment = self.unifiedBody:FindFirstChild("Segment" .. (index - 1))
-		if prevSegment then
-			self:createBeam(prevSegment, segment, index)
+	-- Calculate required segments
+	local requiredSegments = math.min(
+		math.ceil(self.length / self.segmentSpacing),
+		self.maxSegments
+	)
+	
+	-- Create more segments if needed
+	while #self.segmentPool < requiredSegments do
+		local index = #self.segmentPool + 1
+		self:createSegmentPair(index)
+	end
+	
+	-- Update segment positions and visibility
+	local currentTime = tick()
+	local visibleCount = 0
+	
+	for i = 1, requiredSegments do
+		local segment = self.segmentPool[i]
+		local beam = self.beamPool[i]
+		
+		if segment and beam then
+			-- Position from history
+			local historyIndex = i * 2
+			if self.positionHistory[historyIndex] then
+				segment.CFrame = CFrame.new(self.positionHistory[historyIndex])
+				
+				-- Connect beam to next segment
+				if i < requiredSegments and self.segmentPool[i + 1] then
+					local nextSegment = self.segmentPool[i + 1]
+					beam.Attachment0 = segment:FindFirstChild("BeamAttachment1")
+					beam.Attachment1 = nextSegment:FindFirstChild("BeamAttachment0")
+					beam.Enabled = true
+					
+					-- Smooth beam width transition
+					local t = i / requiredSegments
+					local widthMultiplier = 1 - (t * 0.3) -- Taper towards tail
+					beam.Width0 = self.segmentSize.X * widthMultiplier
+					beam.Width1 = self.segmentSize.X * widthMultiplier
+				else
+					beam.Enabled = false
+				end
+				
+				segment.Parent = self.model
+				visibleCount = visibleCount + 1
+				
+				-- Update color (rainbow mode or normal)
+				if self.rainbowMode then
+					local hue = ((currentTime * 0.5) + (i * 0.02)) % 1
+					local color = Color3.fromHSV(hue, 1, 1)
+					segment.Color = color
+					beam.Color = ColorSequence.new(color)
+				else
+					-- Apply LOD-based rendering
+					if self.currentLOD > 0 and i % (self.currentLOD + 1) ~= 0 then
+						segment.Transparency = 0.5
+						beam.Transparency = NumberSequence.new(0.5)
+					else
+						segment.Transparency = 0
+						beam.Transparency = NumberSequence.new(0)
+					end
+				end
+			else
+				segment.Parent = nil
+			end
 		end
 	end
+	
+	-- Hide unused segments
+	for i = requiredSegments + 1, #self.segmentPool do
+		if self.segmentPool[i] then
+			self.segmentPool[i].Parent = nil
+		end
+		if self.beamPool[i] then
+			self.beamPool[i].Enabled = false
+		end
+	end
+	
+	self.actualSegmentCount = visibleCount
+end
+
+function Snake:setupUpdates()
+	-- Main update loop
+	self.updateConnection = RunService.Heartbeat:Connect(function(dt)
+		if self.destroyed or not self.humanoidRootPart.Parent then
+			self:destroy()
+			return
+		end
+		
+		-- Update position history
+		local currentPos = self.humanoidRootPart.Position
+		if (currentPos - self.lastPosition).Magnitude > MIN_SEGMENT_DISTANCE then
+			table.insert(self.positionHistory, 1, currentPos)
+			self.lastPosition = currentPos
+			
+			-- Trim history
+			while #self.positionHistory > POSITION_HISTORY_SIZE do
+				table.remove(self.positionHistory)
+			end
+		end
+		
+		-- Update head position
+		if self.head then
+			self.head.CFrame = self.humanoidRootPart.CFrame
+		end
+		
+		-- Smooth growth animation
+		if self.growing then
+			local elapsed = tick() - self.growthStartTime
+			local t = math.min(elapsed / self.growthDuration, 1)
+			
+			-- Easing function for smooth growth
+			local easedT = 1 - (1 - t) * (1 - t) -- Quadratic ease out
+			self.length = self.startLength + (self.targetLength - self.startLength) * easedT
+			
+			if t >= 1 then
+				self.growing = false
+				self.length = self.targetLength
+			end
+		end
+		
+		-- Update LOD
+		if tick() - self.lastLODUpdate > self.LODUpdateInterval then
+			self:updateLOD()
+			self.lastLODUpdate = tick()
+		end
+		
+		-- Update body
+		self:updateUnifiedBody()
+		
+		-- Update boost effects
+		if self.isBoosting then
+			self:updateBoostEffects()
+		end
+	end)
 end
 
 function Snake:updateLOD()
 	local camera = workspace.CurrentCamera
 	if not camera then return end
 	
-	local playerPos = self.rootPart.Position
-	local cameraPos = camera.CFrame.Position
-	local distanceToPlayer = (cameraPos - playerPos).Magnitude
+	local distance = (camera.CFrame.Position - self.humanoidRootPart.Position).Magnitude
 	
-	-- Adjust LOD based on distance and performance
-	if LOW_PERFORMANCE_MODE then
-		self.currentLOD = distanceToPlayer < 50 and 1 or 2
-	else
-		if distanceToPlayer < 100 then
-			self.currentLOD = 1 -- Full quality
-		elseif distanceToPlayer < 300 then
-			self.currentLOD = 2 -- Medium quality
-		else
-			self.currentLOD = 3 -- Low quality
-		end
-	end
-end
-
-function Snake:startPerformanceMonitoring()
-	self.connections.performance = RunService.Heartbeat:Connect(function()
-		if self.isDestroyed then return end
-		
-		local now = tick()
-		if now - self.lastPerformanceCheck > PERFORMANCE_CHECK_INTERVAL then
-			self.lastPerformanceCheck = now
-			
-			-- Check FPS
-			local fps = math.floor(1 / game:GetService("Stats").FrameRateManager.RenderAverage:GetValue())
-			if fps < 30 then
-				LOW_PERFORMANCE_MODE = true
-			elseif fps > 50 then
-				LOW_PERFORMANCE_MODE = false
-			end
-		end
-	end)
-end
-
-function Snake:updateRainbowEffect()
-	local time = tick()
-	local hue = (time * 0.5) % 1
-	
-	-- Update head color
-	self.head.Color = Color3.fromHSV(hue, 1, 1)
-	local headGlow = self.head:FindFirstChildOfClass("PointLight")
-	if headGlow then
-		headGlow.Color = self.head.Color
-	end
-	
-	-- Update body segments
-	for i, beamData in ipairs(self.beams) do
-		if beamData.beam then
-			local segmentHue = (hue + i * 0.02) % 1
-			local color = Color3.fromHSV(segmentHue, 1, 1)
-			beamData.beam.Color = ColorSequence.new(color)
+	-- Determine LOD level
+	self.currentLOD = 0
+	for i, threshold in ipairs(LOD_DISTANCE_THRESHOLDS) do
+		if distance > threshold then
+			self.currentLOD = i
 		end
 	end
 end
 
 function Snake:grow(amount)
-	amount = amount * self.growthMultiplier
-	self.length = mathmin(self.length + amount, self.maxSegments * self.segmentSpacing)
+	if self.destroyed then return end
 	
-	-- Update segment count
-	local newSegmentCount = math.floor(self.length / self.segmentSpacing)
-	newSegmentCount = mathmin(newSegmentCount, self.maxSegments)
+	amount = amount or self.growthRate
+	self.startLength = self.length
+	self.targetLength = math.min(self.targetLength + amount, self.maxSegments * self.segmentSpacing)
+	self.growthStartTime = tick()
+	self.growing = true
+end
+
+function Snake:setSkin(skinData)
+	if self.destroyed then return end
 	
-	if newSegmentCount > self.segmentCount then
-		self.segmentCount = newSegmentCount
-		-- Segments will be created on demand in updateUnifiedBody
+	-- Update colors
+	self.headColor = skinData.HeadColor or self.headColor
+	self.bodyColors = skinData.BodyColors or self.bodyColors
+	
+	-- Apply to head
+	if self.head then
+		self.head.Color = self.headColor
+		local headLight = self.head:FindFirstChild("PointLight")
+		if headLight then
+			headLight.Color = self.headColor
+		end
+	end
+	
+	-- Check for rainbow mode
+	self.rainbowMode = skinData.IsRainbow or false
+	
+	-- Update all segments
+	for i, segment in ipairs(self.segmentPool) do
+		if segment and segment.Parent then
+			local colorIndex = ((i - 1) % #self.bodyColors) + 1
+			segment.Color = self.bodyColors[colorIndex]
+			
+			local beam = self.beamPool[i]
+			if beam then
+				beam.Color = ColorSequence.new(self.bodyColors[colorIndex])
+			end
+		end
 	end
 end
 
 function Snake:setBoosting(boosting)
+	if self.destroyed then return end
+	
 	self.isBoosting = boosting
 	
 	if boosting then
-		-- Create boost effects
-		if not self.boostParticle then
-			self.boostParticle = Instance.new("ParticleEmitter")
-			self.boostParticle.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-			self.boostParticle.Rate = 100
-			self.boostParticle.Lifetime = NumberRange.new(0.5, 1)
-			self.boostParticle.Speed = NumberRange.new(5, 10)
-			self.boostParticle.SpreadAngle = Vector2.new(30, 30)
-			self.boostParticle.Color = ColorSequence.new(self.headColor)
-			self.boostParticle.Parent = self.head
+		-- Create boost particles
+		if not self.boostEffect then
+			self.boostEffect = Instance.new("ParticleEmitter")
+			self.boostEffect.Name = "BoostEffect"
+			self.boostEffect.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+			self.boostEffect.Rate = 50
+			self.boostEffect.Lifetime = NumberRange.new(0.5, 1)
+			self.boostEffect.Speed = NumberRange.new(5, 10)
+			self.boostEffect.SpreadAngle = Vector2.new(30, 30)
+			self.boostEffect.Color = ColorSequence.new(self.headColor)
+			self.boostEffect.LightEmission = 1
+			self.boostEffect.Parent = self.head
 		end
 		
-		-- Enhanced glow
-		local headGlow = self.head:FindFirstChildOfClass("PointLight")
-		if headGlow then
-			TweenService:Create(headGlow, TweenInfo.new(0.3), {
-				Brightness = self.glowIntensity * 2,
-				Range = self.glowRange * 1.5
+		-- Enhance glow
+		local headLight = self.head:FindFirstChild("PointLight")
+		if headLight then
+			TweenService:Create(headLight, TweenInfo.new(0.3), {
+				Brightness = (self.config.GlowIntensity or 2) * 2,
+				Range = (self.config.GlowRange or 6) * 1.5
 			}):Play()
 		end
 	else
 		-- Remove boost effects
-		if self.boostParticle then
-			self.boostParticle:Destroy()
-			self.boostParticle = nil
+		if self.boostEffect then
+			self.boostEffect:Destroy()
+			self.boostEffect = nil
 		end
 		
-		-- Normal glow
-		local headGlow = self.head:FindFirstChildOfClass("PointLight")
-		if headGlow then
-			TweenService:Create(headGlow, TweenInfo.new(0.3), {
-				Brightness = self.glowIntensity,
-				Range = self.glowRange
+		-- Reset glow
+		local headLight = self.head:FindFirstChild("PointLight")
+		if headLight then
+			TweenService:Create(headLight, TweenInfo.new(0.3), {
+				Brightness = self.config.GlowIntensity or 2,
+				Range = self.config.GlowRange or 6
 			}):Play()
 		end
 	end
 end
 
-function Snake:setGhostMode(enabled)
-	self.isGhostMode = enabled
-	
-	if enabled then
-		-- Make snake semi-transparent
-		self.head.Transparency = 0.5
-		for i = 1, self.segmentCount do
-			local segment = self.unifiedBody:FindFirstChild("Segment" .. i)
-			if segment then
-				segment.Transparency = 0.5
-			end
-		end
-		
-		-- Update beams
-		for _, beamData in ipairs(self.beams) do
-			if beamData.beam then
-				beamData.beam.Transparency = NumberSequence.new(0.5)
-			end
-		end
-	else
-		-- Restore normal transparency
-		self.head.Transparency = 0
-		self:updateUnifiedBody() -- This will restore proper transparency
-	end
-end
-
-function Snake:updateVisuals(config)
-	-- Update colors
-	self.headColor = config.HeadColor or self.headColor
-	self.bodyColors = config.BodyColors or self.bodyColors
-	self.isRainbow = config.IsRainbow or false
-	
-	-- Update head
-	if not self.isRainbow then
-		self.head.Color = self.headColor
-		local headGlow = self.head:FindFirstChildOfClass("PointLight")
-		if headGlow then
-			headGlow.Color = self.headColor
-		end
-	end
-	
-	-- Update beams
-	for i, beamData in ipairs(self.beams) do
-		if beamData.beam and not self.isRainbow then
-			local colorIndex = (i % #self.bodyColors) + 1
-			beamData.beam.Color = ColorSequence.new(self.bodyColors[colorIndex])
-		end
+function Snake:updateBoostEffects()
+	if self.boostEffect then
+		-- Update particle color to match current head color
+		self.boostEffect.Color = ColorSequence.new(self.head.Color)
 	end
 end
 
 function Snake:getLength()
-	return self.length
+	return self.targetLength
+end
+
+function Snake:getSegments()
+	local activeSegments = {}
+	for i, segment in ipairs(self.segmentPool) do
+		if segment.Parent then
+			table.insert(activeSegments, segment)
+		end
+	end
+	return activeSegments
 end
 
 function Snake:destroy()
-	self.isDestroyed = true
+	if self.destroyed then return end
+	self.destroyed = true
 	
-	-- Disconnect all connections
-	for _, connection in pairs(self.connections) do
-		if connection then
-			connection:Disconnect()
-		end
+	-- Disconnect updates
+	if self.updateConnection then
+		self.updateConnection:Disconnect()
 	end
 	
-	-- Clean up objects
-	if self.head then
-		self.head:Destroy()
-	end
-	
-	if self.unifiedBody then
-		self.unifiedBody:Destroy()
-	end
-	
-	if self.boostParticle then
-		self.boostParticle:Destroy()
+	-- Clean up model
+	if self.model then
+		self.model:Destroy()
 	end
 	
 	-- Clear references
-	self.beams = {}
-	self.positionHistory = {}
-	self.connections = {}
+	self.segments = nil
+	self.segmentPool = nil
+	self.beamPool = nil
+	self.positionHistory = nil
 end
 
 -- Module functions
-function module.new(character, config)
+function OptimizedSnakeSystemV9.createSnake(character, config)
 	return Snake.new(character, config)
 end
 
-function module.createSnake(character, config)
-	return Snake.new(character, config)
-end
-
-function module.init()
-	-- Any global initialization
-	print("OptimizedSnakeSystemV9 initialized")
-end
-
-return module
+return OptimizedSnakeSystemV9

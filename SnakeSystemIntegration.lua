@@ -1,69 +1,96 @@
 --[[
 	SNAKE SYSTEM INTEGRATION
-	Placed in ServerScriptService
 	
 	This script integrates the optimized snake system with the existing CharacterSetup
+	It handles:
+	- Loading the appropriate OptimizedSnakeSystem version
+	- Creating the snake when player spawns 
+	- Managing snake lifecycle and cleanup
+	- Syncing with gameplay systems
 --]]
 
--- Wait for CharacterSetup to load first
-local characterSetup = script.Parent:WaitForChild("CharacterSetup")
-
--- Services
+local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 
--- Wait for required modules
-local Systems = ReplicatedStorage:WaitForChild("Systems")
-local Modules = ReplicatedStorage:WaitForChild("Modules")
+-- Create remotes folder if it doesn't exist
+local remotesFolder = ReplicatedStorage:FindFirstChild("SnakeRemotes")
+if not remotesFolder then
+	remotesFolder = Instance.new("Folder")
+	remotesFolder.Name = "SnakeRemotes"
+	remotesFolder.Parent = ReplicatedStorage
+end
 
--- Enhanced loading order
-local OptimizedSnakeSystem
-local loadOrder = {"V9", "V4", "V3", "V2", "V1"}  -- Try V9 first!
+-- Create menu integration remotes
+local spawnRemote = remotesFolder:FindFirstChild("SpawnSnake") or Instance.new("RemoteEvent")
+spawnRemote.Name = "SpawnSnake"
+spawnRemote.Parent = remotesFolder
 
-for _, version in ipairs(loadOrder) do
-	local systemName = "OptimizedSnakeSystem" .. version
-	local success, module = pcall(function()
-		return Modules:WaitForChild(systemName, 2)
+local respawnRemote = remotesFolder:FindFirstChild("RespawnSnake") or Instance.new("RemoteEvent")
+respawnRemote.Name = "RespawnSnake"
+respawnRemote.Parent = remotesFolder
+
+-- Load the best available OptimizedSnakeSystem
+local function loadSnakeSystem()
+	-- Try V9 first (latest version with unified rendering)
+	local success, systemV9 = pcall(function()
+		return require(ServerScriptService:WaitForChild("OptimizedSnakeSystemV9", 5))
 	end)
-	
-	if success and module then
-		local loadSuccess, system = pcall(function()
-			return require(module)
-		end)
-		
-		if loadSuccess then
-			OptimizedSnakeSystem = system
-			print("Successfully loaded", systemName)
-			break
-		else
-			warn("Failed to require", systemName, ":", system)
-		end
+	if success and systemV9 then
+		print("✅ Loaded OptimizedSnakeSystemV9 (ULTIMATE)")
+		return systemV9
 	end
+	
+	-- Try V4
+	local success4, systemV4 = pcall(function()
+		return require(ServerScriptService:WaitForChild("OptimizedSnakeSystemV4", 5))
+	end)
+	if success4 and systemV4 then
+		print("✅ Loaded OptimizedSnakeSystemV4")
+		return systemV4
+	end
+	
+	-- Try V3
+	local success3, systemV3 = pcall(function()
+		return require(ServerScriptService:WaitForChild("OptimizedSnakeSystemV3", 5))
+	end)
+	if success3 and systemV3 then
+		print("✅ Loaded OptimizedSnakeSystemV3")
+		return systemV3
+	end
+	
+	-- Try V2
+	local success2, systemV2 = pcall(function()
+		return require(ServerScriptService:WaitForChild("OptimizedSnakeSystemV2", 5))
+	end)
+	if success2 and systemV2 then
+		print("✅ Loaded OptimizedSnakeSystemV2")
+		return systemV2
+	end
+	
+	-- Fallback to V1
+	local success1, systemV1 = pcall(function()
+		return require(ServerScriptService:WaitForChild("OptimizedSnakeSystem", 5))
+	end)
+	if success1 and systemV1 then
+		print("✅ Loaded OptimizedSnakeSystemV1 (Fallback)")
+		return systemV1
+	end
+	
+	error("❌ No OptimizedSnakeSystem module found!")
 end
 
--- Fallback to V1 if nothing else loaded
-if not OptimizedSnakeSystem then
-	OptimizedSnakeSystem = require(Modules:WaitForChild("OptimizedSnakeSystem"))
-	print("Loaded default OptimizedSnakeSystem")
-end
+-- Load the system
+local OptimizedSnakeSystem = loadSnakeSystem()
 
--- Initialize the system
+-- Initialize the snake system
 OptimizedSnakeSystem.init()
 
--- Setup RemoteEvents for menu integration
-local Events = ReplicatedStorage:FindFirstChild("Events") or Instance.new("Folder")
-Events.Name = "Events"
-Events.Parent = ReplicatedStorage
-
-local spawnSnakeRemote = Events:FindFirstChild("SpawnSnake") or Instance.new("RemoteEvent")
-spawnSnakeRemote.Name = "SpawnSnake"
-spawnSnakeRemote.Parent = Events
-
-local respawnSnakeRemote = Events:FindFirstChild("RespawnSnake") or Instance.new("RemoteEvent")
-respawnSnakeRemote.Name = "RespawnSnake"
-respawnSnakeRemote.Parent = Events
+-- Store references to player snakes
+local playerSnakes = {}
+_G.PlayerSnakes = playerSnakes -- Make globally accessible
 
 -- Default configuration
 local DEFAULT_CONFIG = {
@@ -86,352 +113,260 @@ local DEFAULT_CONFIG = {
 	GlowRange = 6
 }
 
--- SKIN CONFIGURATIONS
-local SKIN_CONFIGS = {
-	Green = DEFAULT_CONFIG,
+-- Create/update length value
+local function updateLengthValue(player, length)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		leaderstats = Instance.new("Folder")
+		leaderstats.Name = "leaderstats"
+		leaderstats.Parent = player
+	end
 	
-	Blue = {
-		InitialLength = DEFAULT_CONFIG.InitialLength,
-		MaxSegments = DEFAULT_CONFIG.MaxSegments,
-		SegmentSpacing = DEFAULT_CONFIG.SegmentSpacing,
-		SegmentSize = DEFAULT_CONFIG.SegmentSize,
-		HeadSize = DEFAULT_CONFIG.HeadSize,
-		HeadColor = Color3.fromRGB(64, 150, 255),
-		BodyColors = {
-			Color3.fromRGB(48, 112, 191),
-			Color3.fromRGB(64, 150, 255),
-			Color3.fromRGB(80, 188, 255),
-			Color3.fromRGB(64, 150, 255),
-			Color3.fromRGB(48, 112, 191),
-		},
-		HeadMaterial = Enum.Material.Neon,
-		BodyMaterial = Enum.Material.Neon,
-		GlowIntensity = 2,
-		GlowRange = 6
-	},
+	local lengthValue = leaderstats:FindFirstChild("Length") or Instance.new("IntValue")
+	lengthValue.Name = "Length"
+	lengthValue.Value = length
+	lengthValue.Parent = leaderstats
 	
-	Red = {
-		InitialLength = DEFAULT_CONFIG.InitialLength,
-		MaxSegments = DEFAULT_CONFIG.MaxSegments,
-		SegmentSpacing = DEFAULT_CONFIG.SegmentSpacing,
-		SegmentSize = DEFAULT_CONFIG.SegmentSize,
-		HeadSize = DEFAULT_CONFIG.HeadSize,
-		HeadColor = Color3.fromRGB(255, 89, 89),
+	-- Also update for AI system
+	player:SetAttribute("Length", length)
+end
+
+-- Skins configuration
+local SKINS = {
+	["Green"] = {
+		HeadColor = Color3.fromRGB(76, 217, 100),
 		BodyColors = {
-			Color3.fromRGB(191, 67, 67),
-			Color3.fromRGB(255, 89, 89),
-			Color3.fromRGB(255, 120, 120),
-			Color3.fromRGB(255, 89, 89),
-			Color3.fromRGB(191, 67, 67),
-		},
-		HeadMaterial = Enum.Material.Neon,
-		BodyMaterial = Enum.Material.Neon,
-		GlowIntensity = 2,
-		GlowRange = 6
+			Color3.fromRGB(60, 180, 80),
+			Color3.fromRGB(80, 200, 100),
+			Color3.fromRGB(100, 220, 120),
+			Color3.fromRGB(80, 200, 100),
+			Color3.fromRGB(60, 180, 80),
+		}
 	},
-	
-	Purple = {
-		InitialLength = DEFAULT_CONFIG.InitialLength,
-		MaxSegments = DEFAULT_CONFIG.MaxSegments,
-		SegmentSpacing = DEFAULT_CONFIG.SegmentSpacing,
-		SegmentSize = DEFAULT_CONFIG.SegmentSize,
-		HeadSize = DEFAULT_CONFIG.HeadSize,
-		HeadColor = Color3.fromRGB(191, 89, 255),
+	["Blue"] = {
+		HeadColor = Color3.fromRGB(100, 149, 237),
 		BodyColors = {
-			Color3.fromRGB(143, 67, 191),
-			Color3.fromRGB(191, 89, 255),
-			Color3.fromRGB(210, 120, 255),
-			Color3.fromRGB(191, 89, 255),
-			Color3.fromRGB(143, 67, 191),
-		},
-		HeadMaterial = Enum.Material.Neon,
-		BodyMaterial = Enum.Material.Neon,
-		GlowIntensity = 2,
-		GlowRange = 6
+			Color3.fromRGB(65, 105, 225),
+			Color3.fromRGB(100, 149, 237),
+			Color3.fromRGB(135, 206, 250),
+			Color3.fromRGB(100, 149, 237),
+			Color3.fromRGB(65, 105, 225),
+		}
 	},
-	
-	Yellow = {
-		InitialLength = DEFAULT_CONFIG.InitialLength,
-		MaxSegments = DEFAULT_CONFIG.MaxSegments,
-		SegmentSpacing = DEFAULT_CONFIG.SegmentSpacing,
-		SegmentSize = DEFAULT_CONFIG.SegmentSize,
-		HeadSize = DEFAULT_CONFIG.HeadSize,
-		HeadColor = Color3.fromRGB(255, 221, 89),
+	["Red"] = {
+		HeadColor = Color3.fromRGB(220, 20, 60),
 		BodyColors = {
-			Color3.fromRGB(191, 166, 67),
-			Color3.fromRGB(255, 221, 89),
-			Color3.fromRGB(255, 236, 120),
-			Color3.fromRGB(255, 221, 89),
-			Color3.fromRGB(191, 166, 67),
-		},
-		HeadMaterial = Enum.Material.Neon,
-		BodyMaterial = Enum.Material.Neon,
-		GlowIntensity = 2,
-		GlowRange = 6
+			Color3.fromRGB(178, 34, 34),
+			Color3.fromRGB(220, 20, 60),
+			Color3.fromRGB(255, 69, 0),
+			Color3.fromRGB(220, 20, 60),
+			Color3.fromRGB(178, 34, 34),
+		}
 	},
-	
-	Pink = {
-		InitialLength = DEFAULT_CONFIG.InitialLength,
-		MaxSegments = DEFAULT_CONFIG.MaxSegments,
-		SegmentSpacing = DEFAULT_CONFIG.SegmentSpacing,
-		SegmentSize = DEFAULT_CONFIG.SegmentSize,
-		HeadSize = DEFAULT_CONFIG.HeadSize,
-		HeadColor = Color3.fromRGB(255, 170, 255),
+	["Purple"] = {
+		HeadColor = Color3.fromRGB(147, 112, 219),
 		BodyColors = {
-			Color3.fromRGB(204, 136, 204),
-			Color3.fromRGB(255, 170, 255),
-			Color3.fromRGB(255, 200, 255),
-			Color3.fromRGB(255, 170, 255),
-			Color3.fromRGB(204, 136, 204),
-		},
-		HeadMaterial = Enum.Material.Neon,
-		BodyMaterial = Enum.Material.Neon,
-		GlowIntensity = 2,
-		GlowRange = 6
+			Color3.fromRGB(138, 43, 226),
+			Color3.fromRGB(147, 112, 219),
+			Color3.fromRGB(186, 85, 211),
+			Color3.fromRGB(147, 112, 219),
+			Color3.fromRGB(138, 43, 226),
+		}
 	},
-	
-	Black = {
-		InitialLength = DEFAULT_CONFIG.InitialLength,
-		MaxSegments = DEFAULT_CONFIG.MaxSegments,
-		SegmentSpacing = DEFAULT_CONFIG.SegmentSpacing,
-		SegmentSize = DEFAULT_CONFIG.SegmentSize,
-		HeadSize = DEFAULT_CONFIG.HeadSize,
-		HeadColor = Color3.fromRGB(40, 40, 40),
+	["Rainbow"] = {
+		HeadColor = Color3.fromRGB(255, 255, 255),
 		BodyColors = {
-			Color3.fromRGB(20, 20, 20),
-			Color3.fromRGB(40, 40, 40),
-			Color3.fromRGB(60, 60, 60),
-			Color3.fromRGB(40, 40, 40),
-			Color3.fromRGB(20, 20, 20),
-		},
-		HeadMaterial = Enum.Material.Neon,
-		BodyMaterial = Enum.Material.Neon,
-		GlowIntensity = 2,
-		GlowRange = 6
+			Color3.fromRGB(255, 0, 0),
+			Color3.fromRGB(255, 127, 0),
+			Color3.fromRGB(255, 255, 0),
+			Color3.fromRGB(0, 255, 0),
+			Color3.fromRGB(0, 0, 255),
+			Color3.fromRGB(75, 0, 130),
+			Color3.fromRGB(148, 0, 211),
+		}
 	},
-	
-	White = {
-		InitialLength = DEFAULT_CONFIG.InitialLength,
-		MaxSegments = DEFAULT_CONFIG.MaxSegments,
-		SegmentSpacing = DEFAULT_CONFIG.SegmentSpacing,
-		SegmentSize = DEFAULT_CONFIG.SegmentSize,
-		HeadSize = DEFAULT_CONFIG.HeadSize,
-		HeadColor = Color3.fromRGB(240, 240, 240),
+	["Galaxy"] = {
+		HeadColor = Color3.fromRGB(100, 65, 165),
 		BodyColors = {
-			Color3.fromRGB(200, 200, 200),
-			Color3.fromRGB(240, 240, 240),
-			Color3.fromRGB(255, 255, 255),
-			Color3.fromRGB(240, 240, 240),
-			Color3.fromRGB(200, 200, 200),
-		},
-		HeadMaterial = Enum.Material.Neon,
-		BodyMaterial = Enum.Material.Neon,
-		GlowIntensity = 2,
-		GlowRange = 6
-	},
-	
-	Rainbow = {
-		InitialLength = DEFAULT_CONFIG.InitialLength,
-		MaxSegments = DEFAULT_CONFIG.MaxSegments,
-		SegmentSpacing = DEFAULT_CONFIG.SegmentSpacing,
-		SegmentSize = DEFAULT_CONFIG.SegmentSize,
-		HeadSize = DEFAULT_CONFIG.HeadSize,
-		HeadColor = Color3.fromRGB(255, 0, 0),
-		BodyColors = {
-			Color3.fromRGB(255, 0, 0),    -- Red
-			Color3.fromRGB(255, 127, 0),  -- Orange
-			Color3.fromRGB(255, 255, 0),  -- Yellow
-			Color3.fromRGB(0, 255, 0),    -- Green
-			Color3.fromRGB(0, 0, 255),    -- Blue
-			Color3.fromRGB(75, 0, 130),   -- Indigo
-			Color3.fromRGB(148, 0, 211),  -- Violet
-		},
-		HeadMaterial = Enum.Material.Neon,
-		BodyMaterial = Enum.Material.Neon,
-		GlowIntensity = 3,
-		GlowRange = 8,
-		IsRainbow = true  -- Special flag for rainbow effect
-	},
-	
-	Gold = {
-		InitialLength = DEFAULT_CONFIG.InitialLength,
-		MaxSegments = DEFAULT_CONFIG.MaxSegments,
-		SegmentSpacing = DEFAULT_CONFIG.SegmentSpacing,
-		SegmentSize = DEFAULT_CONFIG.SegmentSize,
-		HeadSize = DEFAULT_CONFIG.HeadSize,
-		HeadColor = Color3.fromRGB(255, 215, 0),
-		BodyColors = {
-			Color3.fromRGB(184, 134, 11),
-			Color3.fromRGB(218, 165, 32),
-			Color3.fromRGB(255, 215, 0),
-			Color3.fromRGB(218, 165, 32),
-			Color3.fromRGB(184, 134, 11),
-		},
-		HeadMaterial = Enum.Material.Neon,
-		BodyMaterial = Enum.Material.Neon,
-		GlowIntensity = 3,
-		GlowRange = 8
-	},
+			Color3.fromRGB(25, 25, 112),
+			Color3.fromRGB(72, 61, 139),
+			Color3.fromRGB(123, 104, 238),
+			Color3.fromRGB(147, 112, 219),
+			Color3.fromRGB(138, 43, 226),
+		}
+	}
 }
 
--- Store player snakes
-local playerSnakes = {}
-_G.PlayerSnakes = playerSnakes  -- Global reference for other scripts
-
--- Function to create snake for player
+-- Create snake for player with skin and length
 local function createSnake(player, character)
-	-- Remove existing snake if any
+	-- Clean up old snake
 	if playerSnakes[player] then
 		playerSnakes[player]:destroy()
 		playerSnakes[player] = nil
 	end
 	
-	-- Wait a frame to ensure character is ready
-	RunService.Heartbeat:Wait()
-	
-	-- Get selected skin
+	-- Get selected skin (check if player is respawning with JustRevived)
 	local selectedSkin = player:GetAttribute("SelectedSkin") or "Green"
-	local config = SKIN_CONFIGS[selectedSkin] or DEFAULT_CONFIG
+	local skin = SKINS[selectedSkin] or SKINS["Green"]
 	
-	-- Check for revive
-	local isReviving = player:GetAttribute("RevivingNow")
-	if isReviving then
-		-- Use revive length
-		local reviveLength = player:GetAttribute("ReviveSnakeLength") or config.InitialLength
-		config = table.clone(config)
-		config.InitialLength = reviveLength
-		print("Creating revived snake with length:", reviveLength)
+	-- Merge skin with default config
+	local config = {}
+	for key, value in pairs(DEFAULT_CONFIG) do
+		config[key] = value
+	end
+	for key, value in pairs(skin) do
+		config[key] = value
 	end
 	
-	-- Apply gamepass multipliers
-	local growthMultiplier = player:GetAttribute("GrowthMultiplier") or 1
-	config = table.clone(config)
-	config.GrowthMultiplier = growthMultiplier
+	-- Check if player is respawning with revive
+	local isReviving = player:GetAttribute("RevivingNow")
+	local justRevived = player:GetAttribute("JustRevived")
+	
+	if isReviving or justRevived then
+		-- Use the stored revive length
+		local reviveLength = player:GetAttribute("ReviveSnakeLength") or 200
+		config.InitialLength = math.max(200, reviveLength) -- Minimum 200 on revive
+		
+		-- Clear reviving flag
+		player:SetAttribute("RevivingNow", false)
+	else
+		-- Normal spawn
+		config.InitialLength = 500
+	end
+	
+	-- Create the snake  
+	local snake = OptimizedSnakeSystem.createSnake(character, config)
+	if snake then
+		playerSnakes[player] = snake
+		
+		-- Initialize length tracking
+		updateLengthValue(player, config.InitialLength)
+		
+		-- Track length changes
+		local lastLength = config.InitialLength
+		task.spawn(function()
+			while snake and snake.model and snake.model.Parent do
+				local currentLength = snake:getLength()
+				if currentLength ~= lastLength then
+					lastLength = currentLength
+					updateLengthValue(player, currentLength)
+				end
+				task.wait(0.1)
+			end
+		end)
+		
+		-- Listen for skin changes
+		player:GetAttributeChangedSignal("SelectedSkin"):Connect(function()
+			if snake and snake.model and snake.model.Parent then
+				local newSkin = player:GetAttribute("SelectedSkin") or "Green"
+				local skinData = SKINS[newSkin] or SKINS["Green"]
+				snake:setSkin(skinData)
+			end
+		end)
+		
+		-- Track boost states
+		local function updateBoostState()
+			if snake and snake.model and snake.model.Parent then
+				local isBoosting = player:GetAttribute("ActiveSpeedBoost") or 
+				                  player:GetAttribute("ActiveMegaSpeed") or
+				                  false
+				snake:setBoosting(isBoosting)
+			end
+		end
+		
+		player:GetAttributeChangedSignal("ActiveSpeedBoost"):Connect(updateBoostState)
+		player:GetAttributeChangedSignal("ActiveMegaSpeed"):Connect(updateBoostState)
+		
+		print("✅ Snake created for", player.Name, "with length", config.InitialLength)
+	end
+end
+
+-- Handle menu spawn request
+spawnRemote.OnServerEvent:Connect(function(player)
+	print("🎮 SpawnSnake request from", player.Name)
+	
+	-- Get or wait for character
+	local character = player.Character
+	if not character then
+		player:LoadCharacter()
+		character = player.CharacterAdded:Wait()
+		task.wait(0.1) -- Small delay to ensure character is ready
+	end
+	
+	-- Clear any revive attributes from previous life
+	player:SetAttribute("JustRevived", false)
+	player:SetAttribute("RevivingNow", false)
+	player:SetAttribute("ReviveInvincible", false)
 	
 	-- Create the snake
-	local snake = OptimizedSnakeSystem.createSnake(character, config)
-	playerSnakes[player] = snake
+	createSnake(player, character)
+end)
+
+-- Handle respawn after death
+respawnRemote.OnServerEvent:Connect(function(player)
+	print("💀 RespawnSnake request from", player.Name)
 	
-	-- Update global reference if OrbSpawner exists
-	if _G.OrbSpawner then
-		_G.OrbSpawner.PlayerSnakes = playerSnakes
+	-- Check if player has revive and wants to use it
+	local hasRevive = player:GetAttribute("HasRevive") or false
+	local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
+	
+	if hasRevive and revivesAvailable > 0 then
+		-- Will be handled by GamepassHandler when user clicks revive
+		return
 	end
 	
-	-- Track snake length
-	local lengthUpdateConnection
-	lengthUpdateConnection = RunService.Heartbeat:Connect(function()
-		if snake and snake.getLength then
-			local currentLength = snake:getLength()
-			if currentLength ~= player:GetAttribute("SnakeLength") then
-				player:SetAttribute("SnakeLength", currentLength)
-			end
-		else
-			lengthUpdateConnection:Disconnect()
-		end
-	end)
-	
-	-- Clean up connection when snake is destroyed
-	if snake and snake.Destroyed then
-		snake.Destroyed:Connect(function()
-			if lengthUpdateConnection then
-				lengthUpdateConnection:Disconnect()
+	-- Normal respawn
+	player:LoadCharacter()
+end)
+
+-- Clean up on player death
+local function onCharacterDeath(character)
+	local humanoid = character:FindFirstChild("Humanoid")
+	if humanoid then
+		humanoid.Died:Connect(function()
+			local player = Players:GetPlayerFromCharacter(character)
+			if player and playerSnakes[player] then
+				-- Store snake length before death for potential revive
+				local currentLength = playerSnakes[player]:getLength()
+				player:SetAttribute("ReviveSnakeLength", math.floor(currentLength * 0.5)) -- 50% on revive
+				
+				-- Destroy the snake
+				playerSnakes[player]:destroy()
+				playerSnakes[player] = nil
+				print("💀 Snake destroyed for", player.Name)
 			end
 		end)
 	end
-	
-	-- Handle skin updates
-	local skinConnection
-	skinConnection = player:GetAttributeChangedSignal("SelectedSkin"):Connect(function()
-		local newSkin = player:GetAttribute("SelectedSkin") or "Green"
-		local newConfig = SKIN_CONFIGS[newSkin] or DEFAULT_CONFIG
-		
-		if snake and snake.updateVisuals then
-			snake:updateVisuals(newConfig)
-			print("Updated snake skin to:", newSkin)
-		end
-	end)
-	
-	-- Handle boost state updates
-	local function updateBoostState()
-		if not snake or not snake.setBoosting then return end
-		
-		local hasActiveBoost = player:GetAttribute("ActiveSpeedBoost") or 
-			player:GetAttribute("ActiveMegaSpeed") or
-			player:GetAttribute("ActiveGrowthBoost") or
-			false
-			
-		snake:setBoosting(hasActiveBoost)
-	end
-	
-	-- Listen for boost changes
-	local boostConnections = {
-		player:GetAttributeChangedSignal("ActiveSpeedBoost"):Connect(updateBoostState),
-		player:GetAttributeChangedSignal("ActiveMegaSpeed"):Connect(updateBoostState),
-		player:GetAttributeChangedSignal("ActiveGrowthBoost"):Connect(updateBoostState),
-	}
-	
-	-- Add ghost mode handling
-	local function updateGhostMode()
-		if not snake or not snake.setGhostMode then return end
-		
-		local hasGhostMode = player:GetAttribute("ActiveGhostMode") or false
-		snake:setGhostMode(hasGhostMode)
-	end
-	
-	-- Listen for ghost mode changes
-	local ghostConnection = player:GetAttributeChangedSignal("ActiveGhostMode"):Connect(updateGhostMode)
-	table.insert(boostConnections, ghostConnection)
-	
-	-- Clean up when character is removed
-	character.AncestryChanged:Connect(function()
-		if character.Parent == nil then
-			if snake then
-				snake:destroy()
-			end
-			playerSnakes[player] = nil
-			skinConnection:Disconnect()
-			for _, conn in ipairs(boostConnections) do
-				conn:Disconnect()
-			end
-		end
-	end)
-	
-	return snake
 end
 
--- Handle player spawning
+-- Handle player character spawn
 local function onCharacterAdded(character)
 	local player = Players:GetPlayerFromCharacter(character)
 	if not player then return end
 	
-	-- Clear reviving flag after spawn
-	if player:GetAttribute("RevivingNow") then
-		task.wait(0.1)  -- Small delay to ensure everything is set up
-		player:SetAttribute("RevivingNow", false)
+	-- Set up death handling
+	onCharacterDeath(character)
+	
+	-- Only create snake if spawning from menu or reviving
+	-- The menu will call SpawnSnake when ready
+	if player:GetAttribute("JustRevived") then
+		-- Revive spawn - create snake immediately
+		createSnake(player, character)
 	end
-	
-	-- Wait for HumanoidRootPart
-	local rootPart = character:WaitForChild("HumanoidRootPart", 10)
-	if not rootPart then return end
-	
-	-- Create snake
-	createSnake(player, character)
 end
 
--- Connect to existing players
-for _, player in ipairs(Players:GetPlayers()) do
-	if player.Character then
-		onCharacterAdded(player.Character)
-	end
-	player.CharacterAdded:Connect(onCharacterAdded)
-end
-
--- Connect to new players
+-- Connect player events
 Players.PlayerAdded:Connect(function(player)
+	-- Initialize attributes
+	player:SetAttribute("SelectedSkin", "Green")
+	player:SetAttribute("ReviveSnakeLength", 200)
+	player:SetAttribute("JustRevived", false)
+	player:SetAttribute("RevivingNow", false)
+	
 	player.CharacterAdded:Connect(onCharacterAdded)
 end)
 
--- Clean up when player leaves
+-- Cleanup on player leaving
 Players.PlayerRemoving:Connect(function(player)
 	if playerSnakes[player] then
 		playerSnakes[player]:destroy()
@@ -439,17 +374,4 @@ Players.PlayerRemoving:Connect(function(player)
 	end
 end)
 
--- Handle spawn requests from menu
-spawnSnakeRemote.OnServerEvent:Connect(function(player)
-	if player.Character then
-		-- Create snake when player spawns from menu
-		createSnake(player, player.Character)
-	end
-end)
-
--- Handle respawn requests
-respawnSnakeRemote.OnServerEvent:Connect(function(player)
-	if player.Character then
-		player.Character:BreakJoints()  -- Force respawn
-	end
-end)
+print("✅ Snake System Integration loaded!")

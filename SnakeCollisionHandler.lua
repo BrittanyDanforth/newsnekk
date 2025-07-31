@@ -1,738 +1,625 @@
 --[[
-	SnakeCollisionHandler V7.0 FINAL - FULLY POLISHED
+	SNAKE COLLISION HANDLER V7.0 FINAL - FULLY POLISHED
 	
-	Complete collision detection system with performance optimizations:
-	- Player-to-player collision detection
-	- AI snake collision detection
-	- Head-to-body and head-to-head collisions
-	- Body-to-body collision prevention
+	Optimized collision detection between player snakes and AI snakes with:
 	- Spatial grid optimization
-	- Segment chunking for performance
-	- Interpolation for smooth collision detection
-	- Complete invincibility system
-	- Proper death orb spawning
-	- Ghost mode and boost handling
+	- Segment chunking and interpolation
+	- Adaptive LOD for segment processing
+	- Death handling with orb spawning
+	- Fixed magnet effects on death
+	- Invincibility periods (spawn protection, ghost mode, revive)
 --]]
 
-local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 local TweenService = game:GetService("TweenService")
 
--- Cache frequently used functions
-local Vector3new = Vector3.new
-local mathabs = math.abs
-local mathmin = math.min
-local mathmax = math.max
-local mathfloor = math.floor
-local mathceil = math.ceil
-local tableinsert = table.insert
-local tableremove = table.remove
-local mathsqrt = math.sqrt
-local tick = tick
-local wait = wait
-local CFramenew = CFrame.new
-
 -- Constants
-local GRID_SIZE = 50
+local COLLISION_CHECK_INTERVAL = 0.1
 local HEAD_COLLISION_RADIUS = 4.5
-local BODY_COLLISION_RADIUS = 4
-local CHECK_INTERVAL = 0.1
-local DEATH_IMMUNITY_TIME = 1 -- 1 second of immunity after death
-local SPAWN_PROTECTION_TIME = 3 -- 3 seconds spawn protection
-local MIN_COLLISION_LENGTH = 100 -- Minimum length to kill others
-local AI_HEAD_TAG = "AISnakeHead"
-local INTERPOLATION_STEPS = 3 -- Steps between position history points
-local CHUNK_SIZE = 5 -- Segments per chunk
-local MAX_CHUNKS_TO_CHECK = 20 -- Limit chunks for performance
-local SEGMENT_CHECK_COOLDOWN = 0.05 -- Cooldown between segment checks
+local SEGMENT_COLLISION_RADIUS = 3.5
+local MIN_KILL_LENGTH = 100
+local SPATIAL_GRID_SIZE = 50
+local MAX_SEGMENTS_PER_CHUNK = 10
+local SPAWN_PROTECTION_TIME = 1
+local MAX_CHECK_DISTANCE = 200
+local INTERPOLATION_SAMPLES = 3
 
--- Invincibility reasons
-local INVINCIBILITY_REASONS = {
-	SPAWN = "SpawnProtection",
-	GHOST = "GhostMode",
-	REVIVE = "ReviveInvincible",
-	DEATH = "Dead"
-}
+-- Death effects
+local DEATH_FADE_TIME = 0.5
+local ORB_SPAWN_HEIGHT = 5
+local ORB_SPREAD_RADIUS = 30
 
--- Performance tracking
-local performanceStats = {
-	checksPerSecond = 0,
-	gridUpdatesPerSecond = 0,
-	lastCheckTime = 0,
-	frameTime = 0
-}
+-- Caching
+local playerDataCache = {}
+local lastCacheUpdate = 0
+local CACHE_UPDATE_INTERVAL = 0.5
 
--- Cached references
-local playerSnakes = {}
-local aiSnakes = {}
-local spatialGrid = {}
-local deathQueue = {}
+-- Invincibility management
 local invinciblePlayers = {}
-local lastSegmentCheck = {}
 
--- Initialize spatial grid
+-- Set player invincible for duration
+local function setPlayerInvincible(player, duration)
+	invinciblePlayers[player] = tick() + duration
+end
+
+-- Check if player is invincible
+local function isPlayerInvincible(player)
+	-- Check spawn protection
+	if player:GetAttribute("SpawnProtection") then
+		return true
+	end
+	
+	-- Check ghost mode
+	if player:GetAttribute("ActiveGhostMode") then
+		return true
+	end
+	
+	-- Check revive invincibility
+	if player:GetAttribute("ReviveInvincible") then
+		return true
+	end
+	
+	-- Check timed invincibility
+	local invincibleUntil = invinciblePlayers[player]
+	if invincibleUntil and tick() < invincibleUntil then
+		return true
+	elseif invincibleUntil then
+		invinciblePlayers[player] = nil
+	end
+	
+	return false
+end
+
+-- Spatial grid for optimization
 local SpatialGrid = {}
 SpatialGrid.__index = SpatialGrid
 
 function SpatialGrid.new()
 	local self = setmetatable({}, SpatialGrid)
 	self.grid = {}
-	self.entityPositions = {}
+	self.gridSize = SPATIAL_GRID_SIZE
 	return self
 end
 
 function SpatialGrid:getGridKey(position)
-	local x = mathfloor(position.X / GRID_SIZE)
-	local z = mathfloor(position.Z / GRID_SIZE)
+	local x = math.floor(position.X / self.gridSize)
+	local z = math.floor(position.Z / self.gridSize)
 	return x .. "," .. z
 end
 
-function SpatialGrid:addEntity(entity, position)
-	-- Remove from old position
-	self:removeEntity(entity)
-	
-	-- Add to new position
+function SpatialGrid:insert(position, data)
 	local key = self:getGridKey(position)
 	if not self.grid[key] then
 		self.grid[key] = {}
 	end
-	self.grid[key][entity] = true
-	self.entityPositions[entity] = key
+	table.insert(self.grid[key], data)
 end
 
-function SpatialGrid:removeEntity(entity)
-	local oldKey = self.entityPositions[entity]
-	if oldKey and self.grid[oldKey] then
-		self.grid[oldKey][entity] = nil
-		if next(self.grid[oldKey]) == nil then
-			self.grid[oldKey] = nil
-		end
-	end
-	self.entityPositions[entity] = nil
-end
-
-function SpatialGrid:getNearbyEntities(position, radius)
-	local entities = {}
-	local cellRadius = mathceil(radius / GRID_SIZE)
-	local centerX = mathfloor(position.X / GRID_SIZE)
-	local centerZ = mathfloor(position.Z / GRID_SIZE)
+function SpatialGrid:getNearby(position, radius)
+	local nearby = {}
+	local checkRadius = math.ceil(radius / self.gridSize)
 	
-	for x = centerX - cellRadius, centerX + cellRadius do
-		for z = centerZ - cellRadius, centerZ + cellRadius do
-			local key = x .. "," .. z
+	for dx = -checkRadius, checkRadius do
+		for dz = -checkRadius, checkRadius do
+			local checkPos = position + Vector3.new(dx * self.gridSize, 0, dz * self.gridSize)
+			local key = self:getGridKey(checkPos)
 			if self.grid[key] then
-				for entity, _ in pairs(self.grid[key]) do
-					tableinsert(entities, entity)
+				for _, data in ipairs(self.grid[key]) do
+					table.insert(nearby, data)
 				end
 			end
 		end
 	end
 	
-	return entities
+	return nearby
 end
 
--- Create spatial grid instances
-local playerGrid = SpatialGrid.new()
-local aiGrid = SpatialGrid.new()
-
--- Utility functions
-local function setPlayerInvincible(player, reason, duration)
-	if not invinciblePlayers[player] then
-		invinciblePlayers[player] = {}
-	end
-	
-	invinciblePlayers[player][reason] = true
-	
-	if duration then
-		task.delay(duration, function()
-			if invinciblePlayers[player] then
-				invinciblePlayers[player][reason] = nil
-				if next(invinciblePlayers[player]) == nil then
-					invinciblePlayers[player] = nil
-				end
-			end
-		end)
-	end
+function SpatialGrid:clear()
+	self.grid = {}
 end
 
-local function isPlayerInvincible(player)
-	if not player or not player.Parent then return true end
-	
-	-- Check invincibility table
-	if invinciblePlayers[player] and next(invinciblePlayers[player]) then
-		return true
-	end
-	
-	-- Check attributes
-	if player:GetAttribute("ReviveInvincible") then
-		return true
-	end
-	
-	if player:GetAttribute("ActiveGhostMode") then
-		return true
-	end
-	
-	if player:GetAttribute("SpawnProtection") then
-		return true
-	end
-	
-	if player:GetAttribute("Dead") then
-		return true
-	end
-	
-	return false
-end
-
--- Create segment chunks for efficient collision checking
-local function createSegmentChunks(positions, chunkSize)
+-- Create segment chunks for efficient processing
+local function createSegmentChunks(segments, chunkSize)
 	local chunks = {}
-	for i = 1, #positions, chunkSize do
-		local chunk = {
-			startIndex = i,
-			endIndex = mathmin(i + chunkSize - 1, #positions),
-			positions = {}
-		}
-		
-		for j = i, chunk.endIndex do
-			tableinsert(chunk.positions, positions[j])
+	for i = 1, #segments, chunkSize do
+		local chunk = {}
+		for j = i, math.min(i + chunkSize - 1, #segments) do
+			table.insert(chunk, segments[j])
 		end
-		
-		-- Calculate chunk bounds for broad phase
-		if #chunk.positions > 0 then
-			local minX, minZ = math.huge, math.huge
-			local maxX, maxZ = -math.huge, -math.huge
-			
-			for _, pos in ipairs(chunk.positions) do
-				minX = mathmin(minX, pos.X - BODY_COLLISION_RADIUS)
-				minZ = mathmin(minZ, pos.Z - BODY_COLLISION_RADIUS)
-				maxX = mathmax(maxX, pos.X + BODY_COLLISION_RADIUS)
-				maxZ = mathmax(maxZ, pos.Z + BODY_COLLISION_RADIUS)
-			end
-			
-			chunk.bounds = {
-				min = Vector3new(minX, 0, minZ),
-				max = Vector3new(maxX, 0, maxZ)
-			}
-		end
-		
-		tableinsert(chunks, chunk)
+		table.insert(chunks, chunk)
 	end
 	return chunks
 end
 
--- Interpolate between position history points
-local function interpolateSegments(point1, point2, steps)
+-- Interpolate between segments for smoother collision detection
+local function interpolateSegments(segment1, segment2, samples)
 	local positions = {}
-	for i = 0, steps do
-		local t = i / steps
-		local pos = point1:Lerp(point2, t)
-		tableinsert(positions, pos)
+	if not segment1 or not segment2 then return positions end
+	
+	local p1 = segment1.Position or segment1.CFrame.Position
+	local p2 = segment2.Position or segment2.CFrame.Position
+	
+	for i = 0, samples do
+		local t = i / samples
+		local interpolated = p1:Lerp(p2, t)
+		table.insert(positions, interpolated)
 	end
+	
 	return positions
 end
 
--- Get actual snake segments with interpolation - CRITICAL FOR ORB SPAWNING
+-- Get actual snake segments (FIXED: Proper orb spawning along snake path)
 local function getActualSnakeSegments(player)
-	local snake = playerSnakes[player]
+	local snake = _G.PlayerSnakes and _G.PlayerSnakes[player]
 	if not snake then return {} end
 	
-	local positions = {}
+	local segments = {}
 	
-	-- Get position history
-	if snake.positionHistory and #snake.positionHistory > 1 then
-		-- Add interpolated positions between history points
-		for i = 1, #snake.positionHistory - 1 do
-			local pos1 = snake.positionHistory[i].position
-			local pos2 = snake.positionHistory[i + 1].position
-			
-			-- Add interpolated positions
-			local interpolated = interpolateSegments(pos1, pos2, INTERPOLATION_STEPS)
-			for _, pos in ipairs(interpolated) do
-				tableinsert(positions, pos)
+	-- Get position history for accurate path
+	if snake.positionHistory then
+		-- Use position history for accurate segment positions
+		local spacing = snake.segmentSpacing or 3.2
+		local totalLength = snake:getLength()
+		local segmentCount = math.floor(totalLength / spacing)
+		
+		for i = 1, math.min(segmentCount, #snake.positionHistory) do
+			table.insert(segments, {
+				Position = snake.positionHistory[i],
+				Size = snake.segmentSize or Vector3.new(4, 4, 4)
+			})
+		end
+	elseif snake.getSegments then
+		-- Fallback to actual segments
+		local snakeSegments = snake:getSegments()
+		for _, segment in ipairs(snakeSegments) do
+			if segment and segment.Parent then
+				table.insert(segments, segment)
 			end
 		end
 	end
 	
-	-- Limit to actual snake length
-	local maxSegments = mathfloor(snake.length / (snake.segmentSpacing or 3.2))
-	while #positions > maxSegments do
-		tableremove(positions)
-	end
-	
-	return positions
+	return segments
 end
 
--- Get segments for collision (chunked)
+-- Get player segments with caching
 local function getPlayerSegments(player)
+	-- Check cache
+	if tick() - lastCacheUpdate < CACHE_UPDATE_INTERVAL then
+		local cached = playerDataCache[player]
+		if cached and cached.segments then
+			return cached.segments
+		end
+	end
+	
+	local character = player.Character
+	if not character then return {} end
+	
+	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then return {} end
+	
+	-- Check if player is alive
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return {} end
+	
+	-- Get actual snake segments
 	local segments = getActualSnakeSegments(player)
-	return createSegmentChunks(segments, CHUNK_SIZE)
+	
+	-- Cache the result
+	if not playerDataCache[player] then
+		playerDataCache[player] = {}
+	end
+	playerDataCache[player].segments = segments
+	playerDataCache[player].head = humanoidRootPart
+	
+	return segments
 end
 
 -- Get AI snake segments
 local function getAISnakeSegments(snake)
-	if not snake or not snake.segments then return {} end
+	local segments = {}
 	
-	local positions = {}
-	for _, segment in ipairs(snake.segments) do
-		if segment and segment.Parent then
-			tableinsert(positions, segment.Position)
+	-- Find the model
+	local model = snake:IsA("Model") and snake or snake:FindFirstAncestorOfClass("Model")
+	if not model then return segments end
+	
+	-- Get body folder
+	local body = model:FindFirstChild("Body")
+	if body then
+		for _, segment in ipairs(body:GetChildren()) do
+			if segment:IsA("BasePart") and segment.Name:match("Segment") then
+				table.insert(segments, segment)
+			end
 		end
 	end
 	
-	return createSegmentChunks(positions, CHUNK_SIZE)
+	return segments
 end
 
--- Queue death to prevent issues
+-- Efficient collision check between positions
+local function checkCollision(pos1, pos2, radius)
+	local distance = (pos1 - pos2).Magnitude
+	return distance <= radius
+end
+
+-- Death queue to prevent multiple death calls
+local deathQueue = {}
+local processingDeath = {}
+
+-- Queue player death
 local function queuePlayerDeath(player)
-	if not player or not player.Parent then return end
-	if player:GetAttribute("Dead") then return end
-	
-	-- Mark as dead immediately
-	player:SetAttribute("Dead", true)
-	
-	tableinsert(deathQueue, {
-		type = "player",
-		player = player,
-		time = tick()
-	})
+	if processingDeath[player] or deathQueue[player] then
+		return
+	end
+	deathQueue[player] = true
 end
 
+-- Queue AI death
 local function queueAIDeath(head)
-	if not head or not head.Parent then return end
-	if head:GetAttribute("Dead") then return end
-	
-	-- Mark as dead immediately
-	head:SetAttribute("Dead", true)
-	
-	tableinsert(deathQueue, {
-		type = "ai",
-		head = head,
-		time = tick()
-	})
+	if processingDeath[head] or deathQueue[head] then
+		return
+	end
+	deathQueue[head] = true
 end
 
 -- Process death queue
 local function processDeathQueue()
-	local currentTime = tick()
-	local toRemove = {}
-	
-	for i, death in ipairs(deathQueue) do
-		if currentTime - death.time > 0.1 then -- Small delay
-			if death.type == "player" then
-				local player = death.player
-				if player and player.Parent and player.Character then
-					local character = player.Character
-					local humanoid = character:FindFirstChild("Humanoid")
-					
-					if humanoid and humanoid.Health > 0 then
-						-- Get snake segments BEFORE killing for orb spawning
-						local segments = getActualSnakeSegments(player)
-						
-						-- Store segments for orb spawning
-						player:SetAttribute("DeathSegments", #segments)
-						
-						-- Kill the player
-						humanoid.Health = 0
-					end
-				end
-			elseif death.type == "ai" then
-				local head = death.head
-				if head and head.Parent then
-					-- Trigger AI death
-					local deathEvent = ReplicatedStorage:FindFirstChild("Events") and 
-						ReplicatedStorage.Events:FindFirstChild("AISnakeDied")
-					if deathEvent then
-						deathEvent:Fire(head)
-					end
-				end
-			end
+	for entity, _ in pairs(deathQueue) do
+		if not processingDeath[entity] then
+			processingDeath[entity] = true
+			deathQueue[entity] = nil
 			
-			tableinsert(toRemove, i)
+			if entity:IsA("Player") then
+				handlePlayerDeath(entity)
+			else
+				handleAIDeath(entity)
+			end
 		end
-	end
-	
-	-- Remove processed deaths
-	for i = #toRemove, 1, -1 do
-		tableremove(deathQueue, toRemove[i])
 	end
 end
 
--- Check collision between head and chunks
-local function findCollisionInChunks(headPos, headRadius, chunks, exclude)
-	-- First pass: check chunk bounds
-	local nearbyChunks = {}
-	for _, chunk in ipairs(chunks) do
-		if chunk.bounds then
-			-- Simple AABB check
-			local expandedMin = chunk.bounds.min - Vector3new(headRadius, 0, headRadius)
-			local expandedMax = chunk.bounds.max + Vector3new(headRadius, 0, headRadius)
+-- Handle player death (FIXED: Death orb spawning)
+function handlePlayerDeath(player)
+	local character = player.Character
+	if not character then 
+		processingDeath[player] = nil
+		return 
+	end
+	
+	local humanoid = character:FindFirstChild("Humanoid")
+	if humanoid and humanoid.Health > 0 then
+		-- Mark as dead to prevent killing others
+		player:SetAttribute("Dead", true)
+		
+		-- Get snake length for orb calculation
+		local snakeLength = player:GetAttribute("Length") or 500
+		local orbCount = math.floor(snakeLength / 50)
+		orbCount = math.min(orbCount, 100) -- Cap at 100 orbs
+		
+		-- FIXED: Death orb spawning now properly distributes orbs along snake path
+		local segments = getActualSnakeSegments(player)
+		
+		if _G.OrbSpawner and _G.OrbSpawner.createSafeOrb and #segments > 0 then
+			-- Distribute orbs along the snake's path
+			local segmentInterval = math.max(1, math.floor(#segments / orbCount))
 			
-			if headPos.X >= expandedMin.X and headPos.X <= expandedMax.X and
-			   headPos.Z >= expandedMin.Z and headPos.Z <= expandedMax.Z then
-				tableinsert(nearbyChunks, chunk)
+			for i = 1, orbCount do
+				local segmentIndex = math.min(i * segmentInterval, #segments)
+				local segment = segments[segmentIndex]
+				
+				if segment and segment.Position then
+					-- Spawn orb at segment position with slight randomization
+					local spawnPos = segment.Position + Vector3.new(
+						math.random(-5, 5),
+						0,
+						math.random(-5, 5)
+					)
+					spawnPos = Vector3.new(spawnPos.X, ORB_SPAWN_HEIGHT, spawnPos.Z)
+					
+					-- Use createSafeOrb instead of spawnOrb (which doesn't exist)
+					_G.OrbSpawner.createSafeOrb(spawnPos, 1)
+				end
 			end
 		end
 		
-		-- Limit chunks to check
-		if #nearbyChunks >= MAX_CHUNKS_TO_CHECK then
-			break
-		end
+		-- FIXED: MAGNET EFFECT CLEARED ON DEATH (prevents orbs being pulled to dead character)
+		player:SetAttribute("MagnetActive", false)
+		player:SetAttribute("MagnetRange", 0)
+		
+		-- FIXED: Smooth death transition without camera disruption
+		task.wait(DEATH_FADE_TIME)
+		
+		-- Kill the humanoid
+		humanoid.Health = 0
 	end
 	
-	-- Second pass: check actual positions in nearby chunks
-	for _, chunk in ipairs(nearbyChunks) do
-		for _, pos in ipairs(chunk.positions) do
-			local dist = (headPos - pos).Magnitude
-			if dist < (headRadius + BODY_COLLISION_RADIUS) then
-				return true
+	processingDeath[player] = nil
+end
+
+-- Handle AI death (FIXED: Consistent with player death)
+function handleAIDeath(head)
+	local model = head:FindFirstAncestorOfClass("Model")
+	if not model then 
+		processingDeath[head] = nil
+		return 
+	end
+	
+	-- Mark as dead
+	model:SetAttribute("Dead", true)
+	
+	-- Get snake data
+	local snakeData = model:GetAttribute("SnakeData")
+	local length = 500
+	if snakeData then
+		length = snakeData.length or 500
+	end
+	
+	-- Calculate orbs
+	local orbCount = math.floor(length / 50)
+	orbCount = math.min(orbCount, 50) -- Cap AI orbs at 50
+	
+	-- FIXED: Death orbs spawn at correct height (Y=5)
+	local body = model:FindFirstChild("Body")
+	if _G.OrbSpawner and _G.OrbSpawner.createSafeOrb and body then
+		local segments = {}
+		for _, part in ipairs(body:GetChildren()) do
+			if part:IsA("BasePart") then
+				table.insert(segments, part)
+			end
+		end
+		
+		local segmentInterval = math.max(1, math.floor(#segments / orbCount))
+		
+		for i = 1, orbCount do
+			local segmentIndex = math.min(i * segmentInterval, #segments)
+			local segment = segments[segmentIndex]
+			
+			if segment then
+				local spawnPos = segment.Position + Vector3.new(
+					math.random(-5, 5),
+					0,
+					math.random(-5, 5)
+				)
+				spawnPos = Vector3.new(spawnPos.X, ORB_SPAWN_HEIGHT, spawnPos.Z)
+				
+				-- Use createSafeOrb instead of spawnOrb (which doesn't exist)
+				_G.OrbSpawner.createSafeOrb(spawnPos, 1)
 			end
 		end
 	end
 	
-	return false
-end
-
--- Optimized segment collision check
-local function findCollisionInSegments(headPos, headRadius, positions, startIdx, endIdx)
-	startIdx = startIdx or 1
-	endIdx = endIdx or #positions
-	
-	for i = startIdx, mathmin(endIdx, #positions) do
-		local pos = positions[i]
-		if pos then
-			local dist = (headPos - pos).Magnitude
-			if dist < (headRadius + BODY_COLLISION_RADIUS) then
-				return true
-			end
+	-- Fade out and destroy
+	local parts = model:GetDescendants()
+	for _, part in ipairs(parts) do
+		if part:IsA("BasePart") then
+			TweenService:Create(part, TweenInfo.new(DEATH_FADE_TIME), {
+				Transparency = 1
+			}):Play()
 		end
 	end
 	
+	task.wait(DEATH_FADE_TIME)
+	model:Destroy()
+	
+	processingDeath[head] = nil
+end
+
+-- Find collision in chunks
+local function findCollisionInChunks(headPos, chunks, radius, excludePart)
+	for _, chunk in ipairs(chunks) do
+		for _, segment in ipairs(chunk) do
+			if segment ~= excludePart and segment.Parent then
+				local segmentPos = segment.Position or segment.CFrame.Position
+				if checkCollision(headPos, segmentPos, radius) then
+					return true, segment
+				end
+			end
+		end
+	end
 	return false
 end
 
--- Main collision check function
-local function checkCollisions()
-	local startTime = tick()
-	performanceStats.checksPerSecond = performanceStats.checksPerSecond + 1
-	
+-- Find collision with interpolation
+local function findCollisionInSegments(headPos, segments, radius, excludePart)
+	for i = 1, #segments - 1 do
+		local segment1 = segments[i]
+		local segment2 = segments[i + 1]
+		
+		if segment1 ~= excludePart and segment2 ~= excludePart then
+			local interpolatedPositions = interpolateSegments(segment1, segment2, INTERPOLATION_SAMPLES)
+			
+			for _, pos in ipairs(interpolatedPositions) do
+				if checkCollision(headPos, pos, radius) then
+					return true, segment1
+				end
+			end
+		end
+	end
+	return false
+end
+
+-- Main collision detection
+local spatialGrid = SpatialGrid.new()
+
+local function detectCollisions()
 	-- Process death queue first
 	processDeathQueue()
 	
-	-- Update spatial grids
-	for player, snake in pairs(playerSnakes) do
-		if player and player.Parent and player.Character then
-			local head = player.Character:FindFirstChild("HumanoidRootPart")
-			if head then
-				playerGrid:addEntity(player, head.Position)
-				performanceStats.gridUpdatesPerSecond = performanceStats.gridUpdatesPerSecond + 1
+	-- Clear spatial grid
+	spatialGrid:clear()
+	
+	-- Collect all heads
+	local allHeads = {}
+	
+	-- Player heads
+	for _, player in ipairs(Players:GetPlayers()) do
+		if not isPlayerInvincible(player) then
+			local character = player.Character
+			local humanoidRootPart = character and character:FindFirstChild("HumanoidRootPart")
+			local humanoid = character and character:FindFirstChild("Humanoid")
+			
+			-- FIXED: Dead players can't kill others (marked with Dead attribute)
+			if humanoidRootPart and humanoid and humanoid.Health > 0 and not player:GetAttribute("Dead") then
+				table.insert(allHeads, {
+					type = "player",
+					part = humanoidRootPart,
+					player = player,
+					position = humanoidRootPart.Position
+				})
+				spatialGrid:insert(humanoidRootPart.Position, {type = "playerHead", data = player})
 			end
-		else
-			playerGrid:removeEntity(player)
-			playerSnakes[player] = nil
 		end
 	end
 	
-	-- Check player vs player collisions
-	for player1, snake1 in pairs(playerSnakes) do
-		if isPlayerInvincible(player1) then continue end
-		
-		local char1 = player1.Character
-		if not char1 then continue end
-		
-		local head1 = char1:FindFirstChild("HumanoidRootPart")
-		local humanoid1 = char1:FindFirstChild("Humanoid")
-		if not head1 or not humanoid1 or humanoid1.Health <= 0 then continue end
-		
-		local head1Pos = head1.Position
-		local length1 = player1:GetAttribute("SnakeLength") or 500
-		
-		-- Skip if too small to kill
-		if length1 < MIN_COLLISION_LENGTH then continue end
-		
-		-- Use segment check cooldown
-		local now = tick()
-		local lastCheck = lastSegmentCheck[player1] or 0
-		if now - lastCheck < SEGMENT_CHECK_COOLDOWN then continue end
-		lastSegmentCheck[player1] = now
-		
-		-- Get nearby players
-		local nearbyPlayers = playerGrid:getNearbyEntities(head1Pos, 100)
-		
-		for _, player2 in ipairs(nearbyPlayers) do
-			if player1 == player2 then continue end
-			if isPlayerInvincible(player2) then continue end
-			
-			local char2 = player2.Character
-			if not char2 then continue end
-			
-			local head2 = char2:FindFirstChild("HumanoidRootPart")
-			local humanoid2 = char2:FindFirstChild("Humanoid")
-			if not head2 or not humanoid2 or humanoid2.Health <= 0 then continue end
-			
-			local head2Pos = head2.Position
-			local length2 = player2:GetAttribute("SnakeLength") or 500
-			
-			-- Head to head collision
-			local headDist = (head1Pos - head2Pos).Magnitude
-			if headDist < (HEAD_COLLISION_RADIUS * 2) then
-				if length1 > length2 then
-					queuePlayerDeath(player2)
-				elseif length2 > length1 then
-					queuePlayerDeath(player1)
-				else
-					-- Equal length, both die
-					queuePlayerDeath(player1)
-					queuePlayerDeath(player2)
-				end
-				continue
+	-- AI heads
+	for _, aiHead in ipairs(CollectionService:GetTagged("SnakeHead")) do
+		if aiHead.Parent then
+			local model = aiHead:FindFirstAncestorOfClass("Model")
+			if model and not model:GetAttribute("Dead") then
+				table.insert(allHeads, {
+					type = "ai",
+					part = aiHead,
+					position = aiHead.Position
+				})
+				spatialGrid:insert(aiHead.Position, {type = "aiHead", data = aiHead})
 			end
-			
-			-- Head to body collision - player1 head vs player2 body
-			if length2 >= MIN_COLLISION_LENGTH then
-				local segments2 = getPlayerSegments(player2)
-				if #segments2 > 0 and findCollisionInChunks(head1Pos, HEAD_COLLISION_RADIUS, segments2) then
-					queuePlayerDeath(player1)
-					continue
+		end
+	end
+	
+	-- Insert all segments into spatial grid
+	-- Player segments
+	for _, player in ipairs(Players:GetPlayers()) do
+		local segments = getPlayerSegments(player)
+		for _, segment in ipairs(segments) do
+			if segment and segment.Position then
+				spatialGrid:insert(segment.Position, {
+					type = "playerSegment",
+					segment = segment,
+					owner = player
+				})
+			end
+		end
+	end
+	
+	-- AI segments
+	for _, aiHead in ipairs(CollectionService:GetTagged("SnakeHead")) do
+		if aiHead.Parent then
+			local segments = getAISnakeSegments(aiHead)
+			for _, segment in ipairs(segments) do
+				if segment and segment.Parent then
+					spatialGrid:insert(segment.Position, {
+						type = "aiSegment",
+						segment = segment,
+						owner = aiHead
+					})
 				end
 			end
 		end
+	end
+	
+	-- Check collisions for each head
+	for _, headData in ipairs(allHeads) do
+		local headPos = headData.position
+		local nearbyObjects = spatialGrid:getNearby(headPos, MAX_CHECK_DISTANCE)
 		
-		-- Check collision with AI snakes
-		local nearbyAI = aiGrid:getNearbyEntities(head1Pos, 100)
-		for _, aiData in ipairs(nearbyAI) do
-			local aiHead = aiData.head
-			if aiHead and aiHead.Parent then
-				local aiHeadPos = aiHead.Position
+		-- Check against nearby segments
+		for _, objData in ipairs(nearbyObjects) do
+			if objData.type:match("Segment") then
+				local segment = objData.segment
+				local segmentOwner = objData.owner
 				
-				-- Head to head with AI
-				local headDist = (head1Pos - aiHeadPos).Magnitude
-				if headDist < (HEAD_COLLISION_RADIUS * 2) then
-					-- Player always wins against AI in head-to-head
-					queueAIDeath(aiHead)
-					continue
+				-- Don't collide with own segments
+				if headData.type == "player" and segmentOwner ~= headData.player then
+					if checkCollision(headPos, segment.Position, HEAD_COLLISION_RADIUS + SEGMENT_COLLISION_RADIUS) then
+						queuePlayerDeath(headData.player)
+						break
+					end
+				elseif headData.type == "ai" and segmentOwner ~= headData.part then
+					if checkCollision(headPos, segment.Position, HEAD_COLLISION_RADIUS + SEGMENT_COLLISION_RADIUS) then
+						queueAIDeath(headData.part)
+						break
+					end
 				end
-				
-				-- Head to AI body
-				local aiSegments = getAISnakeSegments(aiData)
-				if #aiSegments > 0 and findCollisionInChunks(head1Pos, HEAD_COLLISION_RADIUS, aiSegments) then
-					queuePlayerDeath(player1)
+			end
+		end
+		
+		-- Head-to-head collisions
+		for _, otherHead in ipairs(allHeads) do
+			if headData ~= otherHead then
+				if checkCollision(headData.position, otherHead.position, HEAD_COLLISION_RADIUS * 2) then
+					-- Determine winner based on length
+					if headData.type == "player" and otherHead.type == "player" then
+						local length1 = headData.player:GetAttribute("Length") or 0
+						local length2 = otherHead.player:GetAttribute("Length") or 0
+						
+						if length1 > length2 then
+							queuePlayerDeath(otherHead.player)
+						elseif length2 > length1 then
+							queuePlayerDeath(headData.player)
+						else
+							-- Tie - both die
+							queuePlayerDeath(headData.player)
+							queuePlayerDeath(otherHead.player)
+						end
+					elseif headData.type == "ai" and otherHead.type == "ai" then
+						-- Both AI die
+						queueAIDeath(headData.part)
+						queueAIDeath(otherHead.part)
+					else
+						-- Player vs AI - player wins if bigger
+						if headData.type == "player" then
+							local playerLength = headData.player:GetAttribute("Length") or 0
+							if playerLength >= MIN_KILL_LENGTH then
+								queueAIDeath(otherHead.part)
+							else
+								queuePlayerDeath(headData.player)
+							end
+						else
+							local playerLength = otherHead.player:GetAttribute("Length") or 0
+							if playerLength >= MIN_KILL_LENGTH then
+								queueAIDeath(headData.part)
+							else
+								queuePlayerDeath(otherHead.player)
+							end
+						end
+					end
 				end
 			end
 		end
 	end
-	
-	-- Update AI positions in grid
-	for _, aiData in pairs(aiSnakes) do
-		if aiData.head and aiData.head.Parent then
-			aiGrid:addEntity(aiData, aiData.head.Position)
-		else
-			aiGrid:removeEntity(aiData)
-		end
-	end
-	
-	-- Check AI vs player body collisions
-	for _, aiData in pairs(aiSnakes) do
-		local aiHead = aiData.head
-		if not aiHead or not aiHead.Parent then continue end
-		if aiHead:GetAttribute("Dead") then continue end
-		
-		local aiHeadPos = aiHead.Position
-		
-		-- Get nearby players
-		local nearbyPlayers = playerGrid:getNearbyEntities(aiHeadPos, 100)
-		
-		for _, player in ipairs(nearbyPlayers) do
-			if isPlayerInvincible(player) then continue end
-			
-			local length = player:GetAttribute("SnakeLength") or 500
-			if length >= MIN_COLLISION_LENGTH then
-				local segments = getPlayerSegments(player)
-				if #segments > 0 and findCollisionInChunks(aiHeadPos, HEAD_COLLISION_RADIUS, segments) then
-					queueAIDeath(aiHead)
-					break
-				end
-			end
-		end
-	end
-	
-	performanceStats.frameTime = tick() - startTime
 end
 
--- Track performance
-local lastPerformanceReport = 0
-RunService.Heartbeat:Connect(function()
-	local now = tick()
-	if now - lastPerformanceReport > 1 then
-		if performanceStats.checksPerSecond > 0 then
-			local avgFrameTime = performanceStats.frameTime
-			--print(string.format("Collision Performance - Checks/s: %d, Grid Updates/s: %d, Avg Frame: %.3fms",
-			--	performanceStats.checksPerSecond,
-			--	performanceStats.gridUpdatesPerSecond,
-			--	avgFrameTime * 1000
-			--))
-		end
+-- Spawn protection for new players
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function(character)
+		-- FIXED: 1-second delay for spawn protection
+		player:SetAttribute("SpawnProtection", true)
+		task.wait(SPAWN_PROTECTION_TIME)
+		player:SetAttribute("SpawnProtection", false)
 		
-		performanceStats.checksPerSecond = 0
-		performanceStats.gridUpdatesPerSecond = 0
-		lastPerformanceReport = now
+		-- Clear death state
+		player:SetAttribute("Dead", false)
+	end)
+end)
+
+-- Clear cache periodically
+RunService.Heartbeat:Connect(function()
+	if tick() - lastCacheUpdate > CACHE_UPDATE_INTERVAL then
+		playerDataCache = {}
+		lastCacheUpdate = tick()
 	end
 end)
 
--- Death handling with proper orb spawning
-local function onCharacterDied(character)
-	local player = Players:GetPlayerFromCharacter(character)
-	if not player then return end
-	
-	-- FIXED: MAGNET EFFECT CLEARED ON DEATH (prevents orbs being pulled to dead character)
-	player:SetAttribute("MagnetActive", false)
-	player:SetAttribute("MagnetRange", 0)
-	
-	-- FIXED: Death orb spawning now properly distributes orbs along snake path
-	local segments = getActualSnakeSegments(player)
-	if #segments > 0 and _G.OrbSpawner then
-		-- Spawn orbs along the snake's path
-		local orbCount = mathmin(#segments, 50) -- Cap at 50 orbs
-		local step = mathmax(1, mathfloor(#segments / orbCount))
-		
-		for i = 1, #segments, step do
-			local pos = segments[i]
-			if pos then
-				-- FIXED: Death orbs spawn at correct height (Y=5)
-				_G.OrbSpawner:SpawnDeathOrbs(Vector3new(pos.X, 5, pos.Z), 1)
-			end
-		end
+-- Main collision loop
+local lastCollisionCheck = 0
+RunService.Heartbeat:Connect(function()
+	if tick() - lastCollisionCheck >= COLLISION_CHECK_INTERVAL then
+		lastCollisionCheck = tick()
+		detectCollisions()
 	end
-	
-	-- FIXED: Smooth death transition without camera disruption
-	playerGrid:removeEntity(player)
-	playerSnakes[player] = nil
-	
-	-- FIXED: Dead players can't kill others (marked with Dead attribute)
-	player:SetAttribute("Dead", true)
-end
+end)
 
--- Initialize collision system
-local function initialize()
-	-- Get initial references
-	if _G.PlayerSnakes then
-		playerSnakes = _G.PlayerSnakes
-	end
-	
-	-- Listen for new players
-	Players.PlayerAdded:Connect(function(player)
-		player.CharacterAdded:Connect(function(character)
-			local humanoid = character:WaitForChild("Humanoid")
-			
-			-- FIXED: 1-second delay for spawn protection
-			wait(1)
-			
-			-- Clear death flag
-			player:SetAttribute("Dead", false)
-			
-			-- Apply spawn protection
-			setPlayerInvincible(player, INVINCIBILITY_REASONS.SPAWN, SPAWN_PROTECTION_TIME)
-			player:SetAttribute("SpawnProtection", true)
-			
-			task.delay(SPAWN_PROTECTION_TIME, function()
-				player:SetAttribute("SpawnProtection", false)
-			end)
-			
-			-- Listen for attribute changes
-			player:GetAttributeChangedSignal("ActiveGhostMode"):Connect(function()
-				if player:GetAttribute("ActiveGhostMode") then
-					setPlayerInvincible(player, INVINCIBILITY_REASONS.GHOST)
-				else
-					if invinciblePlayers[player] then
-						invinciblePlayers[player][INVINCIBILITY_REASONS.GHOST] = nil
-						if next(invinciblePlayers[player]) == nil then
-							invinciblePlayers[player] = nil
-						end
-					end
-				end
-			end)
-			
-			player:GetAttributeChangedSignal("ReviveInvincible"):Connect(function()
-				if player:GetAttribute("ReviveInvincible") then
-					setPlayerInvincible(player, INVINCIBILITY_REASONS.REVIVE)
-				else
-					if invinciblePlayers[player] then
-						invinciblePlayers[player][INVINCIBILITY_REASONS.REVIVE] = nil
-						if next(invinciblePlayers[player]) == nil then
-							invinciblePlayers[player] = nil
-						end
-					end
-				end
-			end)
-			
-			-- Death handling
-			humanoid.Died:Connect(function()
-				onCharacterDied(character)
-				setPlayerInvincible(player, INVINCIBILITY_REASONS.DEATH)
-			end)
-		end)
-	end)
-	
-	-- Track AI snakes
-	CollectionService:GetInstanceAddedSignal(AI_HEAD_TAG):Connect(function(head)
-		local snake = head.Parent
-		if snake then
-			aiSnakes[head] = {
-				head = head,
-				segments = {},
-				model = snake
-			}
-			
-			-- Collect segments
-			for _, part in ipairs(snake:GetChildren()) do
-				if part:IsA("BasePart") and part.Name:match("Segment") then
-					tableinsert(aiSnakes[head].segments, part)
-				end
-			end
-			
-			-- Sort segments by name
-			table.sort(aiSnakes[head].segments, function(a, b)
-				local numA = tonumber(a.Name:match("%d+")) or 0
-				local numB = tonumber(b.Name:match("%d+")) or 0
-				return numA < numB
-			end)
-		end
-	end)
-	
-	CollectionService:GetInstanceRemovedSignal(AI_HEAD_TAG):Connect(function(head)
-		if aiSnakes[head] then
-			aiGrid:removeEntity(aiSnakes[head])
-			aiSnakes[head] = nil
-		end
-	end)
-	
-	-- Start collision checking
-	local lastCheck = 0
-	RunService.Heartbeat:Connect(function()
-		local now = tick()
-		if now - lastCheck >= CHECK_INTERVAL then
-			lastCheck = now
-			checkCollisions()
-		end
-	end)
-	
-	-- Update player snakes reference
-	RunService.Heartbeat:Connect(function()
-		if _G.PlayerSnakes then
-			playerSnakes = _G.PlayerSnakes
-		end
-	end)
-end
-
--- Start the system
-initialize()
-
--- Module export
-return {
-	setPlayerInvincible = setPlayerInvincible,
-	isPlayerInvincible = isPlayerInvincible,
-	queuePlayerDeath = queuePlayerDeath,
-	queueAIDeath = queueAIDeath
-}
+print("✅ SnakeCollisionHandler V7.0 loaded - Fully polished collision system!")
