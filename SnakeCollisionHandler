@@ -980,10 +980,19 @@ task.spawn(function()
 									if rootPart then
 										rootPart:SetAttribute("Dead", false)
 									end
+									
+									-- CRITICAL: Remove any pending deaths from the queue
+									for i = #deathQueue, 1, -1 do
+										if deathQueue[i].type == "player" and deathQueue[i].target == player then
+											table.remove(deathQueue, i)
+											print("🧹 Cleared pending death from queue for reviving player")
+										end
+									end
 
 									-- Make player invincible for 5 seconds
 									invinciblePlayers[player] = os.clock() + 5
 									player:SetAttribute("ReviveInvincible", true)
+									player:SetAttribute("SpawnProtection", true) -- Double protection
 
 									-- Set flags to prevent menu from showing
 									player:SetAttribute("RevivingNow", true)
@@ -1292,6 +1301,11 @@ RunService.Stepped:Connect(function()
 		if deadPlayers[player] then
 			continue
 		end
+		
+		-- Skip if player is currently reviving
+		if player:GetAttribute("RevivingNow") then
+			continue
+		end
 
 		if head and head.Parent then
 			-- Skip if head is marked as dead
@@ -1348,6 +1362,11 @@ RunService.Stepped:Connect(function()
 		local headA = headDataA.part
 
 		if isPlayerInvincible(playerA) or deadPlayers[playerA] then
+			continue
+		end
+		
+		-- Skip if player is currently reviving
+		if playerA:GetAttribute("RevivingNow") then
 			continue
 		end
 
