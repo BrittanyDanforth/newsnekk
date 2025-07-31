@@ -838,8 +838,6 @@ task.spawn(function()
 							end
 						end
 
-						deadPlayers[player] = true
-
 						-- IMPORTANT: Clear magnet effect IMMEDIATELY to prevent death orbs from being pulled
 						player:SetAttribute("MagnetRange", 1) -- Reset to default (no magnet)
 						player:SetAttribute("TempMagnetRange", 1) -- Clear any temporary boost
@@ -999,6 +997,9 @@ task.spawn(function()
 								end
 							end
 						end
+
+						-- ONLY mark as dead if NOT reviving
+						deadPlayers[player] = true
 
 						-- Clean death with proper timing for menu
 						humanoid.Health = 0
