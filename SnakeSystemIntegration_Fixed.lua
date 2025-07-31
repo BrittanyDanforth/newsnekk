@@ -1,6 +1,6 @@
 --[[
-SNAKE SYSTEM INTEGRATION
-This script integrates the optimized snake system with your existing CharacterSetup
+SNAKE SYSTEM INTEGRATION - COLLISION FIXED VERSION
+This script integrates the optimized snake system with proper collision isolation
 Place this in ServerScriptService
 --]]
 
@@ -8,58 +8,75 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local PhysicsService = game:GetService("PhysicsService")
+
+-- Create collision groups for proper isolation
+local COLLISION_GROUPS = {
+	PlayerSnake = "PlayerSnake",
+	AISnake = "AISnake",
+	Default = "Default"
+}
+
+-- Setup collision groups
+local function setupCollisionGroups()
+	-- Create groups if they don't exist
+	for _, groupName in pairs(COLLISION_GROUPS) do
+		pcall(function()
+			PhysicsService:CreateCollisionGroup(groupName)
+		end)
+	end
+	
+	-- Set collision rules
+	-- Player snakes don't collide with themselves
+	PhysicsService:CollisionGroupSetCollidable(COLLISION_GROUPS.PlayerSnake, COLLISION_GROUPS.PlayerSnake, false)
+	-- AI snakes don't collide with themselves
+	PhysicsService:CollisionGroupSetCollidable(COLLISION_GROUPS.AISnake, COLLISION_GROUPS.AISnake, false)
+	-- Player and AI snakes don't physically collide (handled by collision system)
+	PhysicsService:CollisionGroupSetCollidable(COLLISION_GROUPS.PlayerSnake, COLLISION_GROUPS.AISnake, false)
+end
+
+setupCollisionGroups()
 
 -- Load the optimized system FIRST to create networking folder
--- Try V9 first, then V4, then V3, then V2, then V1
 local OptimizedSnakeSystem
 
--- Try V9 (Ultimate version)
-local v9Success, v9Result = pcall(function()
-	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV9", 2))
+-- Try V4 first, then V3, then V2, then V1
+local v4Success, v4Result = pcall(function()
+	return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV4", 2))
 end)
 
-if v9Success and v9Result then
-	OptimizedSnakeSystem = v9Result
-	print("✅ Loaded OptimizedSnakeSystemV9 - ULTIMATE!")
+if v4Success and v4Result then
+	OptimizedSnakeSystem = v4Result
+	print("✅ Loaded OptimizedSnakeSystemV4 - PERFORMANCE!")
 else
-	-- Try V4 (Performance focused)
-	local v4Success, v4Result = pcall(function()
-		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV4", 2))
+	-- Try V3
+	local v3Success, v3Result = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV3", 2))
 	end)
 
-	if v4Success and v4Result then
-		OptimizedSnakeSystem = v4Result
-		print("✅ Loaded OptimizedSnakeSystemV4 - PERFORMANCE!")
+	if v3Success and v3Result then
+		OptimizedSnakeSystem = v3Result
+		print("✅ Loaded OptimizedSnakeSystemV3 - SMOOTH!")
 	else
-		-- Try V3
-		local v3Success, v3Result = pcall(function()
-			return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV3", 2))
+		-- Try V2
+		local v2Success, v2Result = pcall(function()
+			return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV2", 2))
 		end)
 
-		if v3Success and v3Result then
-			OptimizedSnakeSystem = v3Result
-			print("✅ Loaded OptimizedSnakeSystemV3 - SMOOTH!")
+		if v2Success and v2Result then
+			OptimizedSnakeSystem = v2Result
+			print("✅ Loaded OptimizedSnakeSystemV2")
 		else
-			-- Try V2
-			local v2Success, v2Result = pcall(function()
-				return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystemV2", 2))
+			-- Fallback to V1
+			local v1Success, v1Result = pcall(function()
+				return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
 			end)
 
-			if v2Success and v2Result then
-				OptimizedSnakeSystem = v2Result
-				print("✅ Loaded OptimizedSnakeSystemV2")
+			if v1Success and v1Result then
+				OptimizedSnakeSystem = v1Result
+				print("✅ Loaded OptimizedSnakeSystem V1")
 			else
-				-- Fallback to V1
-				local v1Success, v1Result = pcall(function()
-					return require(ReplicatedStorage:WaitForChild("OptimizedSnakeSystem"))
-				end)
-
-				if v1Success and v1Result then
-					OptimizedSnakeSystem = v1Result
-					print("✅ Loaded OptimizedSnakeSystem V1")
-				else
-					error("❌ Failed to load any OptimizedSnakeSystem module!")
-				end
+				error("❌ Failed to load any OptimizedSnakeSystem module!")
 			end
 		end
 	end
@@ -93,12 +110,12 @@ spawnSnake.Name = "SpawnSnake"
 local respawnSnake = remoteEvents:FindFirstChild("RespawnSnake") or Instance.new("RemoteEvent", remoteEvents)
 respawnSnake.Name = "RespawnSnake"
 
--- Default configuration
+-- Default configuration with collision fixes
 local DEFAULT_CONFIG = {
-	InitialLength = 500,  -- Normal starting length
-	MaxSegments = 50000,  -- MASSIVE SNAKES! Was 10000
-	SegmentSpacing = 3.2,  -- Original spacing
-	SegmentSize = Vector3.new(4, 4, 4),  -- Original size
+	InitialLength = 1000,
+	MaxSegments = 50000,
+	SegmentSpacing = 3.2,
+	SegmentSize = Vector3.new(4, 4, 4),
 	HeadSize = Vector3.new(4.5, 4.5, 4.5),
 	HeadColor = Color3.fromRGB(76, 217, 100),
 	BodyColors = {
@@ -111,7 +128,10 @@ local DEFAULT_CONFIG = {
 	HeadMaterial = Enum.Material.Neon,
 	BodyMaterial = Enum.Material.Neon,
 	GlowIntensity = 2,
-	GlowRange = 6
+	GlowRange = 6,
+	-- Add collision properties
+	CanCollide = false,  -- Disable physical collision
+	CollisionGroup = COLLISION_GROUPS.PlayerSnake
 }
 
 -- Get skin configuration
@@ -139,11 +159,27 @@ local function getSkinConfig(player)
 	return DEFAULT_CONFIG
 end
 
+-- Set collision properties for snake parts
+local function setSnakePartCollision(part, isHead)
+	if not part then return end
+	
+	-- Disable physical collision (handled by collision system)
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	
+	-- Set collision group
+	PhysicsService:SetPartCollisionGroup(part, COLLISION_GROUPS.PlayerSnake)
+	
+	-- Add identifier for collision system
+	part:SetAttribute("IsSnakePart", true)
+	part:SetAttribute("IsSnakeHead", isHead or false)
+end
+
 -- Handle character spawning
 local function onCharacterAdded(character)
 	local player = Players:GetPlayerFromCharacter(character)
 	if not player then 
-		-- Try again after a short wait
 		wait(0.1)
 		player = Players:GetPlayerFromCharacter(character)
 		if not player then
@@ -162,19 +198,18 @@ local function onCharacterAdded(character)
 	local humanoid = character:WaitForChild("Humanoid")
 	local rootPart = character:WaitForChild("HumanoidRootPart")
 
+	-- IMPORTANT: Disable collision on character parts
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") and part ~= rootPart then
+			part.CanCollide = false
+			part.CanTouch = false
+		end
+	end
+
 	wait(0.5) -- Small delay for stability
 
 	-- Get configuration
 	local config = getSkinConfig(player)
-	
-	-- Check if player is reviving and has a stored snake length
-	local reviveSnakeLength = player:GetAttribute("ReviveSnakeLength")
-	if reviveSnakeLength and reviveSnakeLength > 0 then
-		config.InitialLength = reviveSnakeLength
-		print("🔄 Using revive snake length:", reviveSnakeLength)
-		-- Clear the attribute after using it
-		player:SetAttribute("ReviveSnakeLength", nil)
-	end
 
 	print("Creating snake with config - InitialLength:", config.InitialLength, "MaxSegments:", config.MaxSegments)
 
@@ -197,12 +232,37 @@ local function onCharacterAdded(character)
 	print("✅ Snake created successfully for", player.Name)
 	activeSnakes[player] = snake
 
+	-- COLLISION FIX: Set collision properties on all snake parts
+	if snake.head then
+		setSnakePartCollision(snake.head, true)
+	end
+	
+	if snake.segments then
+		for _, segment in ipairs(snake.segments) do
+			if segment and segment:IsA("BasePart") then
+				setSnakePartCollision(segment, false)
+			end
+		end
+	end
+
 	-- Add to global table for collision handler
 	if not _G.PlayerSnakes then
 		_G.PlayerSnakes = {}
 	end
 	_G.PlayerSnakes[player] = snake
-	
+
+	-- Override snake's segment creation to apply collision settings
+	local originalAddSegment = snake.addSegment
+	if originalAddSegment then
+		snake.addSegment = function(self, ...)
+			local segment = originalAddSegment(self, ...)
+			if segment and segment:IsA("BasePart") then
+				setSnakePartCollision(segment, false)
+			end
+			return segment
+		end
+	end
+
 	-- Setup boost tracking
 	if snake.setBoosting then
 		-- Create RemoteEvent for boost state
@@ -212,7 +272,7 @@ local function onCharacterAdded(character)
 			boostEvent.Name = "UpdateBoostState"
 			boostEvent.Parent = remoteEvents
 		end
-		
+
 		-- Listen for boost state changes
 		local boostConnection
 		boostConnection = boostEvent.OnServerEvent:Connect(function(eventPlayer, isBoosting)
@@ -220,7 +280,7 @@ local function onCharacterAdded(character)
 				activeSnakes[player]:setBoosting(isBoosting)
 			end
 		end)
-		
+
 		-- Store connection for cleanup
 		if not snake._connections then
 			snake._connections = {}
@@ -243,7 +303,6 @@ local function onCharacterAdded(character)
 		lengthValue.Value = config.InitialLength or 55
 		lengthValue.Parent = leaderstats
 	else
-		-- Set to initial length from config
 		lengthValue.Value = config.InitialLength or 55
 	end
 
@@ -251,35 +310,49 @@ local function onCharacterAdded(character)
 	if lengthValue then
 		-- Initial length
 		snake:updateLength(lengthValue.Value)
-		
-		-- Listen for changes
-		lengthValue.Changed:Connect(function(newLength)
+
+		-- Listen for changes with collision fix
+		local lengthConnection = lengthValue.Changed:Connect(function(newLength)
 			if snake and activeSnakes[player] == snake then
 				snake:updateLength(newLength)
+				
+				-- Reapply collision settings to new segments
+				if snake.segments then
+					for _, segment in ipairs(snake.segments) do
+						if segment and segment:IsA("BasePart") then
+							setSnakePartCollision(segment, false)
+						end
+					end
+				end
 			end
 		end)
+		
+		-- Store connection
+		if not snake._connections then
+			snake._connections = {}
+		end
+		snake._connections.length = lengthConnection
 	end
-	
-	-- Note: OptimizedSnakeSystemV9 handles its own update loop internally via RunService.Heartbeat
-	-- We don't need to create an update loop here
-	
-	-- Clean up any connections when character is removed
-	character.AncestryChanged:Connect(function()
-		if not character.Parent then
-			-- Clean up the snake
-			if activeSnakes[player] == snake then
-				activeSnakes[player] = nil
-			end
+
+	-- Update loop - monitor for character removal/death
+	local updateConnection
+	updateConnection = RunService.Heartbeat:Connect(function(dt)
+		if not character.Parent or humanoid.Health <= 0 then
+			updateConnection:Disconnect()
+			return
+		end
+		
+		-- Ensure collision settings persist
+		if snake.head and snake.head.CanCollide then
+			snake.head.CanCollide = false
 		end
 	end)
-	
+
 	-- Handle skin changes
 	local skinConnection
 	skinConnection = player:GetAttributeChangedSignal("SelectedSkin"):Connect(function()
 		if snake and activeSnakes[player] == snake then
-			-- Update snake appearance
 			local newConfig = getSkinConfig(player)
-			-- Apply new skin to snake
 			if snake.head then
 				snake.head.Color = newConfig.HeadColor
 				snake.head.Material = newConfig.HeadMaterial
@@ -287,41 +360,39 @@ local function onCharacterAdded(character)
 			snake.config = newConfig
 		end
 	end)
-	
-	-- Store connections on snake object for cleanup
+
+	-- Store connections
+	snake.monitorConnection = updateConnection
 	snake.skinConnection = skinConnection
-	
+
 	-- Handle death
 	local deathConnection
 	deathConnection = humanoid.Died:Connect(function()
 		if activeSnakes[player] then
 			-- Disconnect all connections immediately
+			if updateConnection then
+				updateConnection:Disconnect()
+			end
 			if skinConnection then
 				skinConnection:Disconnect()
 			end
 			if deathConnection then
 				deathConnection:Disconnect()
 			end
-			
-			-- Cleanup boost connection
-			if snake._connections and snake._connections.boost then
-				snake._connections.boost:Disconnect()
+
+			-- Cleanup all stored connections
+			if snake._connections then
+				for _, conn in pairs(snake._connections) do
+					if conn then
+						conn:Disconnect()
+					end
+				end
 			end
 
-			-- Get snake's current position and length for death orbs
-			local deathPos = rootPart.Position
+			-- SnakeCollisionHandler now handles orb spawning along snake path
+			-- No need to spawn orbs here anymore
 			local snakeLength = lengthValue and lengthValue.Value or 55
-
-			print("Snake died - spawning", math.floor(snakeLength / 10), "death orbs at", deathPos)
-
-			-- Spawn death orbs using global OrbSpawner
-			if _G.OrbSpawner and _G.OrbSpawner.spawnDeathOrbsForSnake then
-				-- Spawn orbs based on snake length (cap at reasonable amount)
-				local orbCount = math.min(math.floor(snakeLength / 10), 100)
-				_G.OrbSpawner.spawnDeathOrbsForSnake(deathPos, orbCount)
-			else
-				warn("OrbSpawner not loaded yet or missing spawnDeathOrbsForSnake function")
-			end
+			print("Snake died - Length:", snakeLength, "(orbs handled by collision system)")
 
 			-- Clean up snake
 			activeSnakes[player]:destroy()
@@ -365,6 +436,11 @@ Players.PlayerRemoving:Connect(function(player)
 		activeSnakes[player]:destroy()
 		activeSnakes[player] = nil
 	end
+	
+	-- Clean up from global table
+	if _G.PlayerSnakes then
+		_G.PlayerSnakes[player] = nil
+	end
 end)
 
 -- Handle existing players
@@ -372,7 +448,6 @@ for _, player in pairs(Players:GetPlayers()) do
 	if player.Character then
 		onCharacterAdded(player.Character)
 	else
-		-- Wait for character to spawn (when they click Play)
 		player.CharacterAdded:Connect(onCharacterAdded)
 	end
 end
@@ -398,6 +473,8 @@ if respawnEvent then
 	end)
 end
 
--- Removed auto-spawn - players spawn when clicking Play button
-
-print("✅ Snake System Integration loaded!")
+print("✅ Snake System Integration loaded with collision fixes!")
+print("🛡️ Collision groups configured:")
+print("   - PlayerSnake: No self-collision")
+print("   - AISnake: No self-collision")
+print("   - Physical collisions disabled (handled by collision system)")
