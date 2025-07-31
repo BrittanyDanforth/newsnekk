@@ -71,38 +71,14 @@ local function setPlayerInvincible(player)
 end
 
 local function isPlayerInvincible(player)
-	-- Check spawn invincibility
+	-- Simple timer-based invincibility
 	local expire = invinciblePlayers[player]
 	if expire and os.clock() < expire then
-		if DEBUG_COLLISIONS then
-			print(string.format("[INVINCIBILITY] %s has spawn invincibility (%.1f seconds left)", player.Name, expire - os.clock()))
-		end
 		return true
 	end
 
-	-- Check ghost mode gamepass on spawn
-	if player:GetAttribute("SpawnGhostMode") then
-		return true
-	end
-
-	-- Check active ghost mode boost
+	-- Check ghost mode gamepass
 	if player:GetAttribute("ActiveGhostMode") then
-		return true
-	end
-
-	-- Check revive invincibility
-	if player:GetAttribute("ReviveInvincible") then
-		if DEBUG_COLLISIONS then
-			print("[INVINCIBILITY]", player.Name, "has ReviveInvincible attribute")
-		end
-		return true
-	end
-
-	-- Check spawn protection (for initial spawn and revive)
-	if player:GetAttribute("SpawnProtection") then
-		if DEBUG_COLLISIONS then
-			print("[INVINCIBILITY]", player.Name, "has SpawnProtection attribute")
-		end
 		return true
 	end
 
@@ -975,14 +951,13 @@ task.spawn(function()
 									-- Revive the player
 									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
 
-									-- Store current position and snake length before respawn
+									-- Store current position and snake length
 									local deathPosition = rootPart and rootPart.Position or Vector3.new(0, 10, 0)
-									-- Ensure position is above ground (Y >= 5)
 									if deathPosition.Y < 5 then
 										deathPosition = Vector3.new(deathPosition.X, 5, deathPosition.Z)
 									end
 
-									local currentSnakeLength = player:GetAttribute("SnakeLength") or 500
+									local currentSnakeLength = 500
 									local leaderstats = player:FindFirstChild("leaderstats")
 									if leaderstats then
 										local lengthValue = leaderstats:FindFirstChild("Length")
@@ -993,63 +968,28 @@ task.spawn(function()
 
 									print("📍 Revive at position:", deathPosition, "with length:", currentSnakeLength)
 
-									-- Remove from dead players FIRST
+									-- Clear dead state
 									deadPlayers[player] = nil
-
-									-- Clear the Dead attribute
 									if rootPart then
 										rootPart:SetAttribute("Dead", false)
 									end
-									
-									-- CRITICAL: Remove any pending deaths from the queue
-									for i = #deathQueue, 1, -1 do
-										if deathQueue[i].type == "player" and deathQueue[i].target == player then
-											table.remove(deathQueue, i)
-											print("🧹 Cleared pending death from queue for reviving player")
-										end
-									end
 
-									-- Make player invincible for 5 seconds
-									invinciblePlayers[player] = os.clock() + 5
-									player:SetAttribute("ReviveInvincible", true)
-									player:SetAttribute("SpawnProtection", true) -- Double protection
-
-									-- Set flags to prevent menu from showing
-									player:SetAttribute("RevivingNow", true)
-									player:SetAttribute("JustRevived", true)
-
-									-- Store revive data for after respawn
+									-- Store revive data
 									player:SetAttribute("RevivePosition", tostring(deathPosition))
 									player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
+									player:SetAttribute("JustRevived", true)
 
-									-- Force respawn the character
+									-- Simple invincibility
+									invinciblePlayers[player] = os.clock() + 5
+									
+									-- Just respawn like clicking Play button
 									player:LoadCharacter()
 
-									-- Clear the RevivingNow flag after a short delay
+									-- Clear invincibility after 5 seconds
 									task.spawn(function()
-										task.wait(0.5)
-										player:SetAttribute("RevivingNow", false)
-										
-										-- Also ensure invincibility is properly managed
-										task.wait(4.5) -- Total of 5 seconds
-										-- Force clear all invincibility
-										player:SetAttribute("ReviveInvincible", false)
-										player:SetAttribute("SpawnProtection", false)
+										task.wait(5)
 										invinciblePlayers[player] = nil
-										print("✅ All invincibility cleared for", player.Name)
-									end)
-
-									-- Wait for character to spawn
-									task.spawn(function()
-										local newCharacter = player.Character or player.CharacterAdded:Wait()
-										local newRootPart = newCharacter:WaitForChild("HumanoidRootPart", 5)
-
-										if newRootPart then
-											-- Wait for GamepassHandler to handle position and length restoration
-											task.wait(0.5)
-
-											print("✅ Revive complete for", player.Name)
-										end
+										print("✅ Invincibility ended for", player.Name)
 									end)
 
 									return -- Don't proceed with normal death
@@ -1330,10 +1270,7 @@ RunService.Stepped:Connect(function()
 			continue
 		end
 		
-		-- Skip if player is currently reviving
-		if player:GetAttribute("RevivingNow") then
-			continue
-		end
+
 
 		if head and head.Parent then
 			-- Skip if head is marked as dead
@@ -1400,10 +1337,7 @@ RunService.Stepped:Connect(function()
 			continue
 		end
 		
-		-- Skip if player is currently reviving
-		if playerA:GetAttribute("RevivingNow") then
-			continue
-		end
+
 
 		if headA and headA.Parent then
 			-- Skip if head is marked as dead

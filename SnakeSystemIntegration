@@ -152,69 +152,22 @@ local function onCharacterAdded(character)
 		end
 	end
 
-	-- 🎯 INSTANT REVIVE TELEPORT FIX - Eliminates spawn-then-teleport visual
-	if player:GetAttribute("RevivingNow") then
-		-- Debug: Check what revive attributes are set
-		print("🔍 Revive Debug - RevivingNow:", player:GetAttribute("RevivingNow"))
-		print("🔍 Revive Debug - ReviveSnakeLength:", player:GetAttribute("ReviveSnakeLength"))
-		print("🔍 Revive Debug - RevivePosition:", player:GetAttribute("RevivePosition"))
-		
+	-- Simple revive teleport - just set position if reviving
+	if player:GetAttribute("JustRevived") then
 		local revivePos = player:GetAttribute("RevivePosition")
 		if revivePos then
-			-- Parse the position string (tostring() format: "X, Y, Z")
 			local x, y, z = revivePos:match("([%d.-]+),%s*([%d.-]+),%s*([%d.-]+)")
 			if x and y and z then
 				local deathPos = Vector3.new(tonumber(x), tonumber(y), tonumber(z))
-				
-				-- INSTANT teleport - don't wait for HumanoidRootPart
-				-- Set position immediately on spawn
-				local rootPart = character:FindFirstChild("HumanoidRootPart")
+				local rootPart = character:WaitForChild("HumanoidRootPart")
 				if rootPart then
-					-- IMMEDIATE teleport before any frame renders
 					rootPart.CFrame = CFrame.new(deathPos)
-					rootPart.Position = deathPos
-					character:SetPrimaryPartCFrame(CFrame.new(deathPos))
-					
-					-- Force physics update to prevent any drift
-					rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-					rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-					rootPart.Velocity = Vector3.new(0, 0, 0)
-					
-					-- Double-ensure position with multiple methods
-					task.defer(function()
-						if rootPart and rootPart.Parent then
-							rootPart.CFrame = CFrame.new(deathPos)
-							rootPart.Position = deathPos
-						end
-					end)
-					
-					-- Triple-ensure after a tiny delay for network sync
-					task.spawn(function()
-						task.wait(0.03)
-						if rootPart and rootPart.Parent then
-							rootPart.CFrame = CFrame.new(deathPos)
-						end
-					end)
-					
-					print("⚡ Instant revive teleport to:", deathPos)
-				else
-					-- If no rootPart yet, wait for it and teleport ASAP
-					task.spawn(function()
-						local root = character:WaitForChild("HumanoidRootPart", 2)
-						if root then
-							root.CFrame = CFrame.new(deathPos)
-							root.Position = deathPos
-							character:SetPrimaryPartCFrame(CFrame.new(deathPos))
-							root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-							root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-							print("⚡ Delayed instant revive teleport to:", deathPos)
-						end
-					end)
+					print("✅ Revived at:", deathPos)
 				end
-			else
-				warn("❌ Failed to parse RevivePosition:", revivePos)
 			end
 		end
+		-- Clear the flag
+		player:SetAttribute("JustRevived", false)
 	end
 
 	-- Clean up old snake
