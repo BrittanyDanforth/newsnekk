@@ -1272,7 +1272,14 @@ RunService.Stepped:Connect(function()
 		local head = headData.part
 
 		if isPlayerInvincible(player) then
+			if DEBUG_COLLISIONS then
+				print(string.format("[BODY COLLISION] Skipping player %s - invincible", player.Name))
+			end
 			continue
+		end
+		
+		if DEBUG_COLLISIONS then
+			print(string.format("[BODY COLLISION] Checking player %s vs AI bodies", player.Name))
 		end
 
 		-- Skip if player is already dead
@@ -1320,12 +1327,10 @@ RunService.Stepped:Connect(function()
 							end
 
 							if collision then
-								if DEBUG_COLLISIONS then
-									print(string.format("[COLLISION] Player %s hit AI snake body!", player.Name))
-									print("  - isPlayerInvincible:", isPlayerInvincible(player))
-									print("  - deadPlayers[player]:", deadPlayers[player])
-									print("  - Using part:", head.Name, "at", head.Position)
-								end
+								print(string.format("💥 [COLLISION] Player %s hit AI snake body!", player.Name))
+								print("  - isPlayerInvincible:", isPlayerInvincible(player))
+								print("  - deadPlayers[player]:", deadPlayers[player])
+								print("  - Using part:", head.Name, "at", head.Position)
 								queuePlayerDeath(player)
 								break
 							end
