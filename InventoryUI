@@ -1154,9 +1154,66 @@ function InventoryUI.equipSelectedItem()
 				successText.TextColor3 = INVENTORY_CONFIG.COLORS.TEXT_PRIMARY
 			end
 		end)
+	elseif InventoryUI.selectedItem.type == "Gamepass" then
+		-- Gamepasses are always active, show info message
+		local infoText = InventoryUI.uiElements.itemName
+		local originalText = infoText.Text
+		local originalDesc = InventoryUI.uiElements.itemDescription.Text
+		
+		-- Show gamepass status
+		infoText.Text = "✨ GAMEPASS ACTIVE"
+		infoText.TextColor3 = INVENTORY_CONFIG.COLORS.LEGENDARY
+		
+		-- Show specific gamepass benefits
+		local gamepassInfo = {
+			["Magnet"] = "Automatically collects orbs within range!",
+			["2x Growth"] = "All orbs give double growth points!",
+			["2x Coins"] = "All orbs give double coins!",
+			["Mega Speed"] = "Your snake moves much faster!",
+			["Ghost Mode"] = "5 seconds of invincibility on spawn!",
+			["Revive"] = "Get a second chance when you die!",
+			["VIP Access"] = "Access to exclusive VIP features!"
+		}
+		
+		InventoryUI.uiElements.itemDescription.Text = gamepassInfo[InventoryUI.selectedItem.name] or "This gamepass is permanently active!"
+		InventoryUI.uiElements.itemDescription.TextColor3 = INVENTORY_CONFIG.COLORS.SUCCESS
+		
+		-- Update button to show it's active
+		local btnText = InventoryUI.uiElements.equipBtn:FindFirstChild("Content") and InventoryUI.uiElements.equipBtn.Content:FindFirstChild("Text")
+		local btnIcon = InventoryUI.uiElements.equipBtn:FindFirstChild("Content") and InventoryUI.uiElements.equipBtn.Content:FindFirstChild("Icon")
+		
+		if btnText then btnText.Text = "ACTIVE" end
+		if btnIcon then btnIcon.Text = "✨" end
+		InventoryUI.uiElements.equipBtn.BackgroundColor3 = INVENTORY_CONFIG.COLORS.LEGENDARY
+		
+		-- Reset after delay
+		task.spawn(function()
+			task.wait(3)
+			if infoText and infoText.Parent then
+				infoText.Text = originalText
+				infoText.TextColor3 = INVENTORY_CONFIG.COLORS.TEXT_PRIMARY
+				InventoryUI.uiElements.itemDescription.Text = originalDesc
+				InventoryUI.uiElements.itemDescription.TextColor3 = INVENTORY_CONFIG.COLORS.TEXT_SECONDARY
+			end
+		end)
 	else
 		-- Handle other item types
 		print("Using item:", InventoryUI.selectedItem.name)
+		
+		-- For now, show a message that items aren't implemented yet
+		local infoText = InventoryUI.uiElements.itemName
+		local originalText = infoText.Text
+		
+		infoText.Text = "⚠️ Coming Soon!"
+		infoText.TextColor3 = INVENTORY_CONFIG.COLORS.WARNING
+		
+		task.spawn(function()
+			task.wait(1.5)
+			if infoText and infoText.Parent then
+				infoText.Text = originalText
+				infoText.TextColor3 = INVENTORY_CONFIG.COLORS.TEXT_PRIMARY
+			end
+		end)
 	end
 end
 

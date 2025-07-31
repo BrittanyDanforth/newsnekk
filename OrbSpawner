@@ -166,8 +166,28 @@ end
 local function getPlayerHeads()
 	local heads = {}
 	for _, p in Players:GetPlayers() do
+		-- First check for HumanoidRootPart
 		local root = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-		if root then table.insert(heads, {player = p, part = root}) end
+		if root then 
+			table.insert(heads, {player = p, part = root}) 
+		end
+		
+		-- Also check for SnakeHead parts
+		if p.Character then
+			-- Look for SnakeHead in character
+			local snakeHead = p.Character:FindFirstChild("SnakeHead")
+			if snakeHead then
+				table.insert(heads, {player = p, part = snakeHead})
+			end
+			
+			-- Also check descendants for SnakeHead
+			for _, desc in pairs(p.Character:GetDescendants()) do
+				if desc:IsA("BasePart") and desc.Name == "SnakeHead" then
+					table.insert(heads, {player = p, part = desc})
+					break -- Only need one head per player
+				end
+			end
+		end
 	end
 	return heads
 end
@@ -742,8 +762,8 @@ task.spawn(function()
 
 		-- OPTIMIZATION: Use spatial grid for efficient proximity checks
 		for _, ph in ipairs(players) do
-			if ph and ph.Parent then
-				local p = getPlayerFromTouchedPart(ph)
+			if ph and ph.part and ph.part.Parent then
+				local p = ph.player
 				if p then
 					-- Get magnet attributes
 					local magnetRange = p:GetAttribute("MagnetRange") or 1
@@ -752,13 +772,13 @@ task.spawn(function()
 					
 					-- Extended search range for magnetic attraction
 					local searchRange = 12 * totalMagnetPower
-					local nearbyOrbs = getOrbsNearPosition(ph.Position, searchRange)
+					local nearbyOrbs = getOrbsNearPosition(ph.part.Position, searchRange)
 					
 					for _, orb in ipairs(nearbyOrbs) do
 						if orb and orb.Parent and not orbDebounce[orb] then
 							local orbState = orbStates[orb]
 							if orbState and orbState.state ~= "hidden" then
-								local dist = (orb.Position - ph.Position).Magnitude
+								local dist = (orb.Position - ph.part.Position).Magnitude
 								
 								-- Collection range
 								local baseRange = orb.Size.X * 0.8 + 3
@@ -778,7 +798,7 @@ task.spawn(function()
 								elseif totalMagnetPower > 1 and dist < searchRange then
 									-- Magnetic attraction effect
 									local attractionStrength = (totalMagnetPower - 1) * 0.3
-									local direction = (ph.Position - orb.Position).Unit
+									local direction = (ph.part.Position - orb.Position).Unit
 									local pullForce = direction * attractionStrength * (1 - dist / searchRange)
 									
 									-- Smoothly move orb towards player
