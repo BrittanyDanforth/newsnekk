@@ -92,6 +92,10 @@ end
 -- Invincibility setup (preserved from V7)
 Players.PlayerAdded:Connect(function(player)
 	player.CharacterAdded:Connect(function()
+		-- CRITICAL: Clear dead state when spawning
+		deadPlayers[player] = nil
+		print("🔄 Cleared dead state for", player.Name, "on spawn")
+		
 		setPlayerInvincible(player)
 		task.spawn(function()
 			local expire = invinciblePlayers[player]
@@ -1044,7 +1048,7 @@ task.spawn(function()
 					else
 						-- Player is already dead or has no humanoid, skip this death
 						print("⚠️ Skipping death for", player.Name, "- Already dead or no humanoid")
-					end
+						-- Skip processing but continue to reset flag
 				end
 			elseif death.type == "ai" then
 				local head = death.target
