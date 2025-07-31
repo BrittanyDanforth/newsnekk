@@ -92,10 +92,6 @@ end
 -- Invincibility setup (preserved from V7)
 Players.PlayerAdded:Connect(function(player)
 	player.CharacterAdded:Connect(function()
-		-- CRITICAL: Clear dead state when spawning
-		deadPlayers[player] = nil
-		print("🔄 Cleared dead state for", player.Name, "on spawn")
-		
 		setPlayerInvincible(player)
 		task.spawn(function()
 			local expire = invinciblePlayers[player]
@@ -297,7 +293,7 @@ local function getPlayerHeads()
 					continue
 				end
 			end
-			
+
 			-- Fallback to HumanoidRootPart if no snake head found
 			local root = player.Character:FindFirstChild("HumanoidRootPart")
 			if root and root.Parent then
@@ -982,22 +978,22 @@ task.spawn(function()
 
 									print("📍 Revive at position:", deathPosition, "with length:", currentSnakeLength)
 
-														-- Clear dead state
-					deadPlayers[player] = nil
-					if rootPart then
-						rootPart:SetAttribute("Dead", false)
-					end
-					
-					-- CRITICAL: Clear collision caches for fresh start
-					if CollisionCache then
-						CollisionCache.playerSegments[player] = nil
-						CollisionCache.aiSegments = {} -- Clear AI cache too
-						CollisionCache.lastAIUpdate = 0
-					end
-					-- Also clear head cache to force refresh
-					headCache.lastUpdate = 0
-					headCache.players = {}
-					print("🧹 Cleared collision caches for", player.Name)
+									-- Clear dead state
+									deadPlayers[player] = nil
+									if rootPart then
+										rootPart:SetAttribute("Dead", false)
+									end
+
+									-- CRITICAL: Clear collision caches for fresh start
+									if CollisionCache then
+										CollisionCache.playerSegments[player] = nil
+										CollisionCache.aiSegments = {} -- Clear AI cache too
+										CollisionCache.lastAIUpdate = 0
+									end
+									-- Also clear head cache to force refresh
+									headCache.lastUpdate = 0
+									headCache.players = {}
+									print("🧹 Cleared collision caches for", player.Name)
 
 									-- Store revive data
 									player:SetAttribute("RevivePosition", tostring(deathPosition))
@@ -1006,7 +1002,7 @@ task.spawn(function()
 
 									-- Simple invincibility
 									invinciblePlayers[player] = os.clock() + 5
-									
+
 									-- Just respawn like clicking Play button
 									player:LoadCharacter()
 
@@ -1026,7 +1022,7 @@ task.spawn(function()
 
 						-- ONLY mark as dead if NOT reviving
 						deadPlayers[player] = true
-						
+
 						-- Clear collision caches when dying
 						if CollisionCache and CollisionCache.playerSegments then
 							CollisionCache.playerSegments[player] = nil
@@ -1048,7 +1044,7 @@ task.spawn(function()
 					else
 						-- Player is already dead or has no humanoid, skip this death
 						print("⚠️ Skipping death for", player.Name, "- Already dead or no humanoid")
-						-- Skip processing but continue to reset flag
+					end
 				end
 			elseif death.type == "ai" then
 				local head = death.target
@@ -1305,7 +1301,7 @@ RunService.Stepped:Connect(function()
 			end
 			continue
 		end
-		
+
 		if DEBUG_COLLISIONS then
 			print(string.format("[BODY COLLISION] Checking player %s vs AI bodies", player.Name))
 		end
@@ -1314,7 +1310,7 @@ RunService.Stepped:Connect(function()
 		if deadPlayers[player] then
 			continue
 		end
-		
+
 
 
 		if head and head.Parent then
@@ -1378,7 +1374,7 @@ RunService.Stepped:Connect(function()
 		if isPlayerInvincible(playerA) or deadPlayers[playerA] then
 			continue
 		end
-		
+
 
 
 		if headA and headA.Parent then
