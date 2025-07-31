@@ -74,7 +74,15 @@ local function isPlayerInvincible(player)
 	-- Simple timer-based invincibility
 	local expire = invinciblePlayers[player]
 	if expire and os.clock() < expire then
+		if DEBUG_COLLISIONS then
+			print(string.format("[INVINCIBLE] %s is invincible for %.1f more seconds", player.Name, expire - os.clock()))
+		end
 		return true
+	end
+	
+	-- Clean up expired invincibility
+	if expire and os.clock() >= expire then
+		invinciblePlayers[player] = nil
 	end
 
 	-- Check ghost mode gamepass
@@ -114,6 +122,9 @@ end)
 
 for _, player in Players:GetPlayers() do
 	player.CharacterAdded:Connect(function()
+		-- CRITICAL: Clear dead state when spawning
+		deadPlayers[player] = nil
+		
 		setPlayerInvincible(player)
 		task.spawn(function()
 			local expire = invinciblePlayers[player]
@@ -284,25 +295,37 @@ local function getPlayerHeads()
 	local heads = {}
 	for _, player in Players:GetPlayers() do
 		if player.Character then
+			-- Skip dead players
+			if deadPlayers[player] then
+				continue
+			end
+			
 			-- First try to get the actual snake head from the new system
 			local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
 			if snakeModel then
 				local snakeHead = snakeModel:FindFirstChild("Segment0_Head")
 				if snakeHead and snakeHead.Parent then
-					heads[#heads + 1] = {player = player, part = snakeHead}
-					if DEBUG_COLLISIONS then
-						print(string.format("[HEAD] Player %s using visual snake head", player.Name))
+					-- CRITICAL: Verify this is the current snake model
+					-- Check if the snake head is anchored (all snake parts are anchored)
+					if snakeHead.Anchored then
+						heads[#heads + 1] = {player = player, part = snakeHead}
+						if DEBUG_COLLISIONS then
+							print(string.format("[HEAD] Player %s using visual snake head", player.Name))
+						end
+						continue
 					end
-					continue
 				end
 			end
 
 			-- Fallback to HumanoidRootPart if no snake head found
 			local root = player.Character:FindFirstChild("HumanoidRootPart")
 			if root and root.Parent then
-				heads[#heads + 1] = {player = player, part = root}
-				if DEBUG_COLLISIONS then
-					print(string.format("[HEAD] Player %s using HumanoidRootPart (fallback)", player.Name))
+				-- Only use if not marked as dead
+				if not root:GetAttribute("Dead") then
+					heads[#heads + 1] = {player = player, part = root}
+					if DEBUG_COLLISIONS then
+						print(string.format("[HEAD] Player %s using HumanoidRootPart (fallback)", player.Name))
+					end
 				end
 			end
 		end
@@ -1021,15 +1044,28 @@ task.spawn(function()
 									-- Simple invincibility
 									invinciblePlayers[player] = os.clock() + 5
 
-									-- Just respawn like clicking Play button
-									player:LoadCharacter()
+														-- Just respawn like clicking Play button
+					player:LoadCharacter()
 
-									-- Clear invincibility after 5 seconds
-									task.spawn(function()
-										task.wait(5)
-										invinciblePlayers[player] = nil
-										print("✅ Invincibility ended for", player.Name)
-									end)
+					-- CRITICAL: Wait for new snake to be created before clearing invincibility
+					task.spawn(function()
+						-- Wait for character to load and snake to be created
+						task.wait(2) -- Give time for snake creation
+						
+						-- Force cache refresh after snake is created
+						headCache.lastUpdate = 0
+						if CollisionCache then
+							CollisionCache.playerSegments[player] = nil
+						end
+						
+						-- Continue invincibility for remaining time
+						task.wait(3)
+						invinciblePlayers[player] = nil
+						print("✅ Invincibility ended for", player.Name)
+						
+						-- Final cache clear to ensure fresh detection
+						headCache.lastUpdate = 0
+					end)
 
 									return -- Don't proceed with normal death
 								end
@@ -1449,6 +1485,11 @@ RunService.Stepped:Connect(function()
 
 			for _, headData in ipairs(playerHeads) do
 				local player = headData.player
+				
+				-- Skip dead AI snakes
+				if deadAISnakes[aiHead] then
+					continue
+				end
 
 				if not isPlayerInvincible(player) then
 					local segmentData = getPlayerSegments(player)
