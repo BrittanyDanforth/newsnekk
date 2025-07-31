@@ -314,11 +314,18 @@ Players.PlayerAdded:Connect(function(player)
 			-- Wait a frame to ensure attributes are set
 			wait()
 			
-			-- Clear the revive flag after a short delay
+			-- Clear the revive flag immediately (not needed after spawn)
+			player:SetAttribute("RevivingNow", false)
+			
+			-- Clear invincibility after a short delay
 			task.spawn(function()
 				task.wait(5) -- Wait for invincibility period
 				player:SetAttribute("ReviveInvincible", false)
 				player:SetAttribute("SpawnProtection", false)
+				-- Also clear from the invinciblePlayers table
+				if _G.invinciblePlayers then
+					_G.invinciblePlayers[player] = nil
+				end
 				print("🛡️ Revive invincibility ended for", player.Name)
 			end)
 

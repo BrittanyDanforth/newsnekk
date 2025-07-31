@@ -74,6 +74,9 @@ local function isPlayerInvincible(player)
 	-- Check spawn invincibility
 	local expire = invinciblePlayers[player]
 	if expire and os.clock() < expire then
+		if DEBUG_COLLISIONS then
+			print(string.format("[INVINCIBILITY] %s has spawn invincibility (%.1f seconds left)", player.Name, expire - os.clock()))
+		end
 		return true
 	end
 
@@ -89,11 +92,17 @@ local function isPlayerInvincible(player)
 
 	-- Check revive invincibility
 	if player:GetAttribute("ReviveInvincible") then
+		if DEBUG_COLLISIONS then
+			print("[INVINCIBILITY]", player.Name, "has ReviveInvincible attribute")
+		end
 		return true
 	end
 
 	-- Check spawn protection (for initial spawn and revive)
 	if player:GetAttribute("SpawnProtection") then
+		if DEBUG_COLLISIONS then
+			print("[INVINCIBILITY]", player.Name, "has SpawnProtection attribute")
+		end
 		return true
 	end
 
@@ -1009,6 +1018,14 @@ task.spawn(function()
 									task.spawn(function()
 										task.wait(0.5)
 										player:SetAttribute("RevivingNow", false)
+										
+										-- Also ensure invincibility is properly managed
+										task.wait(4.5) -- Total of 5 seconds
+										-- Force clear all invincibility
+										player:SetAttribute("ReviveInvincible", false)
+										player:SetAttribute("SpawnProtection", false)
+										invinciblePlayers[player] = nil
+										print("✅ All invincibility cleared for", player.Name)
 									end)
 
 									-- Wait for character to spawn
