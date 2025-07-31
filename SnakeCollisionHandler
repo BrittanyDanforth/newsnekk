@@ -993,6 +993,8 @@ task.spawn(function()
 										print("✅ Invincibility ended for", player.Name)
 									end)
 
+									-- CRITICAL FIX: Reset death processing flag before returning
+									isProcessingDeaths = false
 									return -- Don't proceed with normal death
 								end
 							end
