@@ -32,7 +32,7 @@ local function requestRespawn()
 		respawnEvent.Parent = ReplicatedStorage
 		print("Created RespawnSnake RemoteEvent")
 	end
-	
+
 	respawnEvent:FireServer()
 end
 -- Function to create the menu UI
@@ -456,21 +456,49 @@ local function createMenu(onPlay)
 		copiedLabel.ZIndex = 21
 		copiedLabel.Parent = panel
 		copyBtn.MouseButton1Click:Connect(function()
-			local clipboardAvailable = typeof(setclipboard) == "function"
+			-- Check if setclipboard exists (it's a executor-specific function)
+			local clipboardAvailable = false
+			local setclipboardFunc = nil
+
+			-- Safely check for clipboard functions
+			local function checkFunction(func)
+				local success, result = pcall(function()
+					return type(func) == "function"
+				end)
+				return success and result
+			end
+
+			-- Try different clipboard methods
+			if checkFunction(setclipboard) then
+				clipboardAvailable = true
+				setclipboardFunc = setclipboard
+			elseif checkFunction(toclipboard) then
+				clipboardAvailable = true
+				setclipboardFunc = toclipboard
+			elseif type(syn) == "table" and checkFunction(syn.write_clipboard) then
+				clipboardAvailable = true
+				setclipboardFunc = syn.write_clipboard
+			end
+
 			local success = false
-			if clipboardAvailable then
+			if clipboardAvailable and setclipboardFunc then
 				success = pcall(function()
-					setclipboard(linkBox.Text)
+					setclipboardFunc(linkBox.Text)
 				end)
 			end
+
 			if clipboardAvailable and success then
 				copiedLabel.Text = "Copied!"
 			elseif not clipboardAvailable then
-				copiedLabel.Text = "Clipboard not available"
+				copiedLabel.Text = "Select text manually"
+				linkBox:CaptureFocus()
+				linkBox.SelectionStart = 1
+				linkBox.CursorPosition = #linkBox.Text + 1
 			else
 				copiedLabel.Text = "Copy failed"
 			end
-			task.wait(1.2)
+
+			task.wait(1.5)
 			copiedLabel.Text = ""
 		end)
 		local closeBtn = Instance.new("TextButton")
@@ -611,15 +639,81 @@ createMenu(function()
 end)
 -- Enhanced death handling with better menu timing
 local function onCharacterAdded(character)
+	-- Hide menu when spawning
+	if currentMenu then
+		currentMenu:Destroy()
+		currentMenu = nil
+	end
+
+	-- Check if we're reviving - if so, don't set up death handler
+	if LocalPlayer:GetAttribute("RevivingNow") or LocalPlayer:GetAttribute("JustRevived") then
+		print("🔄 Player is reviving - skipping menu setup")
+		return
+	end
+
+	-- Listen for death to show menu again
 	local humanoid = character:FindFirstChild("Humanoid")
 	if humanoid then
 		humanoid.Died:Connect(function()
-			-- Wait a moment before showing the menu
-			task.wait(1.5)
-			-- Show the menu again for respawn
-			createMenu(function()
-				requestRespawn()
+			-- Check if player has revive gamepass and uses available
+			local hasRevive = LocalPlayer:GetAttribute("HasRevive")
+			local revivesAvailable = LocalPlayer:GetAttribute("RevivesAvailable") or 0
+
+			print("💀 Player died - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
+
+			-- Create a flag to track if we're reviving
+			local isReviving = false
+
+			-- Listen for revive attribute changes
+			local reviveCheckConnection
+			reviveCheckConnection = LocalPlayer:GetAttributeChangedSignal("JustRevived"):Connect(function()
+				if LocalPlayer:GetAttribute("JustRevived") then
+					isReviving = true
+					print("✅ Player is reviving! Menu will not show.")
+				end
 			end)
+
+			-- Also check RevivingNow
+			local revivingNowConnection
+			revivingNowConnection = LocalPlayer:GetAttributeChangedSignal("RevivingNow"):Connect(function()
+				if LocalPlayer:GetAttribute("RevivingNow") then
+					isReviving = true
+					print("✅ Player is reviving now! Menu will not show.")
+				end
+			end)
+
+			if hasRevive and revivesAvailable > 0 then
+				-- Player has revive - wait longer for revive prompt
+				print("⏳ Waiting for revive decision...")
+				task.wait(6) -- Give 5 seconds for revive prompt + 1 second buffer
+			else
+				-- Normal death - show menu after short delay
+				task.wait(1.5)
+			end
+
+			-- Disconnect the revive checks
+			if reviveCheckConnection then
+				reviveCheckConnection:Disconnect()
+			end
+			if revivingNowConnection then
+				revivingNowConnection:Disconnect()
+			end
+
+			-- Final check - make sure we're not reviving
+			if LocalPlayer:GetAttribute("RevivingNow") or LocalPlayer:GetAttribute("JustRevived") then
+				isReviving = true
+			end
+
+			-- Only show menu if player didn't revive
+			if not isReviving and humanoid.Health <= 0 then
+				print("📋 Showing respawn menu")
+				-- Show the menu again for respawn
+				createMenu(function()
+					requestRespawn()
+				end)
+			elseif isReviving then
+				print("🎮 Player revived - not showing menu")
+			end
 		end)
 	end
 end
