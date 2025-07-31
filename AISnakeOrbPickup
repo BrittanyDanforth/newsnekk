@@ -1,6 +1,7 @@
 -- This module is deprecated - AI snakes now handle orb pickup directly in their movement update.
 -- The duplicate orb pickup logic here was causing conflicts.
 -- Keeping only for logging/debugging purposes.
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
@@ -63,7 +64,7 @@ RunService.Heartbeat:Connect(function()
 	-- Get orbs from OrbFolder
 	local orbFolder = Workspace:FindFirstChild("OrbFolder")
 	if not orbFolder then return end
-	
+
 	local allOrbs = {}
 	for _, orb in pairs(orbFolder:GetChildren()) do
 		if orb:IsA("BasePart") then
@@ -77,9 +78,9 @@ RunService.Heartbeat:Connect(function()
 		for _ in pairs(trackedSnakes) do
 			snakeCount = snakeCount + 1
 		end
-		
+
 		print("🔍 AI Orb Pickup: Found", #allOrbs, "orbs in OrbFolder, tracking", snakeCount, "AI snakes")
-		
+
 		-- Check if any orbs have Value child
 		local orbsWithValue = 0
 		local upgradeOrbs = 0
@@ -96,7 +97,7 @@ RunService.Heartbeat:Connect(function()
 
 	-- DISABLED: Orb collection is now handled directly in AISnake:updateMovement()
 	-- This was causing duplicate orb pickups and conflicts
-	
+
 	-- Only clean up invalid tracked snakes
 	for snake, _ in pairs(trackedSnakes) do
 		if not (snake and snake.HeadParts and snake.HeadParts.head and snake.HeadParts.head.Parent) then
