@@ -166,8 +166,7 @@ local function onCharacterAdded(character)
 				end
 			end
 		end
-		-- Clear the flag
-		player:SetAttribute("JustRevived", false)
+		-- Don't clear the flag yet - wait for snake creation
 	end
 
 	-- Clean up old snake

@@ -52,7 +52,7 @@ local ORB_BATCH_SIZE = 8 -- Spawn orbs in smaller batches
 local ORB_SPAWN_DELAY = 0.03 -- Small delay between batches
 
 -- === DEBUG SYSTEM ===
-local DEBUG_COLLISIONS = false
+local DEBUG_COLLISIONS = true
 local collisionDebugData = {}
 
 -- === DEATH PROCESSING QUEUE ===
@@ -287,6 +287,9 @@ local function getPlayerHeads()
 				local snakeHead = snakeModel:FindFirstChild("Segment0_Head")
 				if snakeHead and snakeHead.Parent then
 					heads[#heads + 1] = {player = player, part = snakeHead}
+					if DEBUG_COLLISIONS then
+						print(string.format("[HEAD] Player %s using visual snake head", player.Name))
+					end
 					continue
 				end
 			end
@@ -295,6 +298,9 @@ local function getPlayerHeads()
 			local root = player.Character:FindFirstChild("HumanoidRootPart")
 			if root and root.Parent then
 				heads[#heads + 1] = {player = player, part = root}
+				if DEBUG_COLLISIONS then
+					print(string.format("[HEAD] Player %s using HumanoidRootPart (fallback)", player.Name))
+				end
 			end
 		end
 	end
