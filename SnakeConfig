@@ -1,5 +1,6 @@
 -- Global SnakeConfig for both Player and AI snakes This is a ModuleScript inside ReplicatedStorage
 
+
 return {
 	-- SNAKE DIMENSIONS
 	HeadSize = Vector3.new(3, 3, 3),
