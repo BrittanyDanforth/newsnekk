@@ -19,16 +19,16 @@ function SnakeNetworkHandler.init()
 		networkFolder = Instance.new("Folder")
 		networkFolder.Name = "SnakeNetworking"
 		networkFolder.Parent = ReplicatedStorage
-		
+
 		-- Create events
 		local positionUpdate = Instance.new("RemoteEvent")
 		positionUpdate.Name = "PositionUpdate"
 		positionUpdate.Parent = networkFolder
-		
+
 		local lengthUpdate = Instance.new("RemoteEvent")
 		lengthUpdate.Name = "LengthUpdate"
 		lengthUpdate.Parent = networkFolder
-		
+
 		local skinUpdate = Instance.new("RemoteEvent")
 		skinUpdate.Name = "SkinUpdate"
 		skinUpdate.Parent = networkFolder
@@ -43,19 +43,20 @@ function SnakeNetworkHandler.init()
 	local playerSnakeData = {}
 
 	-- Compression settings
-	local POSITION_PRECISION = 0.1 -- Round positions to nearest 0.1
-	local UPDATE_RATE = 15 -- Updates per second to clients
+	local POSITION_PRECISION = 0.5 -- Less precision for less data
+	local UPDATE_RATE = 10 -- Reduced update rate
+	local MIN_MOVE_DISTANCE = 1 -- Minimum distance before sending update
 
 	-- Handle position updates from clients
 	positionUpdate.OnServerEvent:Connect(function(player, data)
 		if not data or not data.path then return end
-		
+
 		-- Validate data
 		if #data.path > 100 then -- Max 100 path points
 			player:Kick("Invalid snake data")
 			return
 		end
-		
+
 		-- Store player data
 		if not playerSnakeData[player] then
 			playerSnakeData[player] = {
@@ -65,7 +66,7 @@ function SnakeNetworkHandler.init()
 				lastUpdate = tick()
 			}
 		end
-		
+
 		local snakeData = playerSnakeData[player]
 		snakeData.path = data.path
 		snakeData.length = math.clamp(data.length or 50, 10, 5000)
@@ -76,13 +77,13 @@ function SnakeNetworkHandler.init()
 	-- Handle length updates
 	lengthUpdate.OnServerEvent:Connect(function(player, newLength)
 		if not newLength or type(newLength) ~= "number" then return end
-		
+
 		newLength = math.clamp(newLength, 10, 5000)
-		
+
 		if playerSnakeData[player] then
 			playerSnakeData[player].length = newLength
 		end
-		
+
 		-- Broadcast to other players
 		for _, otherPlayer in pairs(Players:GetPlayers()) do
 			if otherPlayer ~= player then
@@ -94,10 +95,10 @@ function SnakeNetworkHandler.init()
 	-- Handle skin updates
 	skinUpdate.OnServerEvent:Connect(function(player, skinName)
 		if not skinName or type(skinName) ~= "string" then return end
-		
+
 		-- Validate skin name
 		if #skinName > 50 then return end
-		
+
 		-- Broadcast to all players
 		for _, otherPlayer in pairs(Players:GetPlayers()) do
 			if otherPlayer ~= player then
@@ -112,10 +113,10 @@ function SnakeNetworkHandler.init()
 		local now = tick()
 		if now - lastBroadcast < 1/UPDATE_RATE then return end
 		lastBroadcast = now
-		
+
 		-- Prepare update data
 		local updateData = {}
-		
+
 		for player, snakeData in pairs(playerSnakeData) do
 			if player.Parent and now - snakeData.lastUpdate < 5 then -- Only include recent updates
 				updateData[player.Name] = {
@@ -125,7 +126,7 @@ function SnakeNetworkHandler.init()
 				}
 			end
 		end
-		
+
 		-- Send to all players
 		for _, player in pairs(Players:GetPlayers()) do
 			positionUpdate:FireClient(player, updateData)
