@@ -315,21 +315,9 @@ Players.PlayerAdded:Connect(function(player)
 				end
 			end
 
-			-- Clear attributes
-			player:SetAttribute("RevivePosition", nil)
-			player:SetAttribute("ReviveSnakeLength", nil)
-
-			-- Teleport to death position if available
+			-- Teleport is handled by SnakeSystemIntegration for instant positioning
+			-- Just verify we have a rootPart for the effect later
 			local rootPart = character:FindFirstChild("HumanoidRootPart")
-			if rootPart and revivePosition then
-				wait(0.2) -- Slightly longer delay to ensure character is fully loaded
-				rootPart.CFrame = CFrame.new(revivePosition)
-				-- Ensure we're above ground
-				if rootPart.Position.Y < 5 then
-					rootPart.CFrame = rootPart.CFrame + Vector3.new(0, 5 - rootPart.Position.Y, 0)
-				end
-				print("📍 Teleported to revive position:", revivePosition)
-			end
 
 			-- Set invincibility BEFORE setting snake length
 			player:SetAttribute("ReviveInvincible", true)
@@ -348,6 +336,10 @@ Players.PlayerAdded:Connect(function(player)
 					print("🐍 Restored snake length to", reviveSnakeLength)
 				end
 			end
+			
+			-- Clear attributes AFTER we've used them
+			player:SetAttribute("RevivePosition", nil)
+			player:SetAttribute("ReviveSnakeLength", nil)
 
 			-- Add revive effect
 			if rootPart then
