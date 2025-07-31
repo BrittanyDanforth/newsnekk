@@ -92,6 +92,9 @@ end
 -- Invincibility setup (preserved from V7)
 Players.PlayerAdded:Connect(function(player)
 	player.CharacterAdded:Connect(function()
+		-- CRITICAL: Clear dead state when spawning (for revive or normal spawn)
+		deadPlayers[player] = nil
+		
 		setPlayerInvincible(player)
 		task.spawn(function()
 			local expire = invinciblePlayers[player]
@@ -958,6 +961,10 @@ task.spawn(function()
 
 								if revived then
 									print("🎉 REVIVING", player.Name)
+									
+									-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
+									isProcessingDeaths = false
+									
 									-- Revive the player
 									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
 
@@ -989,10 +996,21 @@ task.spawn(function()
 										CollisionCache.playerSegments[player] = nil
 										CollisionCache.aiSegments = {} -- Clear AI cache too
 										CollisionCache.lastAIUpdate = 0
+										CollisionCache.spatialGrid:clear() -- Clear spatial grid
+										CollisionCache.frameCache = {} -- Clear frame cache
 									end
 									-- Also clear head cache to force refresh
 									headCache.lastUpdate = 0
 									headCache.players = {}
+									headCache.ai = {}
+									
+									-- Clear from death queue if any pending
+									for i = #deathQueue, 1, -1 do
+										if deathQueue[i].type == "player" and deathQueue[i].target == player then
+											table.remove(deathQueue, i)
+										end
+									end
+									
 									print("🧹 Cleared collision caches for", player.Name)
 
 									-- Store revive data
@@ -1013,8 +1031,6 @@ task.spawn(function()
 										print("✅ Invincibility ended for", player.Name)
 									end)
 
-									-- CRITICAL FIX: Reset death processing flag before returning
-									isProcessingDeaths = false
 									return -- Don't proceed with normal death
 								end
 							end
