@@ -1969,9 +1969,30 @@ function AISnake:grow(amount)
 				local currentBaseSize = BASE_SIZE * self.growthFactor
 				
 				local color = self:getSegmentColor(self.CurrentLength)
-				local lastSegment = self.Segments[self.CurrentLength - 1]
-				local newPos = lastSegment and lastSegment.Position or self.Position
+				
+				-- FIXED: Use position history instead of last segment position
+				-- This prevents visual glitches when growing from far away
+				local newPos
+				if self.CurrentLength > 1 then
+					-- Calculate position based on history to ensure proper spacing
+					local historyIndex = math.floor(self.CurrentLength * 1.2)
+					local historyData = self:getFromHistory(historyIndex)
+					if historyData then
+						newPos = historyData.position
+					else
+						-- Fallback to head position with offset
+						newPos = self.Position - self.Direction * (self.Config.SegmentSpacing * self.CurrentLength * 0.15)
+					end
+				else
+					newPos = self.Position
+				end
+				
 				local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength)
+				if not segment then 
+					-- Failed to create segment, revert length increase
+					self.CurrentLength = self.CurrentLength - 1
+					break
+				end
 				self.Segments[self.CurrentLength] = segment
 				
 				-- Ensure segment uses correct material from our config
@@ -1987,8 +2008,19 @@ function AISnake:grow(amount)
 					local attachment = Instance.new("Attachment")
 					attachment.Name = "Attachment" .. self.CurrentLength
 					attachment.Parent = self.AttachmentPart
+					
+					-- FIXED: Ensure attachment starts at correct position
+					-- Use the same position as the segment to prevent beam stretching
 					attachment.WorldPosition = newPos
 					self.Attachments[self.CurrentLength] = attachment
+					
+					-- FIXED: Update previous attachment position before creating beam
+					if self.CurrentLength > 1 and self.Attachments[self.CurrentLength - 1] then
+						local prevSegment = self.Segments[self.CurrentLength - 1]
+						if prevSegment and prevSegment.Parent then
+							self.Attachments[self.CurrentLength - 1].WorldPosition = prevSegment.Position
+						end
+					end
 
 					-- Create beam from previous segment to this new one
 					if self.CurrentLength > 1 and self.Beams then
@@ -1996,6 +2028,17 @@ function AISnake:grow(amount)
 						beam.Name = "Beam" .. (self.CurrentLength - 1)
 						beam.Attachment0 = self.Attachments[self.CurrentLength - 1]
 						beam.Attachment1 = attachment
+						
+						-- FIXED: Start beam disabled if snake is far away
+						local camera = workspace.CurrentCamera
+						local cameraPos = camera and camera.CFrame.Position
+						if cameraPos then
+							local headDistance = (self.Position - cameraPos).Magnitude
+							if headDistance > LOD_DISTANCE_FAR then
+								beam.Enabled = false
+								beam.Transparency = NumberSequence.new(1)
+							end
+						end
 
 						-- Professional beam properties
 						local beamWidth = self:getBeamWidth(self.CurrentLength - 1, currentBaseSize)
@@ -2041,24 +2084,54 @@ function AISnake:grow(amount)
 				-- Initialize LOD state for new segment
 				self.segmentVisibility[self.CurrentLength] = true
 				self.lodStates[self.CurrentLength] = "near"
-
-				task.spawn(function()
-					if not segment or not segment.Parent then return end
-					local growTime = 0.18
-					local t = 0
-					local startSize = Vector3new(0.1, 0.1, 0.1)
-					while t < growTime do
-						t = t + RunService.Heartbeat:Wait()
-						if not segment or not segment.Parent then return end
-						local alpha = mathMin(t / growTime, 1)
-						segment.Size = startSize:Lerp(Vector3new(finalSize, finalSize, finalSize), alpha)
-						segment.Transparency = 1 - alpha
+				
+				-- FIXED: Check if snake is far away before animating
+				local shouldAnimate = true
+				local camera = workspace.CurrentCamera
+				local cameraPos = camera and camera.CFrame.Position
+				if cameraPos then
+					local headDistance = (self.Position - cameraPos).Magnitude
+					-- Don't animate growth if snake is far away
+					if headDistance > LOD_DISTANCE_MID then
+						shouldAnimate = false
 					end
-					if segment and segment.Parent then
-						segment.Size = Vector3new(finalSize, finalSize, finalSize)
+				end
+
+				if shouldAnimate then
+					task.spawn(function()
+						if not segment or not segment.Parent then return end
+						local growTime = 0.18
+						local t = 0
+						local startSize = Vector3new(0.1, 0.1, 0.1)
+						while t < growTime do
+							t = t + RunService.Heartbeat:Wait()
+							if not segment or not segment.Parent then return end
+							local alpha = mathMin(t / growTime, 1)
+							segment.Size = startSize:Lerp(Vector3new(finalSize, finalSize, finalSize), alpha)
+							segment.Transparency = 1 - alpha
+						end
+						if segment and segment.Parent then
+							segment.Size = Vector3new(finalSize, finalSize, finalSize)
+							segment.Transparency = 0
+						end
+					end)
+				else
+					-- If far away, just set final size immediately to prevent glitches
+					segment.Size = Vector3new(finalSize, finalSize, finalSize)
+					-- Apply appropriate transparency based on distance
+					if cameraPos then
+						local headDistance = (self.Position - cameraPos).Magnitude
+						if headDistance > LOD_DISTANCE_FAR then
+							segment.Transparency = 1  -- Invisible if very far
+							self.lodStates[self.CurrentLength] = "culled"
+						else
+							segment.Transparency = 0.1  -- Slightly transparent if medium distance
+							self.lodStates[self.CurrentLength] = "mid"
+						end
+					else
 						segment.Transparency = 0
 					end
-				end)
+				end
 				
 				-- Update actual segment count
 				self.actualSegmentCount = self.CurrentLength
