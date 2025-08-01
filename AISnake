@@ -61,17 +61,17 @@ local VERY_LONG_SNAKE_THRESHOLD = 300  -- Even more optimization for very long s
 local AI_UPDATE_DISTANCE = 200  -- Only update AI within this distance of players
 local SEGMENT_POOL_MAX = 500  -- Increased pool size for better reuse
 
--- LOD Constants from OptimizedSnakeSystem
-local VISIBILITY_CHECK_INTERVAL = 5 -- Check visibility every N frames
-local RENDER_DISTANCE = 500 -- Force render within this distance
-local LOD_DISTANCE_NEAR = 100 -- Full quality
-local LOD_DISTANCE_MID = 250 -- Medium quality
-local LOD_DISTANCE_FAR = 500 -- Low quality
-local BEAM_SYNC_INTERVAL = 3 -- Sync beams with parts every N frames
-local FORCE_RENDER_SEGMENTS = 150 -- Always force render first N segments
-local VISIBILITY_BUFFER_ZONE = 50 -- Extra distance before culling
-local MAX_VISIBLE_SEGMENTS = 2000 -- Increased cap for longer snakes (was 500)
-local DYNAMIC_SEGMENT_LIMIT = 800 -- Maximum physical segments to create at once
+-- LOD Constants (ENHANCED for better visibility and performance)
+local VISIBILITY_CHECK_INTERVAL = 5  -- Check visibility every N frames
+local RENDER_DISTANCE = 500  -- Force render within this distance
+local LOD_DISTANCE_NEAR = 150  -- Full quality (increased from 100)
+local LOD_DISTANCE_MID = 350   -- Medium quality (increased from 250)
+local LOD_DISTANCE_FAR = 700   -- Low quality (increased from 500)
+local BEAM_SYNC_INTERVAL = 3   -- Sync beams with parts every N frames
+local FORCE_RENDER_SEGMENTS = 150  -- Always force render first N segments
+local VISIBILITY_BUFFER_ZONE = 50  -- Extra distance before culling
+local MAX_VISIBLE_SEGMENTS = 2000  -- Maximum visible segments at once
+local DYNAMIC_SEGMENT_LIMIT = 800  -- Initial physical segment creation limit
 
 -- Visual Constants from OptimizedSnakeSystem
 local BASE_SIZE = 3.5 -- Unified base size for head and segments
@@ -3099,46 +3099,77 @@ function AISnake:applyLODToSegment(segment, lodLevel, index)
 	self.lodStates[index] = lodLevel
 	
 	if lodLevel == "culled" then
-		-- Hide distant segments
+		-- COMPLETELY hide distant segments
 		segment.Transparency = 1
-		segment.CanTouch = false
+		segment.CanTouch = false  -- Disable collision
 		segment.CanQuery = false
-		-- Disable glow
+		
+		-- CRITICAL: Completely disable and hide glow
 		local glow = segment:FindFirstChild("Glow")
 		if glow then
 			glow.Enabled = false
+			glow.Brightness = 0  -- Ensure no light emission
 		end
+		
+		-- Mark as not visible
+		self.segmentVisibility[index] = false
 	elseif lodLevel == "far" then
-		segment.Transparency = 0.3
-		segment.CanTouch = false
+		-- Partially visible but no collision
+		segment.Transparency = 0.5  -- More visible than before
+		segment.CanTouch = false  -- Disable collision for far segments
 		segment.CanQuery = false
-		-- Disable glow
+		
+		-- Disable glow for far segments
 		local glow = segment:FindFirstChild("Glow")
 		if glow then
 			glow.Enabled = false
+			glow.Brightness = 0
 		end
+		
+		-- Mark as visible
+		self.segmentVisibility[index] = true
 	elseif lodLevel == "mid" then
-		segment.Transparency = 0
-		segment.CanTouch = index <= 50
+		-- Mostly visible, collision only for first 50 segments
+		segment.Transparency = 0.1  -- Slightly transparent
+		segment.CanTouch = index <= 50  -- Only first 50 have collision
 		segment.CanQuery = false
-		-- Strategic glow for mid distance
+		
+		-- Selective glow for mid-range
 		local glow = segment:FindFirstChild("Glow")
 		if glow then
-			glow.Enabled = (index % 3 == 0)
+			-- Only enable glow for some segments to reduce lights
+			local shouldGlow = self:shouldHaveGlow(index) and (index % 3 == 0)
+			glow.Enabled = shouldGlow
+			if shouldGlow then
+				glow.Brightness = GLOW_INTENSITY * 0.5  -- Dimmer for mid-range
+			else
+				glow.Brightness = 0
+			end
 		end
+		
+		-- Mark as visible
+		self.segmentVisibility[index] = true
 	else -- near
+		-- Full quality
 		segment.Transparency = 0
-		segment.CanTouch = index <= 50
-		segment.CanQuery = false
+		segment.CanTouch = index <= 50  -- Only first 50 have collision
+		segment.CanQuery = index <= 10  -- Only first 10 for queries
+		
 		-- Full glow for near segments
 		local glow = segment:FindFirstChild("Glow")
 		if glow then
-			glow.Enabled = self:shouldHaveGlow(index)
+			local shouldGlow = self:shouldHaveGlow(index)
+			glow.Enabled = shouldGlow
+			if shouldGlow then
+				glow.Brightness = GLOW_INTENSITY * 0.9
+			else
+				glow.Brightness = 0
+			end
 		end
+		
+		-- Mark as visible
+		self.segmentVisibility[index] = true
 	end
-	
-	-- Mark visibility
-	self.segmentVisibility[index] = lodLevel ~= "culled"
 end
 
 -- Check if segment should have glow
@@ -3156,19 +3187,32 @@ end
 
 -- Update visibility for all segments
 function AISnake:updateSegmentVisibility(cameraPosition)
-	-- Smart visibility based on camera distance and segment count
-	local visibleRadius = RENDER_DISTANCE
-	local maxToCheck = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
+	if not cameraPosition then return end
+	
+	-- For very long snakes, use more aggressive culling
+	local maxToCheck = self.CurrentLength
+	local visibleRadius = LOD_DISTANCE_FAR + VISIBILITY_BUFFER_ZONE
+	
+	-- Adjust visible radius based on snake length
+	if self.CurrentLength > 1500 then
+		visibleRadius = visibleRadius * 0.7  -- More aggressive culling for very long snakes
+		maxToCheck = math.min(self.CurrentLength, 1000)  -- Only check first 1000 segments
+	elseif self.CurrentLength > 1000 then
+		visibleRadius = visibleRadius * 0.85
+		maxToCheck = math.min(self.CurrentLength, 800)
+	end
+	
+	-- Track actually visible segments
 	local actuallyVisible = 0
 	
-	-- Always check head and first segments
-	for i = 0, math.min(FORCE_RENDER_SEGMENTS, maxToCheck) do
+	-- Always update forced render segments
+	for i = 0, FORCE_RENDER_SEGMENTS do
 		local segment = self.Segments[i]
 		if segment and segment.Parent then
 			local lodLevel = self:calculateLODLevel(i, cameraPosition)
 			self:applyLODToSegment(segment, lodLevel, i)
 			if lodLevel ~= "culled" then
-				actuallyVisible = math.max(actuallyVisible, i)
+				actuallyVisible = actuallyVisible + 1
 			end
 		end
 	end
@@ -3188,22 +3232,33 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 			end
 			
 			if distance > cullDistance then
+				-- Force cull distant segments
 				self:applyLODToSegment(segment, "culled", i)
 			else
 				local lodLevel = self:calculateLODLevel(i, cameraPosition)
 				self:applyLODToSegment(segment, lodLevel, i)
 				if lodLevel ~= "culled" then
-					actuallyVisible = math.max(actuallyVisible, i)
+					actuallyVisible = actuallyVisible + 1
 				end
 			end
 		elseif i <= DYNAMIC_SEGMENT_LIMIT then
 			-- Segment doesn't exist yet but could be created
-			actuallyVisible = i -- Track potential visibility
+			self.segmentVisibility[i] = false
 		end
 	end
 	
-	-- Update visible segment count
-	self.visibleSegmentCount = math.min(actuallyVisible, MAX_VISIBLE_SEGMENTS)
+	-- Force cull segments beyond maxToCheck for very long snakes
+	if self.CurrentLength > maxToCheck then
+		for i = maxToCheck + 1, self.CurrentLength do
+			local segment = self.Segments[i]
+			if segment and segment.Parent then
+				self:applyLODToSegment(segment, "culled", i)
+			end
+			self.segmentVisibility[i] = false
+		end
+	end
+	
+	self.visibleSegmentCount = actuallyVisible
 end
 
 -- Sync beam visibility with segments
@@ -3239,91 +3294,94 @@ end
 
 -- Dynamically create segments if they don't exist yet
 function AISnake:ensureSegmentExists(index)
-	if index > self.CurrentLength or index <= 0 then return nil end
-	
-	-- Check if segment already exists
-	if self.Segments[index] then
-		return self.Segments[index]
-	end
-	
-	-- Only create if within dynamic limit
-	if index > DYNAMIC_SEGMENT_LIMIT then
+	if index > DYNAMIC_SEGMENT_LIMIT or index > self.CurrentLength then
 		return nil
 	end
 	
-	-- Create the segment
-	local currentBaseSize = BASE_SIZE * self.growthFactor
+	local segment = self.Segments[index]
+	if segment and segment.Parent then
+		return segment
+	end
+	
+	-- Create segment on demand
+	local delay = mathFloor(index * 1.2)
+	local targetData = self:getFromHistory(delay)
+	if not targetData then
+		return nil
+	end
+	
 	local color = self:getSegmentColor(index)
-	local prevSegment = self.Segments[index - 1] or (index == 1 and self.HeadParts.head)
-	local pos = prevSegment and prevSegment.Position or self.Position
+	segment = createSegment(index, targetData.position, color, self.Config, self.Model, self.CurrentLength)
 	
-	local segment = createSegment(index, pos, color, self.Config, self.Model, index)
-	self.Segments[index] = segment
-	
-	-- Ensure correct color and material (double-check)
-	segment.Color = color
-	segment.Material = self.Config.BodyMaterial or Enum.Material.Neon
-	
-	-- Set proper size
+	-- Apply proper size
+	local currentBaseSize = BASE_SIZE * self.growthFactor
 	local segmentSize = self:getSegmentSize(index, currentBaseSize)
 	segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
 	
+	-- CRITICAL: Apply LOD immediately based on camera distance
+	local camera = workspace.CurrentCamera
+	local cameraPos = camera and camera.CFrame.Position
+	if cameraPos then
+		local lodLevel = self:calculateLODLevel(index, cameraPos)
+		self:applyLODToSegment(segment, lodLevel, index)
+	else
+		-- If no camera, apply conservative LOD
+		if index > FORCE_RENDER_SEGMENTS then
+			self:applyLODToSegment(segment, "far", index)
+		end
+	end
+	
+	self.Segments[index] = segment
+	
 	-- Create attachment if needed
-	if self.AttachmentPart and not self.Attachments[index] then
+	if not self.Attachments[index] then
 		local attachment = Instance.new("Attachment")
 		attachment.Name = "Attachment" .. index
 		attachment.Parent = self.AttachmentPart
-		attachment.WorldPosition = pos
+		attachment.WorldPosition = segment.Position
 		self.Attachments[index] = attachment
 	end
 	
 	-- Create beam to previous segment if needed
-	if index > 1 and self.Attachments and self.Attachments[index-1] and self.Attachments[index] and not self.Beams[index-1] then
-		local beam = Instance.new("Beam")
-		beam.Name = "Beam" .. (index - 1)
-		beam.Attachment0 = self.Attachments[index - 1]
-		beam.Attachment1 = self.Attachments[index]
-		
-		-- Professional beam properties
-		local beamWidth = self:getBeamWidth(index - 1, currentBaseSize)
-		beam.Width0 = beamWidth
-		beam.Width1 = beamWidth
-		beam.CurveSize0 = 0
-		beam.CurveSize1 = 0
-		beam.FaceCamera = true
-		beam.Segments = BEAM_SEGMENTS
-		beam.Texture = BEAM_TEXTURES.gradient
-		beam.TextureMode = Enum.TextureMode.Wrap
-		beam.TextureLength = 2
-		beam.TextureSpeed = BEAM_TEXTURE_SPEED
-		beam.LightEmission = 1
-		beam.LightInfluence = 0
-		beam.Brightness = 2
-		beam.Transparency = NumberSequence.new{
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(0.5, 0),
-			NumberSequenceKeypoint.new(1, 0.1)
-		}
-		
-		-- Color matching
-		local prevColor = self:getSegmentColor(index - 1)
-		local currColor = self:getSegmentColor(index)
-		if prevColor == currColor then
-			beam.Color = ColorSequence.new(currColor)
-		else
-			beam.Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, prevColor),
-				ColorSequenceKeypoint.new(1, currColor)
-			})
+	if index > 0 and not self.Beams[index - 1] then
+		local prevAttachment = self.Attachments[index - 1]
+		if prevAttachment then
+			local beam = Instance.new("Beam")
+			beam.Name = "Beam" .. (index - 1)
+			beam.Attachment0 = prevAttachment
+			beam.Attachment1 = self.Attachments[index]
+			
+			-- Beam properties
+			local beamWidth = self:getBeamWidth(index - 1, currentBaseSize)
+			beam.Width0 = beamWidth
+			beam.Width1 = beamWidth
+			beam.CurveSize0 = 0
+			beam.CurveSize1 = 0
+			beam.FaceCamera = true
+			beam.Segments = BEAM_SEGMENTS
+			beam.Texture = BEAM_TEXTURES.gradient
+			beam.TextureMode = Enum.TextureMode.Wrap
+			beam.TextureLength = 2
+			beam.TextureSpeed = BEAM_TEXTURE_SPEED
+			beam.LightEmission = 1
+			beam.LightInfluence = 0
+			beam.Brightness = 2
+			beam.Transparency = NumberSequence.new{
+				NumberSequenceKeypoint.new(0, 0),
+				NumberSequenceKeypoint.new(0.5, 0),
+				NumberSequenceKeypoint.new(1, 0.1)
+			}
+			beam.Color = ColorSequence.new(color)
+			
+			beam.Parent = self.AttachmentPart
+			self.Beams[index - 1] = beam
+			
+			-- Apply visibility based on LOD
+			if self.segmentVisibility[index] == false or self.segmentVisibility[index - 1] == false then
+				beam.Enabled = false
+			end
 		end
-		
-		beam.Parent = self.AttachmentPart
-		self.Beams[index - 1] = beam
 	end
-	
-	-- Initialize LOD state
-	self.segmentVisibility[index] = true
-	self.lodStates[index] = "near"
 	
 	return segment
 end
