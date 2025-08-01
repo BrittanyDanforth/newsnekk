@@ -60,15 +60,8 @@ local VERY_LONG_SNAKE_THRESHOLD = 300  -- Even more optimization for very long s
 local AI_UPDATE_DISTANCE = 200  -- Only update AI within this distance of players
 local SEGMENT_POOL_MAX = 500  -- Increased pool size for better reuse
 
--- LOD Constants from OptimizedSnakeSystem
-local VISIBILITY_CHECK_INTERVAL = 5 -- Check visibility every N frames
-local RENDER_DISTANCE = 500 -- Force render within this distance
-local LOD_DISTANCE_NEAR = 100 -- Full quality
-local LOD_DISTANCE_MID = 250 -- Medium quality
-local LOD_DISTANCE_FAR = 500 -- Low quality
-local BEAM_SYNC_INTERVAL = 3 -- Sync beams with parts every N frames
+-- Segment limits
 local FORCE_RENDER_SEGMENTS = 150 -- Always force render first N segments
-local VISIBILITY_BUFFER_ZONE = 50 -- Extra distance before culling
 local MAX_VISIBLE_SEGMENTS = 2000 -- Increased cap for longer snakes (was 500)
 local DYNAMIC_SEGMENT_LIMIT = 800 -- Maximum physical segments to create at once
 
@@ -354,6 +347,7 @@ local function createVisualHead(config, parentModel)
 	headPart.BottomSurface = Enum.SurfaceType.Smooth
 	headPart.Transparency = 0  -- Head is visible as first segment
 	headPart.Parent = parentModel
+	headPart:SetAttribute("IsAISnakeHead", true)  -- Mark as AI snake head for client LOD
 
 	-- Professional head glow matching OptimizedSnakeSystem
 	local headLight = Instance.new("PointLight")
@@ -1812,23 +1806,6 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	-- Track actual created segments
 	self.actualSegmentCount = initialSegmentCount
 
-	-- LOD and visibility tracking (from OptimizedSnakeSystem)
-	self.segmentVisibility = {} -- Track visibility state of each segment
-	self.lastVisibilityCheck = 0
-	self.lastBeamSync = 0
-	self.lodStates = {} -- Track LOD level for each segment
-	self.forcedRenderSegments = {} -- Segments that should always render
-	self.visibleSegmentCount = self.CurrentLength -- Track actual visible segments
-	
-	-- Initialize all segments as visible
-	for i = 0, self.CurrentLength do
-		self.segmentVisibility[i] = true
-		self.lodStates[i] = "near"
-		if i <= FORCE_RENDER_SEGMENTS then
-			self.forcedRenderSegments[i] = true
-		end
-	end
-
 	-- Spawn sequence to prevent gaps
 	task.defer(function()
 		-- Wait for model to be ready
@@ -1996,9 +1973,7 @@ function AISnake:grow(amount)
 				-- Calculate final size using getSegmentSize
 				local finalSize = self:getSegmentSize(self.CurrentLength, currentBaseSize)
 
-				-- Initialize LOD state for new segment
-				self.segmentVisibility[self.CurrentLength] = true
-				self.lodStates[self.CurrentLength] = "near"
+
 
 				task.spawn(function()
 					if not segment or not segment.Parent then return end
@@ -2027,8 +2002,7 @@ function AISnake:grow(amount)
 		end
 	end
 	
-	-- Update visible segment count
-	self.visibleSegmentCount = math.min(self.CurrentLength, MAX_VISIBLE_SEGMENTS)
+
 end
 
 function AISnake:setConfidenceBuff()
@@ -2557,20 +2531,6 @@ function AISnake:updateMovement(dt)
 	-- Initialize frame counter if needed
 	self._segmentUpdateFrame = (self._segmentUpdateFrame or 0) + 1
 
-	-- Get camera position for LOD
-	local camera = workspace.CurrentCamera
-	local cameraPos = camera and camera.CFrame.Position or self.Position
-	
-	-- Update visibility checks with LOD
-	if self._segmentUpdateFrame % VISIBILITY_CHECK_INTERVAL == 0 then
-		self:updateSegmentVisibility(cameraPos)
-	end
-	
-	-- Sync beams with segment visibility
-	if self._segmentUpdateFrame % BEAM_SYNC_INTERVAL == 0 then
-		self:syncBeamVisibility()
-	end
-
 	-- Calculate current base size with growth factor
 	local currentBaseSize = BASE_SIZE * self.growthFactor
 
@@ -2591,19 +2551,13 @@ function AISnake:updateMovement(dt)
 	end
 
 	-- Only update visible segments
-	local maxSegmentToUpdate = math.min(self.CurrentLength, self.visibleSegmentCount)
+	local maxSegmentToUpdate = math.min(self.CurrentLength, self.actualSegmentCount)
 
-	-- Update segments with adaptive skipping and LOD
+	-- Update segments with adaptive skipping
 	for i = 1 + updateOffset, maxSegmentToUpdate, segmentSkip do
 		-- Ensure segment exists (dynamic creation)
 		local segment = self:ensureSegmentExists(i)
 		if segment and segment.Parent then
-			-- Skip update if segment is culled
-			local lodState = self.lodStates[i]
-			if lodState == "culled" then
-				continue
-			end
-			
 			local delay = mathFloor(i * 1.2)
 			local targetData = self:getFromHistory(delay)
 			if targetData then
@@ -2628,15 +2582,7 @@ function AISnake:updateMovement(dt)
 					end
 				end
 
-				-- Use different follow speeds based on LOD
-				local lodFollowSpeed = followSpeed
-				if lodState == "far" then
-					lodFollowSpeed = 1 -- Instant update for far segments
-				elseif lodState == "mid" then
-					lodFollowSpeed = math.min(followSpeed * 1.2, 0.99)
-				end
-
-				local newPos = currentSegmentPos:Lerp(segmentPos, lodFollowSpeed)
+				local newPos = currentSegmentPos:Lerp(segmentPos, followSpeed)
 				segment.CFrame = CFramenew(newPos)
 
 				-- Update attachment position for this segment
@@ -2653,10 +2599,7 @@ function AISnake:updateMovement(dt)
 			if i % segmentSkip ~= updateOffset then
 				local segment = self.Segments[i]
 				if segment and segment.Parent and self.Attachments and self.Attachments[i] then
-					-- Only update if not culled
-					if self.lodStates[i] ~= "culled" then
-						self.Attachments[i].WorldPosition = segment.Position
-					end
+					self.Attachments[i].WorldPosition = segment.Position
 				end
 			end
 		end
@@ -2666,13 +2609,13 @@ function AISnake:updateMovement(dt)
 	if self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD * 2 then
 		-- Only update tail segments every 20 frames
 		if self._segmentUpdateFrame % 20 == 0 then
-			local tailStart = mathFloor(self.visibleSegmentCount * 0.6)  -- Last 40% is tail
-			local tailEnd = math.min(self.CurrentLength, self.visibleSegmentCount)
+			local tailStart = mathFloor(self.actualSegmentCount * 0.6)  -- Last 40% is tail
+			local tailEnd = math.min(self.CurrentLength, self.actualSegmentCount)
 			
 			-- Batch update tail segments
 			for i = tailStart, tailEnd, 20 do
 				local segment = self.Segments[i]
-				if segment and segment.Parent and self.lodStates[i] ~= "culled" then
+				if segment and segment.Parent then
 					local delay = mathFloor(i * 1.2)
 					local targetData = self:getFromHistory(delay)
 					if targetData then
@@ -2899,7 +2842,7 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 		return 
 	end
 
-	-- Get nearest player position for LOD
+	-- Get nearest player position for AI update distance check
 	local nearestPlayerPos = nil
 	local nearestDist = math.huge
 	for _, player in Players:GetPlayers() do
@@ -3020,80 +2963,9 @@ function AISnake:getBeamWidth(index, baseSize)
 	return avgSize * beamWidthBase * beamTaper
 end
 
--- Calculate LOD level based on distance (from OptimizedSnakeSystem)
-function AISnake:calculateLODLevel(segmentIndex, cameraPosition)
-	if not cameraPosition then return "near" end
-	
-	local segment = self.Segments[segmentIndex]
-	if not segment or not segment.Parent then return "culled" end
-	
-	-- Always full quality for first segments
-	if segmentIndex <= FORCE_RENDER_SEGMENTS then
-		return "near"
-	end
-	
-	local distance = (segment.Position - cameraPosition).Magnitude
-	
-	if distance <= LOD_DISTANCE_NEAR then
-		return "near"
-	elseif distance <= LOD_DISTANCE_MID then
-		return "mid"
-	elseif distance <= LOD_DISTANCE_FAR then
-		return "far"
-	else
-		return "culled"
-	end
-end
 
--- Apply LOD settings to segment
-function AISnake:applyLODToSegment(segment, lodLevel, index)
-	if not segment or not segment.Parent then return end
-	
-	-- Store LOD state
-	self.lodStates[index] = lodLevel
-	
-	if lodLevel == "culled" then
-		-- Hide distant segments
-		segment.Transparency = 1
-		segment.CanTouch = false
-		segment.CanQuery = false
-		-- Disable glow
-		local glow = segment:FindFirstChild("Glow")
-		if glow then
-			glow.Enabled = false
-		end
-	elseif lodLevel == "far" then
-		segment.Transparency = 0.3
-		segment.CanTouch = false
-		segment.CanQuery = false
-		-- Disable glow
-		local glow = segment:FindFirstChild("Glow")
-		if glow then
-			glow.Enabled = false
-		end
-	elseif lodLevel == "mid" then
-		segment.Transparency = 0
-		segment.CanTouch = index <= 50
-		segment.CanQuery = false
-		-- Strategic glow for mid distance
-		local glow = segment:FindFirstChild("Glow")
-		if glow then
-			glow.Enabled = (index % 3 == 0)
-		end
-	else -- near
-		segment.Transparency = 0
-		segment.CanTouch = index <= 50
-		segment.CanQuery = false
-		-- Full glow for near segments
-		local glow = segment:FindFirstChild("Glow")
-		if glow then
-			glow.Enabled = self:shouldHaveGlow(index)
-		end
-	end
-	
-	-- Mark visibility
-	self.segmentVisibility[index] = lodLevel ~= "culled"
-end
+
+
 
 -- Check if segment should have glow
 function AISnake:shouldHaveGlow(index)
@@ -3108,88 +2980,7 @@ function AISnake:shouldHaveGlow(index)
 	end
 end
 
--- Update visibility for all segments
-function AISnake:updateSegmentVisibility(cameraPosition)
-	-- Smart visibility based on camera distance and segment count
-	local visibleRadius = RENDER_DISTANCE
-	local maxToCheck = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
-	local actuallyVisible = 0
-	
-	-- Always check head and first segments
-	for i = 0, math.min(FORCE_RENDER_SEGMENTS, maxToCheck) do
-		local segment = self.Segments[i]
-		if segment and segment.Parent then
-			local lodLevel = self:calculateLODLevel(i, cameraPosition)
-			self:applyLODToSegment(segment, lodLevel, i)
-			if lodLevel ~= "culled" then
-				actuallyVisible = math.max(actuallyVisible, i)
-			end
-		end
-	end
-	
-	-- Check remaining segments with distance culling
-	for i = FORCE_RENDER_SEGMENTS + 1, maxToCheck do
-		local segment = self.Segments[i]
-		if segment and segment.Parent then
-			local distance = (segment.Position - cameraPosition).Magnitude
-			
-			-- More aggressive culling for longer snakes
-			local cullDistance = visibleRadius
-			if self.CurrentLength > 1000 then
-				cullDistance = visibleRadius * 0.7
-			elseif self.CurrentLength > 500 then
-				cullDistance = visibleRadius * 0.85
-			end
-			
-			if distance > cullDistance then
-				self:applyLODToSegment(segment, "culled", i)
-			else
-				local lodLevel = self:calculateLODLevel(i, cameraPosition)
-				self:applyLODToSegment(segment, lodLevel, i)
-				if lodLevel ~= "culled" then
-					actuallyVisible = math.max(actuallyVisible, i)
-				end
-			end
-		elseif i <= DYNAMIC_SEGMENT_LIMIT then
-			-- Segment doesn't exist yet but could be created
-			actuallyVisible = i -- Track potential visibility
-		end
-	end
-	
-	-- Update visible segment count
-	self.visibleSegmentCount = math.min(actuallyVisible, MAX_VISIBLE_SEGMENTS)
-end
 
--- Sync beam visibility with segments
-function AISnake:syncBeamVisibility()
-	for i, beam in pairs(self.Beams) do
-		if beam and beam.Parent and type(i) == "number" then
-			local seg1Visible = self.segmentVisibility[i] ~= false
-			local seg2Visible = self.segmentVisibility[i + 1] ~= false
-			
-			-- Only show beam if both connected segments are visible
-			beam.Enabled = seg1Visible and seg2Visible
-			
-			-- Adjust transparency based on LOD
-			local lod1 = self.lodStates[i] or "near"
-			local lod2 = self.lodStates[i + 1] or "near"
-			
-			if not beam.Enabled then
-				-- Already hidden
-			elseif lod1 == "far" or lod2 == "far" then
-				beam.Transparency = NumberSequence.new(0.5)
-			elseif lod1 == "mid" or lod2 == "mid" then
-				beam.Transparency = NumberSequence.new(0.2)
-			else
-				beam.Transparency = NumberSequence.new{
-					NumberSequenceKeypoint.new(0, 0),
-					NumberSequenceKeypoint.new(0.5, 0),
-					NumberSequenceKeypoint.new(1, 0.1)
-				}
-			end
-		end
-	end
-end
 
 -- Dynamically create segments if they don't exist yet
 function AISnake:ensureSegmentExists(index)
@@ -3271,9 +3062,7 @@ function AISnake:ensureSegmentExists(index)
 		self.Beams[index - 1] = beam
 	end
 	
-	-- Initialize LOD state
-	self.segmentVisibility[index] = true
-	self.lodStates[index] = "near"
+
 	
 	return segment
 end
