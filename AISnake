@@ -3124,8 +3124,10 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	if not self._lastSegmentsToShow then
 		self._lastSegmentsToShow = targetSegmentsToShow
 	end
-	
-	local segmentsToShow = math.floor(self._lastSegmentsToShow + (targetSegmentsToShow - self._lastSegmentsToShow) * 0.1)
+
+	-- Slower transition when increasing visibility (approaching snake)
+	local transitionSpeed = targetSegmentsToShow > self._lastSegmentsToShow and 0.05 or 0.1
+	local segmentsToShow = math.floor(self._lastSegmentsToShow + (targetSegmentsToShow - self._lastSegmentsToShow) * transitionSpeed)
 	self._lastSegmentsToShow = segmentsToShow
 
 	-- Always show head at full quality
@@ -3138,7 +3140,7 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	if self.HeadParts then
 		local eyeVisible = headDistance < 400  -- Show eyes closer
 		local eyeTransparency = eyeVisible and 0 or 1
-		
+
 		if self.HeadParts.leftEye then
 			self.HeadParts.leftEye.Transparency = eyeTransparency
 		end
@@ -3169,7 +3171,7 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 					segment = self:ensureSegmentExists(i)
 				end
 			end
-			
+
 			if segment and segment.Parent then
 				-- Calculate segment-specific distance
 				local segmentDistance = (segment.Position - cameraPosition).Magnitude
@@ -3188,7 +3190,7 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 
 				-- Calculate target transparency
 				local targetTransparency = 0
-				
+
 				-- Base transparency based on distance
 				if headDistance < 300 then
 					targetTransparency = 0
@@ -3211,16 +3213,30 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 					targetTransparency = 0.5  -- Last visible segment
 				end
 
+				-- CRITICAL FIX: Check if segment was previously culled or newly created
+				local wasCulled = self._segmentTransparencies[i] == nil or self._segmentTransparencies[i] >= 0.95
+				local isNewlyCreated = segment:GetAttribute("JustCreated") == true
+				
+				if wasCulled or isNewlyCreated then
+					-- Segment is appearing - start from invisible and fade in slowly
+					self._segmentTransparencies[i] = 1
+					segment.Transparency = 1
+					segment:SetAttribute("JustCreated", false)
+					-- Force slower fade-in for better visuals
+					transitionSpeed = 0.03
+				end
+
 				-- SMOOTH TRANSPARENCY TRANSITION
-				local currentTransparency = self._segmentTransparencies[i] or targetTransparency
-				local newTransparency = currentTransparency + (targetTransparency - currentTransparency) * 0.15
+				local currentTransparency = self._segmentTransparencies[i] or 1
+				local fadeInSpeed = wasCulled and 0.03 or 0.15  -- Much slower fade-in when appearing
+				local newTransparency = currentTransparency + (targetTransparency - currentTransparency) * fadeInSpeed
 				self._segmentTransparencies[i] = newTransparency
 				segment.Transparency = math.min(0.6, newTransparency)
 
 				-- Update glow based on distance and visibility
 				local glow = segment:FindFirstChild("Glow")
 				if glow then
-					if headDistance < 400 and self:shouldHaveGlow(i) then
+					if headDistance < 400 and self:shouldHaveGlow(i) and segment.Transparency < 0.5 then
 						glow.Enabled = true
 						glow.Brightness = GLOW_INTENSITY * (1 - segment.Transparency)
 						glow.Range = GLOW_RANGE_BASE * (1 - headDistance / 400)
@@ -3228,7 +3244,7 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 						glow.Enabled = false
 					end
 				end
-				
+
 				-- Mark as visible
 				self.segmentVisibility[i] = true
 			end
@@ -3241,7 +3257,7 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 				local newTransparency = currentTransparency + (1 - currentTransparency) * 0.1
 				self._segmentTransparencies[i] = newTransparency
 				segment.Transparency = newTransparency
-				
+
 				-- Only fully cull when completely transparent
 				if newTransparency > 0.95 then
 					self:applyLODToSegment(segment, "culled", i)
@@ -3289,27 +3305,41 @@ function AISnake:syncBeamVisibility()
 					beam.Attachment1 = att2
 					beam.Enabled = true
 
-					-- Smooth beam transparency
+					-- Smooth beam transparency - ensure beams are MORE transparent than segments during fade-in
 					local avgTrans = (trans1 + trans2) / 2
-					local beamTransparency = math.min(avgTrans * 0.8, 0.6)  -- Beams slightly more visible
-					
+					local beamTransparency = math.min(avgTrans + 0.1, 0.8)  -- Beams slightly more transparent
+
 					-- Store beam transparency for smooth transitions
 					if not self._beamTransparencies then
 						self._beamTransparencies = {}
 					end
+
+					local currentBeamTrans = self._beamTransparencies[i] or 1  -- Default to invisible
 					
-					local currentBeamTrans = self._beamTransparencies[i] or beamTransparency
-					local newBeamTrans = currentBeamTrans + (beamTransparency - currentBeamTrans) * 0.2
-					self._beamTransparencies[i] = newBeamTrans
+					-- Check if either segment is fading in
+					local seg1FadingIn = trans1 > 0.5
+					local seg2FadingIn = trans2 > 0.5
 					
-					beam.Transparency = NumberSequence.new(newBeamTrans)
-					beam.Brightness = math.max(1.5, 2 * (1 - newBeamTrans))
+					if seg1FadingIn or seg2FadingIn then
+						-- Use slower fade-in for beams when segments are appearing
+						local fadeSpeed = 0.05
+						local newBeamTrans = currentBeamTrans + (beamTransparency - currentBeamTrans) * fadeSpeed
+						self._beamTransparencies[i] = newBeamTrans
+						beam.Transparency = NumberSequence.new(math.min(newBeamTrans, 0.95))
+					else
+						-- Normal speed for already visible segments
+						local newBeamTrans = currentBeamTrans + (beamTransparency - currentBeamTrans) * 0.2
+						self._beamTransparencies[i] = newBeamTrans
+						beam.Transparency = NumberSequence.new(newBeamTrans)
+					end
+					
+					beam.Brightness = math.max(1.0, 2 * (1 - self._beamTransparencies[i]))
 				else
 					-- Smooth fade out for beams
 					if not self._beamTransparencies then
 						self._beamTransparencies = {}
 					end
-					
+
 					local currentBeamTrans = self._beamTransparencies[i] or 0
 					if currentBeamTrans < 0.95 then
 						-- Still fading out
@@ -3320,11 +3350,15 @@ function AISnake:syncBeamVisibility()
 					else
 						-- Fully faded
 						beam.Enabled = false
+						self._beamTransparencies[i] = 1  -- Reset to fully transparent
 					end
 				end
 			else
 				-- Missing segments or attachments
 				beam.Enabled = false
+				if self._beamTransparencies then
+					self._beamTransparencies[i] = 1  -- Reset to fully transparent
+				end
 			end
 		end
 	end
@@ -3377,6 +3411,10 @@ function AISnake:ensureSegmentExists(index)
 			self:applyLODToSegment(segment, "far", index)
 		end
 	end
+	
+	-- Mark segment as newly created for proper fade-in
+	segment:SetAttribute("JustCreated", true)
+	segment.Transparency = 1  -- Start invisible for smooth fade-in
 
 	self.Segments[index] = segment
 
