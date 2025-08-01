@@ -4,6 +4,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
 
 local SnakeConfig = require(ReplicatedStorage:WaitForChild("SnakeConfig"))
 local OrbUtils = require(ReplicatedStorage:WaitForChild("OrbUtils"))
@@ -1571,17 +1572,19 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	end
 
 	local self = setmetatable({}, AISnake)
-	self.Config = deepCopy(SnakeConfig)
-
-	-- Update map bounds if needed (in case map was created after script started)
-	updateMapBounds()
-
-	-- Get random AI color (50% yellow, 50% others)
+	
+	-- Get random AI color FIRST (50% yellow, 50% others)
 	local colorData = getRandomAIColor()
+	
+	-- Deep copy config and immediately apply colors
+	self.Config = deepCopy(SnakeConfig)
 	self.Config.HeadColor = colorData.HeadColor
 	self.Config.BodyColors = colorData.BodyColors
 	self.Config.HeadMaterial = colorData.HeadMaterial
 	self.Config.BodyMaterial = colorData.BodyMaterial
+
+	-- Update map bounds if needed (in case map was created after script started)
+	updateMapBounds()
 
 		self.Position = startPosition or Vector3new(0, 5, 0)
 	self.Direction = Vector3new(0, 0, 1)
@@ -1919,21 +1922,25 @@ end
 function AISnake:grow(amount)
 	amount = amount or 5
 
-	-- Update growth factor when growing
-	self.growthFactor = self:calculateGrowthFactor()
-	local currentBaseSize = BASE_SIZE * self.growthFactor
-
 	for i = 1, amount do
 		if self.CurrentLength < self.Config.MaxSegments then
 			self.CurrentLength = self.CurrentLength + 1
 			
 			-- Only create physical segment if within dynamic limit
 			if self.CurrentLength <= DYNAMIC_SEGMENT_LIMIT then
+				-- Update growth factor before creating new segment
+				self.growthFactor = self:calculateGrowthFactor()
+				local currentBaseSize = BASE_SIZE * self.growthFactor
+				
 				local color = self:getSegmentColor(self.CurrentLength)
 				local lastSegment = self.Segments[self.CurrentLength - 1]
 				local newPos = lastSegment and lastSegment.Position or self.Position
 				local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength)
 				self.Segments[self.CurrentLength] = segment
+				
+				-- Ensure segment uses correct material from our config
+				segment.Material = self.Config.BodyMaterial or Enum.Material.Neon
+				segment.Color = color  -- Re-apply color to be sure
 
 				-- Match CharacterSetup's segment growth exactly
 				segment.Transparency = 1
@@ -2028,6 +2035,29 @@ function AISnake:grow(amount)
 	
 	-- Update visible segment count
 	self.visibleSegmentCount = math.min(self.CurrentLength, MAX_VISIBLE_SEGMENTS)
+	
+	-- Update all segment sizes with new growth factor to prevent glitching
+	if amount > 0 then
+		self.growthFactor = self:calculateGrowthFactor()
+		local currentBaseSize = BASE_SIZE * self.growthFactor
+		
+		-- Smoothly update existing segment sizes
+		task.spawn(function()
+			for i = 0, math.min(self.CurrentLength, FORCE_RENDER_SEGMENTS) do
+				local segment = self.Segments[i]
+				if segment and segment.Parent then
+					local targetSize = self:getSegmentSize(i, currentBaseSize)
+					-- Use TweenService for smooth size transition
+					local tween = game:GetService("TweenService"):Create(
+						segment,
+						TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{Size = Vector3.new(targetSize, targetSize, targetSize)}
+					)
+					tween:Play()
+				end
+			end
+		end)
+	end
 end
 
 function AISnake:setConfidenceBuff()
