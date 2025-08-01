@@ -21,10 +21,19 @@ function SnakeUpgrades.GiveUpgrade(snake)
         snake.NormalSpeed = origSpeed * SPEED_BOOST_AMOUNT
         snake.BoostSpeed = origBoost * SPEED_BOOST_AMOUNT
 
-        -- NO COLOR CHANGE - just subtle glow increase
+        -- Store original color and apply temporary orange color
         if snake.HeadParts and snake.HeadParts.head then
-            local headGlow = snake.HeadParts.head:FindFirstChild("PointLight")
+            -- Store the original color if not already stored
+            if not snake._originalHeadColor then
+                snake._originalHeadColor = snake.HeadParts.head.Color
+            end
+            
+            -- Apply temporary orange color for visual feedback
+            snake.HeadParts.head.Color = Color3.fromRGB(255, 100, 0)
+            
+            local headGlow = snake.HeadParts.head:FindFirstChild("Glow") or snake.HeadParts.head:FindFirstChild("PointLight")
             if headGlow then
+                snake._originalGlowBrightness = snake._originalGlowBrightness or headGlow.Brightness
                 headGlow.Brightness = headGlow.Brightness * 1.3
             end
         end
@@ -34,11 +43,14 @@ function SnakeUpgrades.GiveUpgrade(snake)
                 snake.NormalSpeed = origSpeed
                 snake.BoostSpeed = origBoost
                 snake._isSpeedBoosted = false
-                -- Restore glow
-                if snake.HeadParts and snake.HeadParts.head then
-                    local headGlow = snake.HeadParts.head:FindFirstChild("PointLight")
-                    if headGlow then
-                        headGlow.Brightness = headGlow.Brightness / 1.3
+                -- Restore original color
+                if snake.HeadParts and snake.HeadParts.head and snake._originalHeadColor then
+                    snake.HeadParts.head.Color = snake._originalHeadColor
+                    -- Don't clear the stored color in case multiple upgrades happen
+                    
+                    local headGlow = snake.HeadParts.head:FindFirstChild("Glow") or snake.HeadParts.head:FindFirstChild("PointLight")
+                    if headGlow and snake._originalGlowBrightness then
+                        headGlow.Brightness = snake._originalGlowBrightness
                     end
                 end
             end
