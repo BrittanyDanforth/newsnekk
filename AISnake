@@ -1911,6 +1911,22 @@ function AISnake.new(startPosition, preservedPersonalityType)
 				end)
 			end
 		end
+		
+		-- Also fade in the head (segment 0) which ipairs skips
+		if self.Segments[0] and self.Segments[0].Parent then
+			task.spawn(function()
+				local fadeSteps = 10
+				for step = 1, fadeSteps do
+					if self.Segments[0] and self.Segments[0].Parent then
+						self.Segments[0].Transparency = 1 - (step / fadeSteps)
+					end
+					task.wait(0.02)
+				end
+				if self.Segments[0] and self.Segments[0].Parent then
+					self.Segments[0].Transparency = 0
+				end
+			end)
+		end
 	end)
 
 	table.insert(AISnake._activeSnakes, self)
@@ -3204,14 +3220,28 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 				
 				-- Calculate transparency - NEVER make segments fully invisible when they should be shown
 				local baseTransparency = 0
-				if headDistance < 200 then
-					baseTransparency = 0
-				elseif headDistance < 400 then
-					baseTransparency = 0.1
-				elseif headDistance < 600 then
-					baseTransparency = 0.2
+				
+				-- Special handling for first few segments to keep them more visible
+				if i <= 3 then
+					-- Keep first 3 segments (after head) more visible
+					if headDistance < 400 then
+						baseTransparency = 0
+					elseif headDistance < 600 then
+						baseTransparency = 0.1
+					else
+						baseTransparency = 0.2  -- Max 20% for early segments
+					end
 				else
-					baseTransparency = 0.3  -- Max 30% transparent, not 50%
+					-- Regular segments
+					if headDistance < 200 then
+						baseTransparency = 0
+					elseif headDistance < 400 then
+						baseTransparency = 0.1
+					elseif headDistance < 600 then
+						baseTransparency = 0.2
+					else
+						baseTransparency = 0.3  -- Max 30% transparent, not 50%
+					end
 				end
 				
 				-- Fade out segments near the cutoff point
@@ -3270,17 +3300,30 @@ function AISnake:syncBeamVisibility()
 				local trans1 = seg1.Transparency or 0
 				local trans2 = seg2.Transparency or 0
 				
-				-- Only show beam if both segments are reasonably visible
-				if trans1 < 0.9 and trans2 < 0.9 then
-					beam.Enabled = true
-					
-					-- Use average transparency but add a bit more for beams
-					local avgTransparency = (trans1 + trans2) / 2
-					beam.Transparency = NumberSequence.new(math.min(avgTransparency + 0.1, 0.8))
-					beam.Brightness = math.max(0.5, 2 * (1 - avgTransparency))
+				-- Special handling for head beam (beam 0)
+				if i == 0 then
+					-- Head beam should only show if head is actually visible
+					if trans1 < 0.5 and trans2 < 0.9 then
+						beam.Enabled = true
+						-- Keep head beam more visible
+						beam.Transparency = NumberSequence.new(math.min(trans2 * 0.5, 0.3))
+						beam.Brightness = 2
+					else
+						beam.Enabled = false
+					end
 				else
-					-- Hide beam if segments are too transparent
-					beam.Enabled = false
+					-- Only show beam if both segments are reasonably visible
+					if trans1 < 0.9 and trans2 < 0.9 then
+						beam.Enabled = true
+						
+						-- Use average transparency but add a bit more for beams
+						local avgTransparency = (trans1 + trans2) / 2
+						beam.Transparency = NumberSequence.new(math.min(avgTransparency + 0.1, 0.8))
+						beam.Brightness = math.max(0.5, 2 * (1 - avgTransparency))
+					else
+						-- Hide beam if segments are too transparent
+						beam.Enabled = false
+					end
 				end
 			else
 				-- Hide beam if segments don't exist or are culled
