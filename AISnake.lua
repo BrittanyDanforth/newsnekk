@@ -3308,9 +3308,9 @@ function AISnake:syncBeamVisibility()
 						-- ROBLOX LOD FIX: Calculate beam quality based on distance
 						if cameraPos then
 							local distance = (seg1.Position - cameraPos).Magnitude
-							local qualityFactor = UserSettings():GetService("UserSettings").GameSettings.SavedQualityLevel.Value / 10
+							-- Server-side quality calculation (no access to UserSettings)
 							local qualityDistanceScalar = math.clamp(
-								(1 - (distance - BEAM_QUALITY_DISTANCE_SCALAR) / BEAM_QUALITY_FALLOFF) * qualityFactor, 
+								(1 - (distance - BEAM_QUALITY_DISTANCE_SCALAR) / BEAM_QUALITY_FALLOFF), 
 								0.1, 
 								1
 							)
