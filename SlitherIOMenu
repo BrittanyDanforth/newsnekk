@@ -676,7 +676,7 @@ local function onCharacterAdded(character)
 				isReviving = true
 			end
 
-			-- Only show menu if player didn't revive
+			-- Only show menu if player didn't revive AND is still dead
 			if not isReviving and humanoid.Health <= 0 then
 				print("📋 Showing respawn menu")
 				-- Show the menu again for respawn
@@ -685,6 +685,15 @@ local function onCharacterAdded(character)
 				end)
 			elseif isReviving then
 				print("🎮 Player revived - not showing menu")
+			else
+				-- Edge case: timer expired but player isn't marked as reviving
+				-- Check if still dead after all that waiting
+				if humanoid.Health <= 0 then
+					print("⏰ Timer expired, player still dead - showing menu")
+					createMenu(function()
+						requestRespawn()
+					end)
+				end
 			end
 		end)
 	end
@@ -695,39 +704,7 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
--- Listen for forced menu show (when revive timer expires)
-print("🔍 Looking for Remotes folder...")
-local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
-if remotes then
-	print("✅ Found Remotes folder")
-	local showMenuRemote = remotes:WaitForChild("ShowDeathMenu", 5)
-	if showMenuRemote then
-		print("✅ Found ShowDeathMenu RemoteEvent")
-		showMenuRemote.OnClientEvent:Connect(function()
-			print("📺 Received ShowDeathMenu event - showing menu!")
-			-- Show the menu immediately
-			createMenu(function()
-				requestRespawn()
-			end)
-		end)
-	else
-		warn("❌ ShowDeathMenu RemoteEvent not found in Remotes folder")
-		-- Try to listen for it being added
-		remotes.ChildAdded:Connect(function(child)
-			if child.Name == "ShowDeathMenu" and child:IsA("RemoteEvent") then
-				print("✅ ShowDeathMenu RemoteEvent was just created")
-				child.OnClientEvent:Connect(function()
-					print("📺 Received ShowDeathMenu event - showing menu!")
-					createMenu(function()
-						requestRespawn()
-					end)
-				end)
-			end
-		end)
-	end
-else
-	warn("❌ Remotes folder not found in ReplicatedStorage")
-end
+
 
 -- Enhanced performance monitoring
 task.spawn(function()
