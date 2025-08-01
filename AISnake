@@ -60,6 +60,45 @@ local VERY_LONG_SNAKE_THRESHOLD = 300  -- Even more optimization for very long s
 local AI_UPDATE_DISTANCE = 200  -- Only update AI within this distance of players
 local SEGMENT_POOL_MAX = 500  -- Increased pool size for better reuse
 
+-- Visual Constants from OptimizedSnakeSystem
+local BASE_SIZE = 3.5 -- Unified base size for head and segments
+local MAX_SIZE_MULTIPLIER = 3.5 -- Maximum size growth
+local GLOW_INTENSITY = 2 -- Professional glow intensity
+local GLOW_RANGE_BASE = 15
+local BEAM_SEGMENTS = 10 -- Optimal segments
+local BEAM_WIDTH_BASE = 0.95 -- Base beam width relative to segments
+local BEAM_TAPER_STRENGTH = 0.15 -- How much beams taper
+local HEAD_SIZE_MULTIPLIER = 1.05 -- Reduced head size multiplier for consistency
+local HEAD_BLEND_SEGMENTS = 8 -- More segments for smoother blend
+local GLOW_FALLOFF_START = 50 -- Start reducing glow density after this many segments
+local VISUAL_SMOOTHING_FACTOR = 0.6 -- Higher = smoother transitions
+
+-- Growth Animation Constants
+local GROWTH_SPEED = 0.15 -- How fast we interpolate to target length
+local SEGMENT_GROWTH_DELAY = 0.05 -- Delay between segment additions
+local GROWTH_PULSE_STRENGTH = 0.1 -- How much segments pulse when growing
+local GROWTH_WAVE_SPEED = 10 -- Speed of growth wave effect
+
+-- Professional Visual Enhancement Constants
+local BEAM_TEXTURE_SPEED = 2 -- Flow animation speed for beams
+local PARTICLE_VELOCITY_INHERITANCE = 0.7 -- Natural trailing behavior
+local PARTICLE_DRAG = 3 -- Exponential velocity decay for boost effects
+local BOOST_PARTICLE_SIZE = NumberSequence.new{
+	NumberSequenceKeypoint.new(0, 0.5),
+	NumberSequenceKeypoint.new(0.5, 1),
+	NumberSequenceKeypoint.new(1, 0)
+}
+local MOBILE_PARTICLE_RATE = 100
+local DESKTOP_PARTICLE_RATE = 200
+
+-- Professional Texture Library
+local BEAM_TEXTURES = {
+	gradient = "rbxasset://textures/ui/LuaChat/9-slice/kit-modal-highlight.png",
+	flow = "rbxasset://textures/ui/GuiImagePlaceholder.png", 
+	energy = "rbxasset://textures/particles/sparkles_main.dds",
+	smooth = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
+}
+
 AISnake._activeSnakes = {}
 AISnake._orbTargets = {}
 
@@ -288,9 +327,6 @@ end
 
 -- === VISUAL CREATION (Enhanced to match OptimizedSnakeSystem) ===
 local function createVisualHead(config, parentModel)
-	local BASE_SIZE = 3.5  -- Match OptimizedSnakeSystem base size
-	local HEAD_SIZE_MULTIPLIER = 1.05  -- Slightly larger than body segments
-	
 	-- HEAD IS NOW SEGMENT 0 - Part of the unified body
 	local headPart = Instance.new("Part")
 	headPart.Name = "Segment0_Head"  -- Match OptimizedSnakeSystem naming
@@ -311,8 +347,8 @@ local function createVisualHead(config, parentModel)
 	local headLight = Instance.new("PointLight")
 	headLight.Name = "Glow"
 	headLight.Color = config.HeadColor
-	headLight.Brightness = 2  -- Professional glow intensity
-	headLight.Range = 15 * 1.1  -- Slightly larger than body segments
+	headLight.Brightness = GLOW_INTENSITY
+	headLight.Range = GLOW_RANGE_BASE * 1.1  -- Slightly larger than body segments
 	headLight.Shadows = false  -- Performance optimization
 	headLight.Parent = headPart
 
@@ -325,13 +361,9 @@ local function createVisualHead(config, parentModel)
 	boostParticles.Rate = 0  -- Start disabled
 	boostParticles.Speed = NumberRange.new(5, 10)
 	boostParticles.SpreadAngle = Vector2.new(180, 180)
-	boostParticles.VelocityInheritance = 0.7  -- Natural trailing
-	boostParticles.Drag = 3  -- Exponential decay
-	boostParticles.Size = NumberSequence.new{
-		NumberSequenceKeypoint.new(0, 0.5),
-		NumberSequenceKeypoint.new(0.5, 1),
-		NumberSequenceKeypoint.new(1, 0)
-	}
+	boostParticles.VelocityInheritance = PARTICLE_VELOCITY_INHERITANCE
+	boostParticles.Drag = PARTICLE_DRAG
+	boostParticles.Size = BOOST_PARTICLE_SIZE
 	boostParticles.Rotation = NumberRange.new(0, 360)
 	boostParticles.RotSpeed = NumberRange.new(-180, 180)
 	boostParticles.Enabled = false
@@ -391,23 +423,8 @@ local function createSegment(index, position, color, config, parentModel, curren
 	segment.Shape = Enum.PartType.Ball  -- Match OptimizedSnakeSystem
 	segment.Material = Enum.Material.Neon  -- Consistent material like OptimizedSnakeSystem
 
-	-- Apply growth factor based on current snake length (same as players)
-	local growthFactor = 1
-	if currentLength and currentLength > 200 then
-		growthFactor = 1 + ((currentLength - 200) / 2800) * 1.0  -- Match moderate growth
-	end
-
-	-- Use base size calculation similar to OptimizedSnakeSystem
-	local BASE_SIZE = 3.5  -- Match OptimizedSnakeSystem base size
-	local segmentSize = BASE_SIZE * mathMin(growthFactor, 2.0)
-	
-	-- Apply taper for tail segments (match OptimizedSnakeSystem)
-	if currentLength and index > currentLength * 0.7 then
-		local tailProgress = (index - currentLength * 0.7) / (currentLength * 0.3)
-		segmentSize = segmentSize * (1 - tailProgress * 0.3)  -- Taper to 70% size at tail
-	end
-	
-	segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
+	-- This is temporary - will be set properly by the snake instance
+	segment.Size = Vector3.new(BASE_SIZE, BASE_SIZE, BASE_SIZE)
 	segment.Color = color
 	segment.CFrame = CFramenew(position)
 	segment.Parent = parentModel
@@ -422,7 +439,6 @@ local function createSegment(index, position, color, config, parentModel, curren
 	segment:SetAttribute("IsAISnake", true)
 
 	-- Strategic glow placement matching OptimizedSnakeSystem
-	local GLOW_FALLOFF_START = 50
 	local shouldHaveGlow = false
 	if index <= GLOW_FALLOFF_START then
 		shouldHaveGlow = true  -- All segments up to falloff
@@ -438,13 +454,8 @@ local function createSegment(index, position, color, config, parentModel, curren
 		local light = segment:FindFirstChild("Glow") or Instance.new("PointLight")
 		light.Name = "Glow"
 		light.Color = color
-		
-		-- Use AI-specific glow settings
-		local aiConfig = config.AI or {}
-		local glowIntensity = aiConfig.GlowIntensity or 1.2
-		
-		light.Range = 15 * (0.9 - (index / (currentLength or 100)) * 0.1)  -- Gradual decrease
-		light.Brightness = glowIntensity * 0.9  -- Slightly dimmer than head
+		light.Brightness = GLOW_INTENSITY * 0.9  -- Slightly dimmer than head
+		light.Range = GLOW_RANGE_BASE * (0.9 - (index / (currentLength or 100)) * 0.1)
 		light.Shadows = false
 		light.Enabled = true
 		light.Parent = segment
@@ -1648,6 +1659,9 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	local aiConfig = self.Config.AI or {}
 	self.CurrentLength = aiConfig.InitialLength or self.Config.InitialLength or 10
 
+	-- Calculate initial growth factor
+	self.growthFactor = self:calculateGrowthFactor()
+
 	-- FIXED: Proper position history initialization
 	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.2) + 20
 	self.PositionHistory = table.create(self.MaxHistorySize)
@@ -1674,7 +1688,7 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 	-- Create attachment part for beams (invisible)
 	local attachmentPart = Instance.new("Part")
-	attachmentPart.Name = "AttachmentHolder"
+	attachmentPart.Name = "BeamHolder"
 	attachmentPart.Size = Vector3.new(1, 1, 1)
 	attachmentPart.Transparency = 1
 	attachmentPart.CanCollide = false
@@ -1683,6 +1697,7 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	attachmentPart.Anchored = true
 	attachmentPart.Position = self.Position
 	attachmentPart.Parent = self.Model
+	attachmentPart:SetAttribute("AlwaysRender", true)
 
 	-- Store attachments and beams for seamless rendering
 	self.Attachments = {}
@@ -1697,6 +1712,13 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	-- Store head as segment 0 for consistency with OptimizedSnakeSystem
 	self.Segments[0] = self.HeadParts.head
 
+	-- Calculate base size with growth factor
+	local currentBaseSize = BASE_SIZE * self.growthFactor
+
+	-- Set proper head size
+	local headSize = self:getSegmentSize(0, currentBaseSize)
+	self.HeadParts.head.Size = Vector3.new(headSize, headSize, headSize)
+
 	-- FIXED: Create segments at proper positions WITHOUT GAPS
 	for i = 1, self.CurrentLength do
 		-- Start ALL segments at the SAME position to prevent gaps
@@ -1704,6 +1726,10 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		local color = self:getSegmentColor(i)  -- Use the new function
 		local segment = createSegment(i, pos, color, self.Config, self.Model, i)
 		self.Segments[i] = segment
+
+		-- Set proper size using getSegmentSize
+		local segmentSize = self:getSegmentSize(i, currentBaseSize)
+		segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
 
 		-- Start segments invisible
 		segment.Transparency = 1
@@ -1719,13 +1745,6 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	end
 
 	-- Create seamless beams between all segments (like OptimizedSnakeSystem)
-	local BEAM_TEXTURES = {
-		gradient = "rbxasset://textures/ui/LuaChat/9-slice/kit-modal-highlight.png",
-		flow = "rbxasset://textures/ui/GuiImagePlaceholder.png", 
-		energy = "rbxasset://textures/particles/sparkles_main.dds",
-		smooth = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
-	}
-
 	for i = 0, self.CurrentLength - 1 do
 		local beam = Instance.new("Beam")
 		beam.Name = "Beam" .. i
@@ -1733,18 +1752,17 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		beam.Attachment1 = self.Attachments[i + 1]
 
 		-- Professional beam properties matching OptimizedSnakeSystem
-		local BASE_SIZE = 3.5
-		local beamWidth = self:getBeamWidth(i, BASE_SIZE)
+		local beamWidth = self:getBeamWidth(i, currentBaseSize)
 		beam.Width0 = beamWidth
 		beam.Width1 = beamWidth
 		beam.CurveSize0 = 0
 		beam.CurveSize1 = 0
 		beam.FaceCamera = true
-		beam.Segments = 10  -- Optimal segments for smooth curves
+		beam.Segments = BEAM_SEGMENTS
 		beam.Texture = BEAM_TEXTURES.gradient  -- Professional gradient
 		beam.TextureMode = Enum.TextureMode.Wrap
 		beam.TextureLength = 2
-		beam.TextureSpeed = 2  -- Animated flow effect
+		beam.TextureSpeed = BEAM_TEXTURE_SPEED  -- Animated flow effect
 		beam.LightEmission = 1
 		beam.LightInfluence = 0
 		beam.Brightness = 2
@@ -1866,6 +1884,11 @@ end
 -- === OTHER METHODS (simplified) ===
 function AISnake:grow(amount)
 	amount = amount or 5
+	
+	-- Update growth factor when growing
+	self.growthFactor = self:calculateGrowthFactor()
+	local currentBaseSize = BASE_SIZE * self.growthFactor
+	
 	for i = 1, amount do
 		if self.CurrentLength < self.Config.MaxSegments then
 			self.CurrentLength = self.CurrentLength + 1
@@ -1895,18 +1918,17 @@ function AISnake:grow(amount)
 					beam.Attachment1 = attachment
 
 					-- Professional beam properties
-					local BASE_SIZE = 3.5
-					local beamWidth = self:getBeamWidth(self.CurrentLength - 1, BASE_SIZE)
+					local beamWidth = self:getBeamWidth(self.CurrentLength - 1, currentBaseSize)
 					beam.Width0 = beamWidth
 					beam.Width1 = beamWidth
 					beam.CurveSize0 = 0
 					beam.CurveSize1 = 0
 					beam.FaceCamera = true
-					beam.Segments = 10
-					beam.Texture = "rbxasset://textures/ui/LuaChat/9-slice/kit-modal-highlight.png"
+					beam.Segments = BEAM_SEGMENTS
+					beam.Texture = BEAM_TEXTURES.gradient
 					beam.TextureMode = Enum.TextureMode.Wrap
 					beam.TextureLength = 2
-					beam.TextureSpeed = 2
+					beam.TextureSpeed = BEAM_TEXTURE_SPEED
 					beam.LightEmission = 1
 					beam.LightInfluence = 0
 					beam.Brightness = 2
@@ -1933,21 +1955,8 @@ function AISnake:grow(amount)
 				end
 			end
 
-			-- Apply growth factor for the final size
-			local growthFactor = 1
-			if self.CurrentLength > 200 then
-				growthFactor = 1 + ((self.CurrentLength - 200) / 2800) * 1.0
-			end
-			
-			-- Use base size calculation similar to OptimizedSnakeSystem
-			local BASE_SIZE = 3.5
-			local finalSize = BASE_SIZE * mathMin(growthFactor, 2.0)
-			
-			-- Apply taper for tail segments
-			if self.CurrentLength > self.CurrentLength * 0.7 then
-				local tailProgress = (self.CurrentLength - self.CurrentLength * 0.7) / (self.CurrentLength * 0.3)
-				finalSize = finalSize * (1 - tailProgress * 0.3)
-			end
+			-- Calculate final size using getSegmentSize
+			local finalSize = self:getSegmentSize(self.CurrentLength, currentBaseSize)
 
 			task.spawn(function()
 				if not segment or not segment.Parent then return end
@@ -2866,36 +2875,67 @@ function AISnake:getSegmentColor(index)
 	end
 end
 
+-- Calculate growth factor exactly like OptimizedSnakeSystem
+function AISnake:calculateGrowthFactor()
+	local length = self.CurrentLength
+
+	if length <= 50 then
+		return 1.0
+	elseif length <= 200 then
+		return 1.0 + (length - 50) / 150 * 0.5 -- Up to 1.5x
+	elseif length <= 1000 then
+		return 1.5 + (length - 200) / 800 * 1.0 -- Up to 2.5x
+	elseif length <= 5000 then
+		return 2.5 + (length - 1000) / 4000 * 0.5 -- Up to 3.0x
+	else
+		return 3.0 + math.min((length - 5000) / 10000 * 0.5, 0.5) -- Max 3.5x
+	end
+end
+
+-- Smooth size transition function from OptimizedSnakeSystem
+function AISnake:getSegmentSize(index, baseSize)
+	local sizeMult = 1
+
+	-- Add growth pulse effect when growing (if we implement growth animation)
+	-- For now, we'll skip this since AI doesn't have isGrowing state
+
+	local visibleSegmentCount = self.CurrentLength
+
+	if index == 0 then
+		-- Head with subtle size increase
+		return baseSize * HEAD_SIZE_MULTIPLIER * sizeMult
+	elseif index <= HEAD_BLEND_SEGMENTS then
+		-- Smooth transition from head to body
+		local blendFactor = index / HEAD_BLEND_SEGMENTS
+		local headSize = baseSize * HEAD_SIZE_MULTIPLIER
+		local bodySize = baseSize * (1 - 0.05 * blendFactor) -- Subtle initial taper
+		return (headSize + (bodySize - headSize) * (blendFactor ^ 0.5)) * sizeMult
+	else
+		-- Body with gradual taper
+		local taperFactor = 1 - (index / visibleSegmentCount) * 0.2
+		-- Apply exponential smoothing to taper
+		taperFactor = 1 - (1 - taperFactor) ^ 1.5
+		return baseSize * taperFactor * sizeMult
+	end
+end
+
 -- Calculate beam width with proper transitions (matching OptimizedSnakeSystem)
 function AISnake:getBeamWidth(index, baseSize)
-	-- Get the sizes of the two segments this beam connects
-	local segmentSize1 = baseSize -- Default size
-	local segmentSize2 = baseSize
-	
-	-- Calculate actual segment sizes including growth and taper
-	if index == 0 then
-		segmentSize1 = baseSize * 1.05  -- Head is slightly larger
-	end
-	
-	-- Apply taper for tail segments
-	local segmentCount = self.CurrentLength or 100
-	if index > segmentCount * 0.7 then
-		local tailProgress = (index - segmentCount * 0.7) / (segmentCount * 0.3)
-		segmentSize2 = baseSize * (1 - tailProgress * 0.3)
-	end
+	local segmentSize1 = self:getSegmentSize(index, baseSize)
+	local segmentSize2 = self:getSegmentSize(index + 1, baseSize)
 	
 	-- Average the two segment sizes for smooth transition
 	local avgSize = (segmentSize1 + segmentSize2) / 2
 	
-	-- Apply beam-specific reduction to keep beams inside segments
+	-- Apply beam-specific taper (less than segment taper for fuller appearance)
+	local visibleSegmentCount = self.CurrentLength
+	local beamTaper = 1 - (index / visibleSegmentCount) * BEAM_TAPER_STRENGTH
+	
+	-- For AI snakes, use slightly smaller beam width to prevent showing outside
 	local aiConfig = self.Config.AI or {}
-	local BEAM_WIDTH_BASE = aiConfig.BeamWidthMultiplier or 0.85  -- Use AI config or default
-	local BEAM_TAPER_STRENGTH = 0.15
+	local beamWidthBase = aiConfig.BeamWidthMultiplier or BEAM_WIDTH_BASE * 0.9
 	
-	-- Apply beam taper
-	local beamTaper = 1 - (index / segmentCount) * BEAM_TAPER_STRENGTH
-	
-	return avgSize * BEAM_WIDTH_BASE * beamTaper
+	return avgSize * beamWidthBase * beamTaper
 end
 
 
