@@ -207,6 +207,11 @@ local function resetSegment(segment, config)
 			child:Destroy()
 		end
 	end
+	-- CRITICAL: Clear any attributes that might cause collision issues
+	segment:SetAttribute("IsSnakeSegment", false)
+	segment:SetAttribute("SegmentIndex", nil)
+	segment:SetAttribute("IsAISnake", false)
+	segment:SetAttribute("BeingDestroyed", false)
 end
 
 local function getSegment(config)
@@ -246,6 +251,16 @@ local function returnSegment(segment)
 	segment.Color = Color3.new()
 	segment.Material = Enum.Material.Neon
 	segment.Size = Vector3.new(3.5, 3.5, 4)
+	
+	-- CRITICAL: Clear collision attributes
+	segment:SetAttribute("IsSnakeSegment", false)
+	segment:SetAttribute("SegmentIndex", nil)
+	segment:SetAttribute("IsAISnake", false)
+	segment:SetAttribute("BeingDestroyed", false)
+	
+	-- CRITICAL: Move segment far away to prevent ghost collisions
+	segment.Position = Vector3new(0, -1000, 0)
+	segment.CFrame = CFramenew(0, -1000, 0)
 
 	-- Return to pool
 	segment.Parent = SEGMENT_PARENT
@@ -640,6 +655,10 @@ end
 
 local function isPartsColliding(partA, partB)
 	if not (partA and partA.Parent and partB and partB.Parent) then return false end
+	-- CRITICAL: Check if either part is being destroyed
+	if partA:GetAttribute("BeingDestroyed") or partB:GetAttribute("BeingDestroyed") then 
+		return false 
+	end
 	local radiusA = (partA.Size.X + partA.Size.Y + partA.Size.Z) / 6
 	local radiusB = (partB.Size.X + partB.Size.Y + partB.Size.Z) / 6
 	local dist = (partA.Position - partB.Position).Magnitude
@@ -2109,6 +2128,22 @@ function AISnake:Destroy()
 	-- Immediately mark as destroyed to prevent any updates
 	self._destroyed = true
 
+	-- CRITICAL: Mark all segments as being destroyed IMMEDIATELY
+	if self.HeadParts and self.HeadParts.head then
+		self.HeadParts.head:SetAttribute("BeingDestroyed", true)
+		self.HeadParts.head.CanTouch = false
+		self.HeadParts.head.CanQuery = false
+	end
+	
+	for i = 0, #self.Segments do
+		local segment = self.Segments[i]
+		if segment and segment.Parent then
+			segment:SetAttribute("BeingDestroyed", true)
+			segment.CanTouch = false
+			segment.CanQuery = false
+		end
+	end
+
 	-- Untrack snake from orb pickup system
 	if AISnakeOrbPickup then
 		pcall(function()
@@ -2745,6 +2780,10 @@ function AISnake:updateMovement(dt)
 	for _, data in nearbyEntities do
 		local otherPart = data.part
 		if otherPart == myHead then continue end
+		
+		-- CRITICAL: Skip destroyed parts
+		if not otherPart or not otherPart.Parent then continue end
+		if otherPart:GetAttribute("BeingDestroyed") then continue end
 
 		if isPartsColliding(myHead, otherPart) then
 			local otherOwner = data.owner
@@ -2752,6 +2791,11 @@ function AISnake:updateMovement(dt)
 			-- Add double-check to prevent false positives
 			if (myHead.Position - otherPart.Position).Magnitude > 5 then
 				continue  -- Skip if distance is too far (false positive)
+			end
+			
+			-- EXTRA SAFETY: Verify owner is still valid
+			if data.type == "AI_HEAD" or data.type == "AI_SEGMENT" then
+				if not otherOwner or otherOwner._destroyed then continue end
 			end
 
 			if data.type == "AI_HEAD" then
@@ -2771,7 +2815,9 @@ function AISnake:updateMovement(dt)
 			elseif data.type == "AI_SEGMENT" then
 				if otherOwner ~= self then
 					self:Destroy()
-					otherOwner:setConfidenceBuff()
+					if otherOwner and not otherOwner._destroyed then
+						otherOwner:setConfidenceBuff()
+					end
 					return
 				end
 			elseif data.type == "PLAYER_HEAD" then
@@ -2895,12 +2941,15 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 		SpatialGrid.Clear()
 
 		for _, snake in AISnake._activeSnakes do
-			if snake._active and snake.HeadParts and snake.HeadParts.head then
-				SpatialGrid.Insert(snake.HeadParts.head, snake, "AI_HEAD")
+			if snake._active and not snake._destroyed and snake.HeadParts and snake.HeadParts.head then
+				-- Skip if head is being destroyed
+				if not snake.HeadParts.head:GetAttribute("BeingDestroyed") then
+					SpatialGrid.Insert(snake.HeadParts.head, snake, "AI_HEAD")
+				end
 
 				for i = 1, #snake.Segments, 4 do
 					local segment = snake.Segments[i]
-					if segment then
+					if segment and segment.Parent and not segment:GetAttribute("BeingDestroyed") then
 						SpatialGrid.Insert(segment, snake, "AI_SEGMENT")
 					end
 				end
