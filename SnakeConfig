@@ -10,7 +10,7 @@ return {
 	SegmentGap = 3.0, -- For SnakeMovement path system
 
 	-- BODY SETTINGS (FOR AI ONLY - Players use SnakeSystemIntegration)
-	InitialLength = 10,      -- AI snakes spawn with this length
+	InitialLength = 100,      -- AI spawns with 100 segments for proper visual size
 	MaxSegments = 2450,
 
 	-- ENHANCED COLORS (Default skin - better green gradient)
