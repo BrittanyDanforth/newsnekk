@@ -286,12 +286,15 @@ local function deepCopy(orig)
 	return copy
 end
 
--- === VISUAL CREATION (unchanged) ===
+-- === VISUAL CREATION (Enhanced to match OptimizedSnakeSystem) ===
 local function createVisualHead(config, parentModel)
+	local BASE_SIZE = 3.5  -- Match OptimizedSnakeSystem base size
+	local HEAD_SIZE_MULTIPLIER = 1.05  -- Slightly larger than body segments
+	
 	local headPart = Instance.new("Part")
 	headPart.Name = "AISnakeHead"
-	headPart.Size = config.HeadSize
-	headPart.Material = config.HeadMaterial
+	headPart.Size = Vector3.new(BASE_SIZE * HEAD_SIZE_MULTIPLIER, BASE_SIZE * HEAD_SIZE_MULTIPLIER, BASE_SIZE * HEAD_SIZE_MULTIPLIER)
+	headPart.Material = Enum.Material.Neon  -- Consistent with OptimizedSnakeSystem
 	headPart.Color = config.HeadColor
 	headPart.Shape = Enum.PartType.Ball
 	headPart.CanCollide = false
@@ -302,15 +305,90 @@ local function createVisualHead(config, parentModel)
 	headPart.BottomSurface = Enum.SurfaceType.Smooth
 	headPart.Parent = parentModel
 
-	-- MAKE AI SNAKE HEAD COMPLETELY INVISIBLE (like player snakes)
-	headPart.Transparency = 1
+	-- Match OptimizedSnakeSystem's transparency approach
+	headPart.Transparency = 0  -- Keep head visible (it's the first segment)
 
+	-- Professional head glow matching OptimizedSnakeSystem
 	local headLight = Instance.new("PointLight")
+	headLight.Name = "Glow"
 	headLight.Color = config.HeadColor
-	headLight.Brightness = config.GlowIntensity + 2
-	headLight.Range = config.GlowRange + 3
+	headLight.Brightness = 2  -- Professional glow intensity
+	headLight.Range = 15 * 1.1  -- Slightly larger than body segments
+	headLight.Shadows = false  -- Performance optimization
 	headLight.Parent = headPart
 
+	-- Professional boost particles (match OptimizedSnakeSystem)
+	local boostParticles = Instance.new("ParticleEmitter")
+	boostParticles.Name = "BoostParticles"
+	boostParticles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	boostParticles.Color = ColorSequence.new(config.HeadColor)
+	boostParticles.Lifetime = NumberRange.new(0.5, 1)
+	boostParticles.Rate = 0  -- Start disabled
+	boostParticles.Speed = NumberRange.new(5, 10)
+	boostParticles.SpreadAngle = Vector2.new(180, 180)
+	boostParticles.VelocityInheritance = 0.7  -- Natural trailing
+	boostParticles.Drag = 3  -- Exponential decay
+	boostParticles.Size = NumberSequence.new{
+		NumberSequenceKeypoint.new(0, 0.5),
+		NumberSequenceKeypoint.new(0.5, 1),
+		NumberSequenceKeypoint.new(1, 0)
+	}
+	boostParticles.Rotation = NumberRange.new(0, 360)
+	boostParticles.RotSpeed = NumberRange.new(-180, 180)
+	boostParticles.Enabled = false
+	boostParticles.LightEmission = 1
+	boostParticles.LightInfluence = 0
+	boostParticles.ZOffset = 1
+	boostParticles.Parent = headPart
+
+	-- Eyes (smaller, integrated style like OptimizedSnakeSystem)
+	local function createEye(xOffset)
+		local eye = Instance.new("Part")
+		eye.Name = xOffset > 0 and "RightEye" or "LeftEye"
+		eye.Shape = Enum.PartType.Ball
+		eye.Material = Enum.Material.Neon
+		eye.Color = Color3.fromRGB(255, 255, 255)
+		eye.Size = Vector3.new(0.5, 0.5, 0.5)
+		eye.Transparency = 0
+		eye.CanCollide = false
+		eye.Anchored = false
+		eye:SetAttribute("AlwaysRender", true)
+		eye.Parent = parentModel
+
+		local pupil = Instance.new("Part")
+		pupil.Name = eye.Name .. "Pupil"
+		pupil.Shape = Enum.PartType.Ball
+		pupil.Material = Enum.Material.Neon
+		pupil.Color = Color3.fromRGB(0, 0, 0)
+		pupil.Size = Vector3.new(0.25, 0.25, 0.25)
+		pupil.Transparency = 0
+		pupil.CanCollide = false
+		pupil.Anchored = false
+		pupil:SetAttribute("AlwaysRender", true)
+		pupil.Parent = parentModel
+
+		-- Position relative to head
+		eye.CFrame = headPart.CFrame * CFramenew(xOffset * 0.6, 0.4, 0.6)
+		pupil.CFrame = eye.CFrame * CFramenew(0, 0, -0.15)
+
+		-- Weld to head
+		local eyeWeld = Instance.new("WeldConstraint")
+		eyeWeld.Part0 = headPart
+		eyeWeld.Part1 = eye
+		eyeWeld.Parent = headPart
+
+		local pupilWeld = Instance.new("WeldConstraint")
+		pupilWeld.Part0 = eye
+		pupilWeld.Part1 = pupil
+		pupilWeld.Parent = eye
+
+		return eye, pupil, eyeWeld, pupilWeld
+	end
+
+	local leftEye, leftPupil, leftEyeWeld, leftPupilWeld = createEye(-1)
+	local rightEye, rightPupil, rightEyeWeld, rightPupilWeld = createEye(1)
+
+	-- Selection outline (hidden by default, matching OptimizedSnakeSystem approach)
 	local headOutline = Instance.new("SelectionBox")
 	headOutline.Adornee = headPart
 	headOutline.Color3 = Color3.fromRGB(255, 255, 255)
@@ -318,79 +396,14 @@ local function createVisualHead(config, parentModel)
 	headOutline.Transparency = 1
 	headOutline.Parent = headPart
 
-	-- Eyes
-	local leftEye = Instance.new("Part")
-	leftEye.Name = "LeftEye"
-	leftEye.Size = Vector3new(0.7, 0.7, 0.7)
-	leftEye.Material = Enum.Material.Neon
-	leftEye.Color = Color3.fromRGB(255, 255, 255)
-	leftEye.Shape = Enum.PartType.Ball
-	leftEye.CanCollide = false
-	leftEye.Anchored = false
-	leftEye.Parent = headPart
-
-	local rightEye = Instance.new("Part")
-	rightEye.Name = "RightEye"
-	rightEye.Size = Vector3new(0.7, 0.7, 0.7)
-	rightEye.Material = Enum.Material.Neon
-	rightEye.Color = Color3.fromRGB(255, 255, 255)
-	rightEye.Shape = Enum.PartType.Ball
-	rightEye.CanCollide = false
-	rightEye.Anchored = false
-	rightEye.Parent = headPart
-
-	local leftPupil = Instance.new("Part")
-	leftPupil.Name = "LeftPupil"
-	leftPupil.Size = Vector3new(0.3, 0.3, 0.3)
-	leftPupil.Material = Enum.Material.Neon
-	leftPupil.Color = Color3.fromRGB(0, 0, 0)
-	leftPupil.Shape = Enum.PartType.Ball
-	leftPupil.CanCollide = false
-	leftPupil.Anchored = false
-	leftPupil.Parent = leftEye
-
-	local rightPupil = Instance.new("Part")
-	rightPupil.Name = "RightPupil"
-	rightPupil.Size = Vector3new(0.3, 0.3, 0.3)
-	rightPupil.Material = Enum.Material.Neon
-	rightPupil.Color = Color3.fromRGB(0, 0, 0)
-	rightPupil.Shape = Enum.PartType.Ball
-	rightPupil.CanCollide = false
-	rightPupil.Anchored = false
-	rightPupil.Parent = rightEye
-
-	leftEye.CFrame = headPart.CFrame * CFramenew(-0.6, 0.55, 0.8)
-	rightEye.CFrame = headPart.CFrame * CFramenew(0.6, 0.55, 0.8)
-	leftPupil.CFrame = leftEye.CFrame * CFramenew(0, 0, -0.25)
-	rightPupil.CFrame = rightEye.CFrame * CFramenew(0, 0, -0.25)
-
-	local leftEyeWeld = Instance.new("WeldConstraint")
-	leftEyeWeld.Part0 = headPart
-	leftEyeWeld.Part1 = leftEye
-	leftEyeWeld.Parent = headPart
-
-	local rightEyeWeld = Instance.new("WeldConstraint")
-	rightEyeWeld.Part0 = headPart
-	rightEyeWeld.Part1 = rightEye
-	rightEyeWeld.Parent = headPart
-
-	local leftPupilWeld = Instance.new("WeldConstraint")
-	leftPupilWeld.Part0 = leftEye
-	leftPupilWeld.Part1 = leftPupil
-	leftPupilWeld.Parent = leftEye
-
-	local rightPupilWeld = Instance.new("WeldConstraint")
-	rightPupilWeld.Part0 = rightEye
-	rightPupilWeld.Part1 = rightPupil
-	rightPupilWeld.Parent = rightEye
-
-	-- Debug UI
+	-- Debug UI (optional, can be toggled)
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "PersonalityDebug"
 	billboard.Size = UDim2.new(0, 120, 0, 36)
 	billboard.StudsOffset = Vector3.new(0, 3.5, 0)
 	billboard.AlwaysOnTop = true
 	billboard.Parent = headPart
+	billboard.Enabled = false  -- Hidden by default
 
 	local label = Instance.new("TextLabel")
 	label.Name = "PersonalityLabel"
@@ -407,6 +420,7 @@ local function createVisualHead(config, parentModel)
 		head = headPart,
 		headLight = headLight,
 		headOutline = headOutline,
+		boostParticles = boostParticles,
 		leftEye = leftEye,
 		rightEye = rightEye,
 		leftPupil = leftPupil,
@@ -422,6 +436,8 @@ end
 local function createSegment(index, position, color, config, parentModel, currentLength)
 	local segment = getSegment(config)
 	segment.Name = "AISegment" .. index
+	segment.Shape = Enum.PartType.Ball  -- Match OptimizedSnakeSystem
+	segment.Material = Enum.Material.Neon  -- Consistent material like OptimizedSnakeSystem
 
 	-- Apply growth factor based on current snake length (same as players)
 	local growthFactor = 1
@@ -429,24 +445,50 @@ local function createSegment(index, position, color, config, parentModel, curren
 		growthFactor = 1 + ((currentLength - 200) / 2800) * 1.0  -- Match moderate growth
 	end
 
-	segment.Size = config.SegmentSize * mathMin(growthFactor, 2.0)  -- Match new max
-	segment.Material = config.BodyMaterial or Enum.Material.Neon
+	-- Use base size calculation similar to OptimizedSnakeSystem
+	local BASE_SIZE = 3.5  -- Match OptimizedSnakeSystem base size
+	local segmentSize = BASE_SIZE * mathMin(growthFactor, 2.0)
+	
+	-- Apply taper for tail segments (match OptimizedSnakeSystem)
+	if currentLength and index > currentLength * 0.7 then
+		local tailProgress = (index - currentLength * 0.7) / (currentLength * 0.3)
+		segmentSize = segmentSize * (1 - tailProgress * 0.3)  -- Taper to 70% size at tail
+	end
+	
+	segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
 	segment.Color = color
 	segment.CFrame = CFramenew(position)
 	segment.Parent = parentModel
 	segment.Transparency = 0
+	segment.CanCollide = false
+	segment.CanTouch = index <= 50  -- Only first 50 segments have collision
+	segment.CanQuery = false
+	segment.Anchored = true
 
 	segment:SetAttribute("IsSnakeSegment", true)
 	segment:SetAttribute("SegmentIndex", index)
 	segment:SetAttribute("IsAISnake", true)
 
-	-- Add glow to head segments and every 10th segment for performance (same as players)
-	if index <= 30 or index % 10 == 0 then
+	-- Strategic glow placement matching OptimizedSnakeSystem
+	local GLOW_FALLOFF_START = 50
+	local shouldHaveGlow = false
+	if index <= GLOW_FALLOFF_START then
+		shouldHaveGlow = true  -- All segments up to falloff
+	elseif index <= 100 then
+		shouldHaveGlow = index % 2 == 0  -- Every other segment
+	elseif index <= 200 then
+		shouldHaveGlow = index % 3 == 0  -- Every third
+	else
+		shouldHaveGlow = index % 5 == 0  -- Every fifth
+	end
+
+	if shouldHaveGlow then
 		local light = segment:FindFirstChild("Glow") or Instance.new("PointLight")
 		light.Name = "Glow"
 		light.Color = color
-		light.Range = config.GlowRange * 0.7  -- Slightly reduced for AI
-		light.Brightness = config.GlowIntensity * 0.8  -- Slightly reduced for AI
+		light.Range = 15 * (0.9 - (index / (currentLength or 100)) * 0.1)  -- Gradual decrease
+		light.Brightness = 2 * 0.9  -- Slightly dimmer than head
+		light.Shadows = false
 		light.Enabled = true
 		light.Parent = segment
 	else
@@ -940,6 +982,21 @@ function AISnake:startBoost(duration)
 	self.IsBoosting = true
 	self.BoostEndTime = now + duration
 	self.BoostCooldown = self.BoostEndTime + mathRandom(15, 30) / 10 -- INCREASED cooldown
+
+	-- Enable boost particles if they exist
+	if self.HeadParts and self.HeadParts.boostParticles then
+		self.HeadParts.boostParticles.Enabled = true
+		-- Adjust particle rate based on mobile/desktop
+		local isMobile = game:GetService("UserInputService").TouchEnabled
+		self.HeadParts.boostParticles.Rate = isMobile and 100 or 200
+		
+		-- Disable particles when boost ends
+		task.delay(duration, function()
+			if self.HeadParts and self.HeadParts.boostParticles then
+				self.HeadParts.boostParticles.Enabled = false
+			end
+		end)
+	end
 end
 
 -- FIXED: Much smoother flee logic
@@ -1651,6 +1708,31 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		return self.PositionHistory[index]
 	end
 
+	-- Create attachment part for beams (invisible)
+	local attachmentPart = Instance.new("Part")
+	attachmentPart.Name = "AttachmentHolder"
+	attachmentPart.Size = Vector3.new(1, 1, 1)
+	attachmentPart.Transparency = 1
+	attachmentPart.CanCollide = false
+	attachmentPart.CanQuery = false
+	attachmentPart.CanTouch = false
+	attachmentPart.Anchored = true
+	attachmentPart.Position = self.Position
+	attachmentPart.Parent = self.Model
+
+	-- Store attachments and beams for seamless rendering
+	self.Attachments = {}
+	self.Beams = {}
+
+	-- Create head attachment
+	local headAttachment = Instance.new("Attachment")
+	headAttachment.Name = "Attachment0"
+	headAttachment.Parent = attachmentPart
+	self.Attachments[0] = headAttachment
+
+	-- Store head as segment 0 for consistency with OptimizedSnakeSystem
+	self.Segments[0] = self.HeadParts.head
+
 	-- FIXED: Create segments at proper positions WITHOUT GAPS
 	for i = 1, self.CurrentLength do
 		-- Start ALL segments at the SAME position to prevent gaps
@@ -1665,7 +1747,68 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 		-- Ensure segment is at exact position
 		segment.CFrame = CFramenew(pos)
+
+		-- Create attachment for this segment
+		local attachment = Instance.new("Attachment")
+		attachment.Name = "Attachment" .. i
+		attachment.Parent = attachmentPart
+		self.Attachments[i] = attachment
 	end
+
+	-- Create seamless beams between all segments (like OptimizedSnakeSystem)
+	local BEAM_TEXTURES = {
+		gradient = "rbxasset://textures/ui/LuaChat/9-slice/kit-modal-highlight.png",
+		flow = "rbxasset://textures/ui/GuiImagePlaceholder.png", 
+		energy = "rbxasset://textures/particles/sparkles_main.dds",
+		smooth = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
+	}
+
+	for i = 0, self.CurrentLength - 1 do
+		local beam = Instance.new("Beam")
+		beam.Name = "Beam" .. i
+		beam.Attachment0 = self.Attachments[i]
+		beam.Attachment1 = self.Attachments[i + 1]
+
+		-- Professional beam properties matching OptimizedSnakeSystem
+		local BASE_SIZE = 3.5
+		local beamWidth = BASE_SIZE * 0.95  -- Slightly smaller than segments
+		beam.Width0 = beamWidth
+		beam.Width1 = beamWidth
+		beam.CurveSize0 = 0
+		beam.CurveSize1 = 0
+		beam.FaceCamera = true
+		beam.Segments = 10  -- Optimal segments for smooth curves
+		beam.Texture = BEAM_TEXTURES.gradient  -- Professional gradient
+		beam.TextureMode = Enum.TextureMode.Wrap
+		beam.TextureLength = 2
+		beam.TextureSpeed = 2  -- Animated flow effect
+		beam.LightEmission = 1
+		beam.LightInfluence = 0
+		beam.Brightness = 2
+		beam.Transparency = NumberSequence.new{
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(0.5, 0),
+			NumberSequenceKeypoint.new(1, 0.1)  -- Slight fade at edges
+		}
+
+		-- Color matching
+		local color1 = self.Segments[i].Color
+		local color2 = self.Segments[i + 1].Color
+		if color1 == color2 then
+			beam.Color = ColorSequence.new(color1)
+		else
+			beam.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, color1),
+				ColorSequenceKeypoint.new(1, color2)
+			})
+		end
+
+		beam.Parent = attachmentPart
+		self.Beams[i] = beam
+	end
+
+	-- Store attachment part reference
+	self.AttachmentPart = attachmentPart
 
 	-- Spawn sequence to prevent gaps
 	task.defer(function()
@@ -1771,12 +1914,74 @@ function AISnake:grow(amount)
 			segment.Transparency = 1
 			segment.Size = Vector3new(0.1, 0.1, 0.1)
 
+			-- Create attachment for new segment
+			if self.AttachmentPart and self.Attachments then
+				local attachment = Instance.new("Attachment")
+				attachment.Name = "Attachment" .. self.CurrentLength
+				attachment.Parent = self.AttachmentPart
+				attachment.WorldPosition = newPos
+				self.Attachments[self.CurrentLength] = attachment
+
+				-- Create beam from previous segment to this new one
+				if self.CurrentLength > 1 and self.Beams then
+					local beam = Instance.new("Beam")
+					beam.Name = "Beam" .. (self.CurrentLength - 1)
+					beam.Attachment0 = self.Attachments[self.CurrentLength - 1]
+					beam.Attachment1 = attachment
+
+					-- Professional beam properties
+					local BASE_SIZE = 3.5
+					local beamWidth = BASE_SIZE * 0.95
+					beam.Width0 = beamWidth
+					beam.Width1 = beamWidth
+					beam.CurveSize0 = 0
+					beam.CurveSize1 = 0
+					beam.FaceCamera = true
+					beam.Segments = 10
+					beam.Texture = "rbxasset://textures/ui/LuaChat/9-slice/kit-modal-highlight.png"
+					beam.TextureMode = Enum.TextureMode.Wrap
+					beam.TextureLength = 2
+					beam.TextureSpeed = 2
+					beam.LightEmission = 1
+					beam.LightInfluence = 0
+					beam.Brightness = 2
+					beam.Transparency = NumberSequence.new{
+						NumberSequenceKeypoint.new(0, 0),
+						NumberSequenceKeypoint.new(0.5, 0),
+						NumberSequenceKeypoint.new(1, 0.1)
+					}
+
+					-- Color matching
+					local prevColor = self.Segments[self.CurrentLength - 1].Color
+					if prevColor == color then
+						beam.Color = ColorSequence.new(color)
+					else
+						beam.Color = ColorSequence.new({
+							ColorSequenceKeypoint.new(0, prevColor),
+							ColorSequenceKeypoint.new(1, color)
+						})
+					end
+
+					beam.Parent = self.AttachmentPart
+					self.Beams[self.CurrentLength - 1] = beam
+				end
+			end
+
 			-- Apply growth factor for the final size
 			local growthFactor = 1
 			if self.CurrentLength > 200 then
 				growthFactor = 1 + ((self.CurrentLength - 200) / 2800) * 1.0
 			end
-			local finalSize = self.Config.SegmentSize * mathMin(growthFactor, 2.0)
+			
+			-- Use base size calculation similar to OptimizedSnakeSystem
+			local BASE_SIZE = 3.5
+			local finalSize = BASE_SIZE * mathMin(growthFactor, 2.0)
+			
+			-- Apply taper for tail segments
+			if self.CurrentLength > self.CurrentLength * 0.7 then
+				local tailProgress = (self.CurrentLength - self.CurrentLength * 0.7) / (self.CurrentLength * 0.3)
+				finalSize = finalSize * (1 - tailProgress * 0.3)
+			end
 
 			task.spawn(function()
 				if not segment or not segment.Parent then return end
@@ -1787,11 +1992,11 @@ function AISnake:grow(amount)
 					t = t + RunService.Heartbeat:Wait()
 					if not segment or not segment.Parent then return end
 					local alpha = mathMin(t / growTime, 1)
-					segment.Size = startSize:Lerp(finalSize, alpha)
+					segment.Size = startSize:Lerp(Vector3new(finalSize, finalSize, finalSize), alpha)
 					segment.Transparency = 1 - alpha
 				end
 				if segment and segment.Parent then
-					segment.Size = finalSize
+					segment.Size = Vector3new(finalSize, finalSize, finalSize)
 					segment.Transparency = 0
 				end
 			end)
@@ -1808,7 +2013,7 @@ function AISnake:setConfidenceBuff()
 
 	-- REMOVED: Debug yellow outline - keep it invisible
 	-- if self.HeadParts and self.HeadParts.headOutline then
-	--	self.HeadParts.headOutline.Color3 = Color3.fromRGB(255, 255, 0)
+	--	head.HeadParts.headOutline.Color3 = Color3.fromRGB(255, 255, 0)
 	--	self.HeadParts.headOutline.LineThickness = 0.3
 	--	self.HeadParts.headOutline.Transparency = 0.3
 	-- end
@@ -1877,6 +2082,36 @@ function AISnake:Destroy()
 		end
 	end
 	self.Segments = {}
+
+	-- Clean up beams and attachments
+	if self.Beams then
+		for _, beam in pairs(self.Beams) do
+			if beam and beam.Parent then
+				pcall(function()
+					beam:Destroy()
+				end)
+			end
+		end
+		self.Beams = {}
+	end
+
+	if self.Attachments then
+		for _, attachment in pairs(self.Attachments) do
+			if attachment and attachment.Parent then
+				pcall(function()
+					attachment:Destroy()
+				end)
+			end
+		end
+		self.Attachments = {}
+	end
+
+	if self.AttachmentPart and self.AttachmentPart.Parent then
+		pcall(function()
+			self.AttachmentPart:Destroy()
+		end)
+		self.AttachmentPart = nil
+	end
 
 	-- Destroy head parts
 	if self.HeadParts then
@@ -2180,10 +2415,7 @@ function AISnake:updateMovement(dt)
 	local newHeadPos = self.Position + headOffset
 	self.HeadParts.head.CFrame = CFramelookAt(newHeadPos, newHeadPos + self.Direction)
 
-	-- ENSURE AI SNAKE HEAD STAYS INVISIBLE
-	if self.HeadParts.head.Transparency ~= 1 then
-		self.HeadParts.head.Transparency = 1
-	end
+	-- Head is now visible like OptimizedSnakeSystem (removed forced invisibility)
 
 	-- Set velocity for collision detection
 	self.HeadParts.head.AssemblyLinearVelocity = self.Direction * self.Speed
@@ -2288,6 +2520,11 @@ function AISnake:updateMovement(dt)
 	-- Update different segments on different frames to spread the load
 	local updateOffset = self._segmentUpdateFrame % segmentSkip
 
+	-- Update head attachment position
+	if self.Attachments and self.Attachments[0] then
+		self.Attachments[0].WorldPosition = self.HeadParts.head.Position
+	end
+
 	-- Update segments with adaptive skipping
 	for i = 1 + updateOffset, self.CurrentLength, segmentSkip do
 		local segment = self.Segments[i]
@@ -2318,6 +2555,23 @@ function AISnake:updateMovement(dt)
 
 				local newPos = currentSegmentPos:Lerp(segmentPos, followSpeed)
 				segment.CFrame = CFramenew(newPos)
+
+				-- Update attachment position for this segment
+				if self.Attachments and self.Attachments[i] then
+					self.Attachments[i].WorldPosition = newPos
+				end
+			end
+		end
+	end
+
+	-- Update attachment positions for skipped segments (to keep beams smooth)
+	if segmentSkip > 1 then
+		for i = 1, self.CurrentLength do
+			if i % segmentSkip ~= updateOffset then
+				local segment = self.Segments[i]
+				if segment and segment.Parent and self.Attachments and self.Attachments[i] then
+					self.Attachments[i].WorldPosition = segment.Position
+				end
 			end
 		end
 	end
