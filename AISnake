@@ -1571,7 +1571,9 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	end
 
 	local self = setmetatable({}, AISnake)
-	self.Config = deepCopy(SnakeConfig)
+	-- Use AI-specific config from SnakeConfig
+	local baseConfig = SnakeConfig.AI or SnakeConfig
+	self.Config = deepCopy(baseConfig)
 
 	-- Update map bounds if needed (in case map was created after script started)
 	updateMapBounds()
@@ -1583,15 +1585,14 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self.Config.HeadMaterial = colorData.HeadMaterial
 	self.Config.BodyMaterial = colorData.BodyMaterial
 
-	self.Position = startPosition or Vector3new(0, 5, 0)
+		self.Position = startPosition or Vector3new(0, 5, 0)
 	self.Direction = Vector3new(0, 0, 1)
-	
-	-- Use AI-specific settings if available
-	local aiConfig = self.Config.AI or {}
-	self.Speed = aiConfig.BaseSpeed or self.Config.BaseSpeed or 10
-	self.NormalSpeed = aiConfig.BaseSpeed or self.Config.BaseSpeed or 10
-	self.BoostSpeed = aiConfig.BoostSpeed or self.Config.BoostSpeed or 24
-	self.TurnSpeed = aiConfig.TurnSpeed or self.Config.TurnSpeed or 1.8
+
+	-- Use settings from config (which is now AI-specific)
+	self.Speed = self.Config.BaseSpeed or 10
+	self.NormalSpeed = self.Config.BaseSpeed or 10
+	self.BoostSpeed = self.Config.BoostSpeed or 24
+	self.TurnSpeed = self.Config.TurnSpeed or 1.8
 	
 	self.RandomTurnInterval = 1.5
 	self.LastTurn = tick()
@@ -1665,11 +1666,10 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 	self.HeadParts = createVisualHead(self.Config, self.Model)
 
-	self.Segments = {}
-	
-	-- Use AI-specific initial length
-	local aiConfig = self.Config.AI or {}
-	self.CurrentLength = aiConfig.InitialLength or self.Config.InitialLength or 10
+		self.Segments = {}
+
+	-- Use initial length from config
+	self.CurrentLength = self.Config.InitialLength or 10
 
 	-- Calculate initial growth factor
 	self.growthFactor = self:calculateGrowthFactor()
@@ -3009,14 +3009,13 @@ function AISnake:getBeamWidth(index, baseSize)
 	-- Average the two segment sizes for smooth transition
 	local avgSize = (segmentSize1 + segmentSize2) / 2
 	
-	-- Apply beam-specific taper (less than segment taper for fuller appearance)
+		-- Apply beam-specific taper (less than segment taper for fuller appearance)
 	local visibleSegmentCount = self.CurrentLength
 	local beamTaper = 1 - (index / visibleSegmentCount) * BEAM_TAPER_STRENGTH
-	
-	-- For AI snakes, use slightly smaller beam width to prevent showing outside
-	local aiConfig = self.Config.AI or {}
-	local beamWidthBase = aiConfig.BeamWidthMultiplier or BEAM_WIDTH_BASE * 0.9
-	
+
+	-- Use beam width multiplier from config
+	local beamWidthBase = self.Config.BeamWidthMultiplier or BEAM_WIDTH_BASE * 0.9
+
 	return avgSize * beamWidthBase * beamTaper
 end
 
