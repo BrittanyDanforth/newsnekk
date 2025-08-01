@@ -207,6 +207,11 @@ local function resetSegment(segment, config)
 			child:Destroy()
 		end
 	end
+	-- CRITICAL: Clear any attributes that might cause collision issues
+	segment:SetAttribute("IsSnakeSegment", false)
+	segment:SetAttribute("SegmentIndex", nil)
+	segment:SetAttribute("IsAISnake", false)
+	segment:SetAttribute("BeingDestroyed", false)
 end
 
 local function getSegment(config)
@@ -246,6 +251,16 @@ local function returnSegment(segment)
 	segment.Color = Color3.new()
 	segment.Material = Enum.Material.Neon
 	segment.Size = Vector3.new(3.5, 3.5, 4)
+	
+	-- CRITICAL: Clear collision attributes
+	segment:SetAttribute("IsSnakeSegment", false)
+	segment:SetAttribute("SegmentIndex", nil)
+	segment:SetAttribute("IsAISnake", false)
+	segment:SetAttribute("BeingDestroyed", false)
+	
+	-- CRITICAL: Move segment far away to prevent ghost collisions
+	segment.Position = Vector3new(0, -1000, 0)
+	segment.CFrame = CFramenew(0, -1000, 0)
 
 	-- Return to pool
 	segment.Parent = SEGMENT_PARENT
@@ -441,7 +456,14 @@ local function createVisualHead(config, parentModel)
 end
 
 local function createSegment(index, position, color, config, parentModel, currentLength)
+	-- SAFETY: Don't create segments for destroyed models
+	if not parentModel or not parentModel.Parent then
+		return nil
+	end
+	
 	local segment = getSegment(config)
+	if not segment then return nil end
+	
 	segment.Name = "AISegment" .. index
 	segment.Shape = Enum.PartType.Ball  -- Match OptimizedSnakeSystem
 	segment.Material = Enum.Material.Neon  -- Consistent material like OptimizedSnakeSystem
@@ -640,6 +662,10 @@ end
 
 local function isPartsColliding(partA, partB)
 	if not (partA and partA.Parent and partB and partB.Parent) then return false end
+	-- CRITICAL: Check if either part is being destroyed
+	if partA:GetAttribute("BeingDestroyed") or partB:GetAttribute("BeingDestroyed") then 
+		return false 
+	end
 	local radiusA = (partA.Size.X + partA.Size.Y + partA.Size.Z) / 6
 	local radiusB = (partB.Size.X + partB.Size.Y + partB.Size.Z) / 6
 	local dist = (partA.Position - partB.Position).Magnitude
@@ -1687,14 +1713,21 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self.growthFactor = self:calculateGrowthFactor()
 
 	-- FIXED: Proper position history initialization
-	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.2) + 20
+	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.5) + 50  -- Increased buffer
 	self.PositionHistory = table.create(self.MaxHistorySize)
-	self.HistoryHead = 1
+	self.HistoryHead = self.MaxHistorySize -- Points to the most recent entry after pre-fill
 
-	-- Initialize history at spawn position to prevent gaps
-	for i = 1, self.MaxHistorySize do
-		-- All history starts at the same position
-		self.PositionHistory[i] = { position = self.Position, lookVector = self.Direction }
+	-- CRITICAL FIX: Pre-fill history with a simulated trail
+	local currentSimulatedPos = self.Position
+	local currentSimulatedDir = self.Direction
+	local segmentSpacingForHistory = self.Config.SegmentSpacing * 0.15 -- Match spacingMultiplier from updateMovement
+
+	-- Fill the history buffer backwards from the current position
+	for i = 0, self.MaxHistorySize - 1 do
+		local historyPos = currentSimulatedPos - currentSimulatedDir * (i * segmentSpacingForHistory)
+		-- Calculate the index for the circular buffer
+		local index = (self.HistoryHead - 1 - i + self.MaxHistorySize) % self.MaxHistorySize + 1
+		self.PositionHistory[index] = { position = historyPos, lookVector = currentSimulatedDir }
 	end
 
 	function self:addToHistory(data)
@@ -1943,10 +1976,34 @@ function AISnake:grow(amount)
 				local currentBaseSize = BASE_SIZE * self.growthFactor
 				
 				local color = self:getSegmentColor(self.CurrentLength)
-				local lastSegment = self.Segments[self.CurrentLength - 1]
-				local newPos = lastSegment and lastSegment.Position or self.Position
+				
+				-- FIXED: Use position history instead of last segment position
+				-- This prevents visual glitches when growing from far away
+				local newPos
+				if self.CurrentLength > 1 then
+					-- Calculate position based on history to ensure proper spacing
+					local historyIndex = math.floor(self.CurrentLength * 1.2)
+					local historyData = self:getFromHistory(historyIndex)
+					if historyData then
+						newPos = historyData.position
+					else
+						-- Fallback to head position with offset
+						newPos = self.Position - self.Direction * (self.Config.SegmentSpacing * self.CurrentLength * 0.15)
+					end
+				else
+					newPos = self.Position
+				end
+				
 				local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength)
+				if not segment then 
+					-- Failed to create segment, revert length increase
+					self.CurrentLength = self.CurrentLength - 1
+					break
+				end
 				self.Segments[self.CurrentLength] = segment
+				
+				-- CRITICAL: Mark segment as just grown for smooth integration
+				segment:SetAttribute("JustGrown", true)
 				
 				-- Ensure segment uses correct material from our config
 				segment.Material = self.Config.BodyMaterial or Enum.Material.Neon
@@ -1961,8 +2018,19 @@ function AISnake:grow(amount)
 					local attachment = Instance.new("Attachment")
 					attachment.Name = "Attachment" .. self.CurrentLength
 					attachment.Parent = self.AttachmentPart
+					
+					-- FIXED: Ensure attachment starts at correct position
+					-- Use the same position as the segment to prevent beam stretching
 					attachment.WorldPosition = newPos
 					self.Attachments[self.CurrentLength] = attachment
+					
+					-- FIXED: Update previous attachment position before creating beam
+					if self.CurrentLength > 1 and self.Attachments[self.CurrentLength - 1] then
+						local prevSegment = self.Segments[self.CurrentLength - 1]
+						if prevSegment and prevSegment.Parent then
+							self.Attachments[self.CurrentLength - 1].WorldPosition = prevSegment.Position
+						end
+					end
 
 					-- Create beam from previous segment to this new one
 					if self.CurrentLength > 1 and self.Beams then
@@ -1970,6 +2038,17 @@ function AISnake:grow(amount)
 						beam.Name = "Beam" .. (self.CurrentLength - 1)
 						beam.Attachment0 = self.Attachments[self.CurrentLength - 1]
 						beam.Attachment1 = attachment
+						
+						-- FIXED: Start beam disabled if snake is far away
+						local camera = workspace.CurrentCamera
+						local cameraPos = camera and camera.CFrame.Position
+						if cameraPos then
+							local headDistance = (self.Position - cameraPos).Magnitude
+							if headDistance > LOD_DISTANCE_FAR then
+								beam.Enabled = false
+								beam.Transparency = NumberSequence.new(1)
+							end
+						end
 
 						-- Professional beam properties
 						local beamWidth = self:getBeamWidth(self.CurrentLength - 1, currentBaseSize)
@@ -2015,24 +2094,54 @@ function AISnake:grow(amount)
 				-- Initialize LOD state for new segment
 				self.segmentVisibility[self.CurrentLength] = true
 				self.lodStates[self.CurrentLength] = "near"
-
-				task.spawn(function()
-					if not segment or not segment.Parent then return end
-					local growTime = 0.18
-					local t = 0
-					local startSize = Vector3new(0.1, 0.1, 0.1)
-					while t < growTime do
-						t = t + RunService.Heartbeat:Wait()
-						if not segment or not segment.Parent then return end
-						local alpha = mathMin(t / growTime, 1)
-						segment.Size = startSize:Lerp(Vector3new(finalSize, finalSize, finalSize), alpha)
-						segment.Transparency = 1 - alpha
+				
+				-- FIXED: Check if snake is far away before animating
+				local shouldAnimate = true
+				local camera = workspace.CurrentCamera
+				local cameraPos = camera and camera.CFrame.Position
+				if cameraPos then
+					local headDistance = (self.Position - cameraPos).Magnitude
+					-- Don't animate growth if snake is far away
+					if headDistance > LOD_DISTANCE_MID then
+						shouldAnimate = false
 					end
-					if segment and segment.Parent then
-						segment.Size = Vector3new(finalSize, finalSize, finalSize)
+				end
+
+				if shouldAnimate then
+					task.spawn(function()
+						if not segment or not segment.Parent then return end
+						local growTime = 0.18
+						local t = 0
+						local startSize = Vector3new(0.1, 0.1, 0.1)
+						while t < growTime do
+							t = t + RunService.Heartbeat:Wait()
+							if not segment or not segment.Parent then return end
+							local alpha = mathMin(t / growTime, 1)
+							segment.Size = startSize:Lerp(Vector3new(finalSize, finalSize, finalSize), alpha)
+							segment.Transparency = 1 - alpha
+						end
+						if segment and segment.Parent then
+							segment.Size = Vector3new(finalSize, finalSize, finalSize)
+							segment.Transparency = 0
+						end
+					end)
+				else
+					-- If far away, just set final size immediately to prevent glitches
+					segment.Size = Vector3new(finalSize, finalSize, finalSize)
+					-- Apply appropriate transparency based on distance
+					if cameraPos then
+						local headDistance = (self.Position - cameraPos).Magnitude
+						if headDistance > LOD_DISTANCE_FAR then
+							segment.Transparency = 1  -- Invisible if very far
+							self.lodStates[self.CurrentLength] = "culled"
+						else
+							segment.Transparency = 0.1  -- Slightly transparent if medium distance
+							self.lodStates[self.CurrentLength] = "mid"
+						end
+					else
 						segment.Transparency = 0
 					end
-				end)
+				end
 				
 				-- Update actual segment count
 				self.actualSegmentCount = self.CurrentLength
@@ -2108,6 +2217,22 @@ function AISnake:Destroy()
 
 	-- Immediately mark as destroyed to prevent any updates
 	self._destroyed = true
+
+	-- CRITICAL: Mark all segments as being destroyed IMMEDIATELY
+	if self.HeadParts and self.HeadParts.head then
+		self.HeadParts.head:SetAttribute("BeingDestroyed", true)
+		self.HeadParts.head.CanTouch = false
+		self.HeadParts.head.CanQuery = false
+	end
+	
+	for i = 0, #self.Segments do
+		local segment = self.Segments[i]
+		if segment and segment.Parent then
+			segment:SetAttribute("BeingDestroyed", true)
+			segment.CanTouch = false
+			segment.CanQuery = false
+		end
+	end
 
 	-- Untrack snake from orb pickup system
 	if AISnakeOrbPickup then
@@ -2200,11 +2325,26 @@ function AISnake:Destroy()
 	if self.HeadParts then
 		for name, part in pairs(self.HeadParts) do
 			if typeof(part) == "Instance" and part.Parent then
+				-- Mark as being destroyed and disable collision
+				if part:IsA("BasePart") then
+					part:SetAttribute("BeingDestroyed", true)
+					part.CanTouch = false
+					part.CanQuery = false
+					part.Transparency = 1
+					
+					-- Destroy any lights
+					local light = part:FindFirstChild("Glow")
+					if light then
+						light:Destroy()
+					end
+				end
+				
 				pcall(function()
 					part:Destroy()
 				end)
 			end
 		end
+		self.HeadParts = nil
 	end
 
 	-- Destroy model and all its descendants
@@ -2213,18 +2353,37 @@ function AISnake:Destroy()
 			-- First destroy all descendants to ensure nothing is left
 			for _, descendant in ipairs(self.Model:GetDescendants()) do
 				if descendant:IsA("BasePart") then
+					-- Mark as being destroyed
+					descendant:SetAttribute("BeingDestroyed", true)
+					descendant.CanTouch = false
+					descendant.CanQuery = false
+					descendant.Transparency = 1
+					
+					-- Destroy any lights
+					local light = descendant:FindFirstChild("Glow")
+					if light then
+						light:Destroy()
+					end
+					
+					descendant:Destroy()
+				elseif descendant:IsA("PointLight") then
 					descendant:Destroy()
 				end
 			end
 			self.Model:Destroy()
 		end)
+		self.Model = nil
 	end
 
 	-- Clear all references
-	self.Model = nil
-	self.HeadParts = nil
 	self.RootPart = nil
 	self.Segments = nil
+	
+	-- Force immediate cleanup of this snake from spatial grid
+	task.spawn(function()
+		task.wait(0.1) -- Small delay to ensure destruction
+		SpatialGrid.Clear() -- Force spatial grid rebuild
+	end)
 end
 
 -- === SMOOTHER MOVEMENT (FIXED) ===
@@ -2668,6 +2827,9 @@ function AISnake:updateMovement(dt)
 			end
 			
 			local delay = mathFloor(i * 1.2)
+			-- CRITICAL FIX: Ensure delay doesn't exceed history size
+			delay = math.min(delay, self.MaxHistorySize - 5)
+			
 			local targetData = self:getFromHistory(delay)
 			if targetData then
 				-- Use EXACT same spacing as CharacterSetup
@@ -2677,7 +2839,14 @@ function AISnake:updateMovement(dt)
 				end
 				local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
 				local currentSegmentPos = segment.Position
-
+				
+				-- CRITICAL FIX: For newly grown segments, ensure smooth initial positioning
+				if segment:GetAttribute("JustGrown") then
+					-- Force immediate positioning for smooth integration
+					lodFollowSpeed = 1.0
+					segment:SetAttribute("JustGrown", false)
+				end
+				
 				-- Anti-gap check (from CharacterSetup)
 				if i > 1 then
 					local prevSegment = self.Segments[i - 1]
@@ -2745,6 +2914,10 @@ function AISnake:updateMovement(dt)
 	for _, data in nearbyEntities do
 		local otherPart = data.part
 		if otherPart == myHead then continue end
+		
+		-- CRITICAL: Skip destroyed parts
+		if not otherPart or not otherPart.Parent then continue end
+		if otherPart:GetAttribute("BeingDestroyed") then continue end
 
 		if isPartsColliding(myHead, otherPart) then
 			local otherOwner = data.owner
@@ -2752,6 +2925,11 @@ function AISnake:updateMovement(dt)
 			-- Add double-check to prevent false positives
 			if (myHead.Position - otherPart.Position).Magnitude > 5 then
 				continue  -- Skip if distance is too far (false positive)
+			end
+			
+			-- EXTRA SAFETY: Verify owner is still valid
+			if data.type == "AI_HEAD" or data.type == "AI_SEGMENT" then
+				if not otherOwner or otherOwner._destroyed then continue end
 			end
 
 			if data.type == "AI_HEAD" then
@@ -2771,7 +2949,9 @@ function AISnake:updateMovement(dt)
 			elseif data.type == "AI_SEGMENT" then
 				if otherOwner ~= self then
 					self:Destroy()
-					otherOwner:setConfidenceBuff()
+					if otherOwner and not otherOwner._destroyed then
+						otherOwner:setConfidenceBuff()
+					end
 					return
 				end
 			elseif data.type == "PLAYER_HEAD" then
@@ -2895,12 +3075,15 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 		SpatialGrid.Clear()
 
 		for _, snake in AISnake._activeSnakes do
-			if snake._active and snake.HeadParts and snake.HeadParts.head then
-				SpatialGrid.Insert(snake.HeadParts.head, snake, "AI_HEAD")
+			if snake._active and not snake._destroyed and snake.HeadParts and snake.HeadParts.head then
+				-- Skip if head is being destroyed
+				if not snake.HeadParts.head:GetAttribute("BeingDestroyed") then
+					SpatialGrid.Insert(snake.HeadParts.head, snake, "AI_HEAD")
+				end
 
 				for i = 1, #snake.Segments, 4 do
 					local segment = snake.Segments[i]
-					if segment then
+					if segment and segment.Parent and not segment:GetAttribute("BeingDestroyed") then
 						SpatialGrid.Insert(segment, snake, "AI_SEGMENT")
 					end
 				end
@@ -3180,13 +3363,25 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 		end
 	end
 	
-	-- Update segments continuously from head
+	-- Update segments with SMOOTH transitions
 	for i = 1, self.CurrentLength do
-		local segment = self.Segments[i]
-		
 		if i <= segmentsToShow then
-			-- This segment should be visible
+			-- This segment should be visible - ensure it exists first
+			local segment = self.Segments[i]
+			if not segment then
+				-- Create missing segment if within limits
+				if i <= DYNAMIC_SEGMENT_LIMIT then
+					segment = self:ensureSegmentExists(i)
+				end
+			end
+			
 			if segment and segment.Parent then
+				-- CRITICAL: Skip visibility updates for segments that just grew
+				if segment:GetAttribute("JustGrown") then
+					-- Let the growth animation handle visibility
+					continue
+				end
+				
 				-- Calculate segment-specific distance
 				local segmentDistance = (segment.Position - cameraPosition).Magnitude
 				
@@ -3323,6 +3518,8 @@ function AISnake:ensureSegmentExists(index)
 	
 	-- Create segment on demand
 	local delay = mathFloor(index * 1.2)
+	-- CRITICAL FIX: Ensure delay doesn't exceed history size
+	delay = math.min(delay, self.MaxHistorySize - 5)
 	local targetData = self:getFromHistory(delay)
 	if not targetData then
 		return nil
@@ -3403,6 +3600,71 @@ function AISnake:ensureSegmentExists(index)
 	
 	return segment
 end
+
+-- Add this function after the segment pooling section
+
+-- === ORPHANED SEGMENT CLEANUP ===
+local function cleanupOrphanedSegments()
+	-- Clean up any segments that don't belong to active snakes
+	local orphanedCount = 0
+	
+	-- Check all parts in workspace
+	for _, obj in pairs(Workspace:GetDescendants()) do
+		if obj:IsA("BasePart") and (obj.Name:match("^AISegment") or obj.Name == "Segment0_Head") then
+			-- Check if this segment belongs to an active snake
+			local belongsToActiveSnake = false
+			
+			for _, snake in pairs(AISnake._activeSnakes) do
+				if snake and snake._active and not snake._destroyed then
+					-- Check if it's the head
+					if snake.HeadParts and snake.HeadParts.head == obj then
+						belongsToActiveSnake = true
+						break
+					end
+					
+					-- Check if it's a body segment
+					for _, segment in pairs(snake.Segments) do
+						if segment == obj then
+							belongsToActiveSnake = true
+							break
+						end
+					end
+				end
+			end
+			
+			-- If it doesn't belong to any active snake, destroy it
+			if not belongsToActiveSnake and obj.Parent ~= SEGMENT_PARENT then
+				-- Mark as being destroyed first
+				obj:SetAttribute("BeingDestroyed", true)
+				obj.CanTouch = false
+				obj.CanQuery = false
+				obj.Transparency = 1
+				
+				-- Destroy any lights
+				local light = obj:FindFirstChild("Glow")
+				if light then
+					light:Destroy()
+				end
+				
+				-- Destroy the segment
+				obj:Destroy()
+				orphanedCount = orphanedCount + 1
+			end
+		end
+	end
+	
+	if orphanedCount > 0 then
+		print("🧹 Cleaned up", orphanedCount, "orphaned AI snake segments")
+	end
+end
+
+-- Run cleanup periodically
+task.spawn(function()
+	while true do
+		task.wait(15) -- Run every 15 seconds
+		cleanupOrphanedSegments()
+	end
+end)
 
 
 
