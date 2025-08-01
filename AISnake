@@ -438,8 +438,13 @@ local function createSegment(index, position, color, config, parentModel, curren
 		local light = segment:FindFirstChild("Glow") or Instance.new("PointLight")
 		light.Name = "Glow"
 		light.Color = color
+		
+		-- Use AI-specific glow settings
+		local aiConfig = config.AI or {}
+		local glowIntensity = aiConfig.GlowIntensity or 1.2
+		
 		light.Range = 15 * (0.9 - (index / (currentLength or 100)) * 0.1)  -- Gradual decrease
-		light.Brightness = 2 * 0.9  -- Slightly dimmer than head
+		light.Brightness = glowIntensity * 0.9  -- Slightly dimmer than head
 		light.Shadows = false
 		light.Enabled = true
 		light.Parent = segment
@@ -1557,10 +1562,14 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 	self.Position = startPosition or Vector3new(0, 5, 0)
 	self.Direction = Vector3new(0, 0, 1)
-	self.Speed = self.Config.BaseSpeed or 10
-	self.NormalSpeed = self.Config.BaseSpeed or 10
-	self.BoostSpeed = self.Config.BoostSpeed or 24
-	self.TurnSpeed = self.Config.TurnSpeed or 1.8 -- Better turning for orb collection
+	
+	-- Use AI-specific settings if available
+	local aiConfig = self.Config.AI or {}
+	self.Speed = aiConfig.BaseSpeed or self.Config.BaseSpeed or 10
+	self.NormalSpeed = aiConfig.BaseSpeed or self.Config.BaseSpeed or 10
+	self.BoostSpeed = aiConfig.BoostSpeed or self.Config.BoostSpeed or 24
+	self.TurnSpeed = aiConfig.TurnSpeed or self.Config.TurnSpeed or 1.8
+	
 	self.RandomTurnInterval = 1.5
 	self.LastTurn = tick()
 	self.TargetYaw = 0
@@ -1634,7 +1643,10 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self.HeadParts = createVisualHead(self.Config, self.Model)
 
 	self.Segments = {}
-	self.CurrentLength = self.Config.InitialLength
+	
+	-- Use AI-specific initial length
+	local aiConfig = self.Config.AI or {}
+	self.CurrentLength = aiConfig.InitialLength or self.Config.InitialLength or 10
 
 	-- FIXED: Proper position history initialization
 	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.2) + 20
@@ -1722,7 +1734,7 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 		-- Professional beam properties matching OptimizedSnakeSystem
 		local BASE_SIZE = 3.5
-		local beamWidth = BASE_SIZE * 0.95  -- Slightly smaller than segments
+		local beamWidth = self:getBeamWidth(i, BASE_SIZE)
 		beam.Width0 = beamWidth
 		beam.Width1 = beamWidth
 		beam.CurveSize0 = 0
@@ -1884,7 +1896,7 @@ function AISnake:grow(amount)
 
 					-- Professional beam properties
 					local BASE_SIZE = 3.5
-					local beamWidth = BASE_SIZE * 0.95
+					local beamWidth = self:getBeamWidth(self.CurrentLength - 1, BASE_SIZE)
 					beam.Width0 = beamWidth
 					beam.Width1 = beamWidth
 					beam.CurveSize0 = 0
@@ -2852,6 +2864,38 @@ function AISnake:getSegmentColor(index)
 		local colorIndex = ((index - 1) % #self.Config.BodyColors) + 1
 		return self.Config.BodyColors[colorIndex]
 	end
+end
+
+-- Calculate beam width with proper transitions (matching OptimizedSnakeSystem)
+function AISnake:getBeamWidth(index, baseSize)
+	-- Get the sizes of the two segments this beam connects
+	local segmentSize1 = baseSize -- Default size
+	local segmentSize2 = baseSize
+	
+	-- Calculate actual segment sizes including growth and taper
+	if index == 0 then
+		segmentSize1 = baseSize * 1.05  -- Head is slightly larger
+	end
+	
+	-- Apply taper for tail segments
+	local segmentCount = self.CurrentLength or 100
+	if index > segmentCount * 0.7 then
+		local tailProgress = (index - segmentCount * 0.7) / (segmentCount * 0.3)
+		segmentSize2 = baseSize * (1 - tailProgress * 0.3)
+	end
+	
+	-- Average the two segment sizes for smooth transition
+	local avgSize = (segmentSize1 + segmentSize2) / 2
+	
+	-- Apply beam-specific reduction to keep beams inside segments
+	local aiConfig = self.Config.AI or {}
+	local BEAM_WIDTH_BASE = aiConfig.BeamWidthMultiplier or 0.85  -- Use AI config or default
+	local BEAM_TAPER_STRENGTH = 0.15
+	
+	-- Apply beam taper
+	local beamTaper = 1 - (index / segmentCount) * BEAM_TAPER_STRENGTH
+	
+	return avgSize * BEAM_WIDTH_BASE * beamTaper
 end
 
 
