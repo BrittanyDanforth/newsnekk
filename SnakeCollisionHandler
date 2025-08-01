@@ -1064,6 +1064,8 @@ task.spawn(function()
 										player:SetAttribute("ReviveDeclined", true)
 									else
 										print("⏰ Revive timer expired for", player.Name)
+										-- Also set attribute for timer expiry so menu shows quickly
+										player:SetAttribute("ReviveTimerExpired", true)
 									end
 									
 									print("💀 Continuing with normal death - menu should show from humanoid.Died")
