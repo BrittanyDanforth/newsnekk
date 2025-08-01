@@ -5,6 +5,7 @@
 -- FIXED: Smooth death transition without camera disruption
 -- FIXED: Dead players can't kill others (marked with Dead attribute)
 -- FIXED: Death orbs spawn at correct height (Y=5)
+-- FIXED: Collision detection after revive (resetPlayerCollisionState)
 -- 
 -- Death Handling Features:
 --   - Dead players excluded from collision detection
@@ -66,6 +67,10 @@ local deadPlayers = {}
 local INVINCIBILITY_DURATION = 5
 local invinciblePlayers = {}
 
+-- Forward declare CollisionCache and headCache
+local CollisionCache
+local headCache
+
 local function setPlayerInvincible(player)
 	invinciblePlayers[player] = os.clock() + INVINCIBILITY_DURATION
 end
@@ -79,7 +84,7 @@ local function isPlayerInvincible(player)
 		end
 		return true
 	end
-	
+
 	-- Clean up expired invincibility
 	if expire and os.clock() >= expire then
 		invinciblePlayers[player] = nil
@@ -97,11 +102,69 @@ local function clearPlayerInvincibility(player)
 	invinciblePlayers[player] = nil
 end
 
+-- === UTILITY: Reset player collision state after revive or respawn ===
+local function resetPlayerCollisionState(player)
+	print("🔄 Resetting collision state for", player.Name)
+	
+	-- Clear dead player tracking
+	deadPlayers[player] = nil
+	
+	-- Reset character parts
+	if player.Character then
+		local root = player.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			root:SetAttribute("Dead", false)
+			root.Anchored = false
+			root.CanCollide = true
+			root.CanTouch = true
+			root.CanQuery = true
+			root.Transparency = 0
+		end
+		
+		-- Reset all parts
+		for _, part in pairs(player.Character:GetDescendants()) do
+			if part:IsA("BasePart") and part ~= root then
+				part.CanCollide = true
+				part.CanTouch = true
+				part.CanQuery = true
+				if part.Transparency < 1 then
+					part.Transparency = 0
+				end
+			elseif part:IsA("Decal") or part:IsA("Texture") then
+				if part.Transparency < 1 then
+					part.Transparency = 0
+				end
+			end
+		end
+	end
+	
+	-- Clear global snake reference
+	if _G and _G.PlayerSnakes then
+		_G.PlayerSnakes[player] = nil
+	end
+	
+	-- Clear collision caches
+	if CollisionCache then
+		CollisionCache.playerSegments[player] = nil
+		CollisionCache.spatialGrid:clear()
+		CollisionCache.frameCache = {}
+	end
+	
+	-- Force head cache refresh
+	if headCache then
+		headCache.lastUpdate = 0
+		headCache.players = {}
+		headCache.ai = {}
+	end
+	
+	print("✅ Collision state reset complete for", player.Name)
+end
+
 -- Invincibility setup (preserved from V7)
 Players.PlayerAdded:Connect(function(player)
 	player.CharacterAdded:Connect(function()
 		-- CRITICAL: Clear dead state when spawning (for revive or normal spawn)
-		deadPlayers[player] = nil
+		resetPlayerCollisionState(player)
 		
 		setPlayerInvincible(player)
 		task.spawn(function()
@@ -114,8 +177,9 @@ Players.PlayerAdded:Connect(function(player)
 		end)
 	end)
 	player.AncestryChanged:Connect(function()
-		if not player:IsDescendantOf(game) then
+		if not player.Parent then
 			clearPlayerInvincibility(player)
+			deadPlayers[player] = nil
 		end
 	end)
 end)
@@ -123,7 +187,7 @@ end)
 for _, player in Players:GetPlayers() do
 	player.CharacterAdded:Connect(function()
 		-- CRITICAL: Clear dead state when spawning
-		deadPlayers[player] = nil
+		resetPlayerCollisionState(player)
 		
 		setPlayerInvincible(player)
 		task.spawn(function()
@@ -210,7 +274,7 @@ function SpatialGrid:clear()
 end
 
 -- === COLLISION CACHE ===
-local CollisionCache = {
+CollisionCache = {
 	playerSegments = {},
 	aiSegments = {},
 	spatialGrid = SpatialGrid.new(),
@@ -280,7 +344,7 @@ local function spawnOrbDirect(position, value)
 end
 
 -- === HEAD RETRIEVAL (OPTIMIZED) ===
-local headCache = {
+headCache = {
 	players = {},
 	ai = {},
 	lastUpdate = 0
@@ -299,7 +363,7 @@ local function getPlayerHeads()
 			if deadPlayers[player] then
 				continue
 			end
-			
+
 			-- First try to get the actual snake head from the new system
 			local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
 			if snakeModel then
@@ -984,10 +1048,10 @@ task.spawn(function()
 
 								if revived then
 									print("🎉 REVIVING", player.Name)
-									
+
 									-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
 									isProcessingDeaths = false
-									
+
 									-- Revive the player
 									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
 
@@ -1008,32 +1072,16 @@ task.spawn(function()
 
 									print("📍 Revive at position:", deathPosition, "with length:", currentSnakeLength)
 
-									-- Clear dead state
-									deadPlayers[player] = nil
-									if rootPart then
-										rootPart:SetAttribute("Dead", false)
-									end
+									-- Clear dead state and reset collision state
+									resetPlayerCollisionState(player)
 
-									-- CRITICAL: Clear collision caches for fresh start
-									if CollisionCache then
-										CollisionCache.playerSegments[player] = nil
-										CollisionCache.aiSegments = {} -- Clear AI cache too
-										CollisionCache.lastAIUpdate = 0
-										CollisionCache.spatialGrid:clear() -- Clear spatial grid
-										CollisionCache.frameCache = {} -- Clear frame cache
-									end
-									-- Also clear head cache to force refresh
-									headCache.lastUpdate = 0
-									headCache.players = {}
-									headCache.ai = {}
-									
 									-- Clear from death queue if any pending
 									for i = #deathQueue, 1, -1 do
 										if deathQueue[i].type == "player" and deathQueue[i].target == player then
 											table.remove(deathQueue, i)
 										end
 									end
-									
+
 									print("🧹 Cleared collision caches for", player.Name)
 
 									-- Store revive data
@@ -1044,28 +1092,25 @@ task.spawn(function()
 									-- Simple invincibility
 									invinciblePlayers[player] = os.clock() + 5
 
-														-- Just respawn like clicking Play button
-					player:LoadCharacter()
+									-- Just respawn like clicking Play button
+									player:LoadCharacter()
 
-					-- CRITICAL: Wait for new snake to be created before clearing invincibility
-					task.spawn(function()
-						-- Wait for character to load and snake to be created
-						task.wait(2) -- Give time for snake creation
-						
-						-- Force cache refresh after snake is created
-						headCache.lastUpdate = 0
-						if CollisionCache then
-							CollisionCache.playerSegments[player] = nil
-						end
-						
-						-- Continue invincibility for remaining time
-						task.wait(3)
-						invinciblePlayers[player] = nil
-						print("✅ Invincibility ended for", player.Name)
-						
-						-- Final cache clear to ensure fresh detection
-						headCache.lastUpdate = 0
-					end)
+									-- CRITICAL: Wait for new snake to be created before clearing invincibility
+									task.spawn(function()
+										-- Wait for character to load and snake to be created
+										task.wait(2) -- Give time for snake creation
+
+										-- Force cache refresh after snake is created
+										resetPlayerCollisionState(player)
+
+										-- Continue invincibility for remaining time
+										task.wait(3)
+										invinciblePlayers[player] = nil
+										print("✅ Invincibility ended for", player.Name)
+
+										-- Final cache clear to ensure fresh detection
+										headCache.lastUpdate = 0
+									end)
 
 									return -- Don't proceed with normal death
 								end
@@ -1483,13 +1528,13 @@ RunService.Stepped:Connect(function()
 		if aiHead and aiHead.Parent then
 			local aiPos = aiHead.Position
 
+			-- Skip dead AI snakes
+			if deadAISnakes[aiHead] then
+				continue
+			end
+
 			for _, headData in ipairs(playerHeads) do
 				local player = headData.player
-				
-				-- Skip dead AI snakes
-				if deadAISnakes[aiHead] then
-					continue
-				end
 
 				if not isPlayerInvincible(player) then
 					local segmentData = getPlayerSegments(player)
@@ -1779,6 +1824,7 @@ print("🧲 FIXED: MAGNET EFFECT CLEARED ON DEATH!")
 print("⚰️ FIXED: Dead players can't kill others!")
 print("📏 FIXED: Death orbs spawn at correct height (Y=5)")
 print("✨ FIXED: Smooth death transition (no camera issues)")
+print("🔄 FIXED: Collision detection after revive (resetPlayerCollisionState)")
 print("🛡️ DEATH HANDLING:")
 print("   - Dead players marked with Dead=true attribute")
 print("   - Character moved down 10 studs + anchored")
