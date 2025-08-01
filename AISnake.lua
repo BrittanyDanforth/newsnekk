@@ -2628,13 +2628,8 @@ function AISnake:updateMovement(dt)
 	local camera = workspace.CurrentCamera
 	local cameraPos = camera and camera.CFrame.Position or self.Position
 
-	-- Update visibility checks with LOD
-	if self._segmentUpdateFrame % VISIBILITY_CHECK_INTERVAL == 0 then
-		self:updateSegmentVisibility(cameraPos)
-	end
-
-	-- Always sync beams with segments to ensure consistency
-	self:syncBeamVisibility()
+		-- LOD is now handled client-side in ClientAISnakeLOD.lua
+	-- Server no longer updates transparency or beam visibility
 
 	-- Calculate current base size with growth factor
 	local currentBaseSize = BASE_SIZE * self.growthFactor
