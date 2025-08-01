@@ -456,7 +456,14 @@ local function createVisualHead(config, parentModel)
 end
 
 local function createSegment(index, position, color, config, parentModel, currentLength)
+	-- SAFETY: Don't create segments for destroyed models
+	if not parentModel or not parentModel.Parent then
+		return nil
+	end
+	
 	local segment = getSegment(config)
+	if not segment then return nil end
+	
 	segment.Name = "AISegment" .. index
 	segment.Shape = Enum.PartType.Ball  -- Match OptimizedSnakeSystem
 	segment.Material = Enum.Material.Neon  -- Consistent material like OptimizedSnakeSystem
@@ -2235,11 +2242,26 @@ function AISnake:Destroy()
 	if self.HeadParts then
 		for name, part in pairs(self.HeadParts) do
 			if typeof(part) == "Instance" and part.Parent then
+				-- Mark as being destroyed and disable collision
+				if part:IsA("BasePart") then
+					part:SetAttribute("BeingDestroyed", true)
+					part.CanTouch = false
+					part.CanQuery = false
+					part.Transparency = 1
+					
+					-- Destroy any lights
+					local light = part:FindFirstChild("Glow")
+					if light then
+						light:Destroy()
+					end
+				end
+				
 				pcall(function()
 					part:Destroy()
 				end)
 			end
 		end
+		self.HeadParts = nil
 	end
 
 	-- Destroy model and all its descendants
@@ -2248,18 +2270,37 @@ function AISnake:Destroy()
 			-- First destroy all descendants to ensure nothing is left
 			for _, descendant in ipairs(self.Model:GetDescendants()) do
 				if descendant:IsA("BasePart") then
+					-- Mark as being destroyed
+					descendant:SetAttribute("BeingDestroyed", true)
+					descendant.CanTouch = false
+					descendant.CanQuery = false
+					descendant.Transparency = 1
+					
+					-- Destroy any lights
+					local light = descendant:FindFirstChild("Glow")
+					if light then
+						light:Destroy()
+					end
+					
+					descendant:Destroy()
+				elseif descendant:IsA("PointLight") then
 					descendant:Destroy()
 				end
 			end
 			self.Model:Destroy()
 		end)
+		self.Model = nil
 	end
 
 	-- Clear all references
-	self.Model = nil
-	self.HeadParts = nil
 	self.RootPart = nil
 	self.Segments = nil
+	
+	-- Force immediate cleanup of this snake from spatial grid
+	task.spawn(function()
+		task.wait(0.1) -- Small delay to ensure destruction
+		SpatialGrid.Clear() -- Force spatial grid rebuild
+	end)
 end
 
 -- === SMOOTHER MOVEMENT (FIXED) ===
@@ -3452,6 +3493,71 @@ function AISnake:ensureSegmentExists(index)
 	
 	return segment
 end
+
+-- Add this function after the segment pooling section
+
+-- === ORPHANED SEGMENT CLEANUP ===
+local function cleanupOrphanedSegments()
+	-- Clean up any segments that don't belong to active snakes
+	local orphanedCount = 0
+	
+	-- Check all parts in workspace
+	for _, obj in pairs(Workspace:GetDescendants()) do
+		if obj:IsA("BasePart") and (obj.Name:match("^AISegment") or obj.Name == "Segment0_Head") then
+			-- Check if this segment belongs to an active snake
+			local belongsToActiveSnake = false
+			
+			for _, snake in pairs(AISnake._activeSnakes) do
+				if snake and snake._active and not snake._destroyed then
+					-- Check if it's the head
+					if snake.HeadParts and snake.HeadParts.head == obj then
+						belongsToActiveSnake = true
+						break
+					end
+					
+					-- Check if it's a body segment
+					for _, segment in pairs(snake.Segments) do
+						if segment == obj then
+							belongsToActiveSnake = true
+							break
+						end
+					end
+				end
+			end
+			
+			-- If it doesn't belong to any active snake, destroy it
+			if not belongsToActiveSnake and obj.Parent ~= SEGMENT_PARENT then
+				-- Mark as being destroyed first
+				obj:SetAttribute("BeingDestroyed", true)
+				obj.CanTouch = false
+				obj.CanQuery = false
+				obj.Transparency = 1
+				
+				-- Destroy any lights
+				local light = obj:FindFirstChild("Glow")
+				if light then
+					light:Destroy()
+				end
+				
+				-- Destroy the segment
+				obj:Destroy()
+				orphanedCount = orphanedCount + 1
+			end
+		end
+	end
+	
+	if orphanedCount > 0 then
+		print("🧹 Cleaned up", orphanedCount, "orphaned AI snake segments")
+	end
+end
+
+-- Run cleanup periodically
+task.spawn(function()
+	while true do
+		task.wait(15) -- Run every 15 seconds
+		cleanupOrphanedSegments()
+	end
+end)
 
 
 
