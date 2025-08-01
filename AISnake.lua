@@ -74,19 +74,6 @@ local MIN_VISIBLE_SEGMENTS = 10    -- Minimum segments to show even from far awa
 local MAX_VISIBLE_SEGMENTS = 2000  -- Maximum visible segments at once
 local DYNAMIC_SEGMENT_LIMIT = 800  -- Initial physical segment creation limit
 
--- UNIFIED LOD MANAGEMENT CONSTANTS (Based on Roblox LOD Analysis)
-local UNIFIED_LOD_UPDATE_INTERVAL = 2  -- Update unified LOD every N frames
-local BEAM_QUALITY_DISTANCE_SCALAR = 200  -- Distance where beam quality starts degrading
-local BEAM_QUALITY_FALLOFF = 800  -- Distance for maximum beam quality reduction
-local MIN_BEAM_SEGMENTS = 2  -- Minimum segments to prevent beam disappearance
-local SEGMENT_SKIP_PATTERNS = {  -- Distance-based segment skipping
-	[100] = 1,   -- Show every segment under 100 studs
-	[200] = 2,   -- Show every 2nd segment at 100-200 studs
-	[400] = 3,   -- Show every 3rd segment at 200-400 studs
-	[600] = 5,   -- Show every 5th segment at 400-600 studs
-	[1000] = 10  -- Show every 10th segment beyond 600 studs
-}
-
 -- Progressive visibility percentages based on distance
 local VISIBILITY_PERCENTAGES = {
 	near = 1.0,      -- 100% of snake visible
@@ -1828,7 +1815,6 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		end
 
 		beam.Parent = attachmentPart
-		beam:SetAttribute("DesiredSegments", BEAM_SEGMENTS)  -- For LOD calculation
 		self.Beams[i] = beam
 	end
 
@@ -1837,7 +1823,6 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 	-- Track actual created segments
 	self.actualSegmentCount = initialSegmentCount
-	self._cleanupFrame = 0  -- For periodic segment cleanup
 
 	-- LOD and visibility tracking (from OptimizedSnakeSystem)
 	self.segmentVisibility = {} -- Track visibility state of each segment
@@ -2632,9 +2617,14 @@ function AISnake:updateMovement(dt)
 	local camera = workspace.CurrentCamera
 	local cameraPos = camera and camera.CFrame.Position or self.Position
 
-	-- UNIFIED LOD UPDATE (Replaces separate visibility/beam updates)
-	if self._segmentUpdateFrame % UNIFIED_LOD_UPDATE_INTERVAL == 0 then
-		self:updateUnifiedLOD(cameraPos)
+	-- Update visibility checks with LOD
+	if self._segmentUpdateFrame % VISIBILITY_CHECK_INTERVAL == 0 then
+		self:updateSegmentVisibility(cameraPos)
+	end
+
+	-- Sync beams with segment visibility
+	if self._segmentUpdateFrame % BEAM_SYNC_INTERVAL == 0 then
+		self:syncBeamVisibility()
 	end
 
 	-- Calculate current base size with growth factor
@@ -2656,8 +2646,8 @@ function AISnake:updateMovement(dt)
 		self.Attachments[0].WorldPosition = self.HeadParts.head.Position
 	end
 
-	-- Only update visible segments (CRITICAL: Include actualSegmentCount)
-	local maxSegmentToUpdate = math.min(self.visibleSegmentCount, self.actualSegmentCount or 0, DYNAMIC_SEGMENT_LIMIT)
+	-- Only update visible segments
+	local maxSegmentToUpdate = math.min(self.visibleSegmentCount, DYNAMIC_SEGMENT_LIMIT)
 
 	-- Build list of segments to update based on visibility
 	local segmentsToUpdate = {}
@@ -3143,23 +3133,14 @@ function AISnake:shouldHaveGlow(index)
 	end
 end
 
--- UNIFIED LOD SEGMENT VISIBILITY (Based on Roblox Analysis)
+-- Update visibility for all segments
 function AISnake:updateSegmentVisibility(cameraPosition)
 	if not cameraPosition then return end
 
 	-- Calculate distance from camera to snake head
 	local headDistance = (self.HeadParts.head.Position - cameraPosition).Magnitude
 
-	-- ROBLOX FIX: Implement distance-based segment reduction pattern
-	local segmentSkipPattern = 1
-	for distance, skipValue in pairs(SEGMENT_SKIP_PATTERNS) do
-		if headDistance <= distance then
-			segmentSkipPattern = skipValue
-			break
-		end
-	end
-
-	-- Calculate segments to show with skip pattern
+	-- Determine how many segments to show based on distance
 	local segmentsToShow
 	if headDistance < 200 then
 		segmentsToShow = self.CurrentLength  -- Show all
@@ -3173,14 +3154,13 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 		segmentsToShow = math.max(15, math.floor(self.CurrentLength * 0.15))  -- 15% but at least 15
 	end
 
-	-- CRITICAL: Clamp to actual segment count
-	segmentsToShow = math.min(segmentsToShow, self.CurrentLength, self.actualSegmentCount or DYNAMIC_SEGMENT_LIMIT)
+	-- Clamp to limits
+	segmentsToShow = math.min(segmentsToShow, self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
 
 	-- Always show head at full quality
 	if self.Segments[0] then
 		self:applyLODToSegment(self.Segments[0], "near", 0)
 		self.Segments[0].Transparency = 0  -- Head always fully opaque
-		self.segmentVisibility[0] = true  -- CRITICAL: Mark head as always visible
 	end
 
 	-- Update eye visibility based on head distance
@@ -3200,17 +3180,12 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 		end
 	end
 
-	-- Update segments with distance-based skip pattern
-	for i = 1, math.min(self.CurrentLength, self.actualSegmentCount or DYNAMIC_SEGMENT_LIMIT) do
+	-- Update segments continuously from head
+	for i = 1, self.CurrentLength do
 		local segment = self.Segments[i]
-		
-		-- ROBLOX FIX: Apply skip pattern based on distance
-		local shouldRender = (i <= segmentsToShow) and ((i - 1) % segmentSkipPattern == 0 or i <= FORCE_RENDER_SEGMENTS)
 
-		if shouldRender then
+		if i <= segmentsToShow then
 			-- This segment should be visible
-			self.segmentVisibility[i] = true  -- CRITICAL: Mark segment as visible
-			
 			if segment and segment.Parent then
 				-- Calculate segment-specific distance
 				local segmentDistance = (segment.Position - cameraPosition).Magnitude
@@ -3276,116 +3251,59 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	self.visibleSegmentCount = segmentsToShow
 end
 
--- UNIFIED LOD BEAM-SEGMENT SYNCHRONIZATION (FULLY FIXED - NO USERSETTINGS)
+-- Sync beam visibility with segments (Continuous visibility)
 function AISnake:syncBeamVisibility()
-	-- CRITICAL FIX: Ensure we have proper bounds
-	if not self.Segments or #self.Segments == 0 then return end
-	
-	local actualSegmentCount = self.actualSegmentCount or 0
-	local visibleSegmentCount = self.visibleSegmentCount or 0
-	
-	-- Ensure we don't exceed actual created segments
-	local maxBeamIndex = math.min(actualSegmentCount - 1, visibleSegmentCount - 1, DYNAMIC_SEGMENT_LIMIT - 1)
-	if maxBeamIndex < 0 then return end
-	
-	-- Get camera for distance calculations (works on both client and server)
-	local camera = workspace.CurrentCamera
-	local cameraPos = camera and camera.CFrame.Position or (self.Head and self.Head.Position)
-	
-	-- First pass: Disable ALL beams by default
-	for i = 0, #self.Beams do
+	-- Update main beams based on segment visibility
+	for i = 0, math.min(self.CurrentLength - 1, DYNAMIC_SEGMENT_LIMIT - 1) do
 		local beam = self.Beams[i]
 		if beam and beam.Parent then
-			beam.Enabled = false
-		end
-	end
-	
-	-- Second pass: Enable only beams that should be visible
-	for i = 0, maxBeamIndex do
-		local beam = self.Beams[i]
-		if not beam or not beam.Parent then continue end
-		
-		-- CRITICAL: Segments are 0-indexed, beams connect i to i+1
-		local seg1Index = i
-		local seg2Index = i + 1
-		
-		-- Check bounds
-		if seg1Index > actualSegmentCount or seg2Index > actualSegmentCount then
-			continue
-		end
-		
-		local seg1 = self.Segments[seg1Index]
-		local seg2 = self.Segments[seg2Index]
-		
-		-- CRITICAL: Both segments must exist and be parented
-		if not seg1 or not seg2 or not seg1.Parent or not seg2.Parent then
-			continue
-		end
-		
-		-- Check if both segments are within visible range
-		if seg1Index >= visibleSegmentCount or seg2Index >= visibleSegmentCount then
-			continue
-		end
-		
-		-- Check segment visibility states
-		local vis1 = self.segmentVisibility[seg1Index] ~= false
-		local vis2 = self.segmentVisibility[seg2Index] ~= false
-		
-		if not vis1 or not vis2 then
-			continue
-		end
-		
-		-- Get segment transparencies
-		local trans1 = seg1.Transparency or 1
-		local trans2 = seg2.Transparency or 1
-		
-		-- Only show beam if BOTH segments are sufficiently visible
-		if trans1 < 0.95 and trans2 < 0.95 then
-			beam.Enabled = true
-			
-			-- Calculate beam quality based on distance (simplified, no UserSettings)
-			if cameraPos then
-				local distance = (seg1.Position - cameraPos).Magnitude
-				local qualityScalar = math.clamp(1 - (distance / 1000), 0.2, 1)
-				
-				-- Apply beam segments
-				local desiredSegments = beam:GetAttribute("DesiredSegments") or BEAM_SEGMENTS
-				beam.Segments = math.max(MIN_BEAM_SEGMENTS or 2, math.ceil(desiredSegments * qualityScalar))
+			local seg1 = self.Segments[i]
+			local seg2 = self.Segments[i + 1]
+
+			-- Check if both segments exist and are visible
+			if seg1 and seg2 and seg1.Parent and seg2.Parent and 
+				i < self.visibleSegmentCount and 
+				self.segmentVisibility[i] ~= false and 
+				self.segmentVisibility[i + 1] ~= false then
+
+				-- Get segment transparencies
+				local trans1 = seg1.Transparency or 0
+				local trans2 = seg2.Transparency or 0
+
+				-- Only show beam if both segments are reasonably visible
+				if trans1 < 0.9 and trans2 < 0.9 then
+					beam.Enabled = true
+
+					-- Use average transparency but add a bit more for beams
+					local avgTransparency = (trans1 + trans2) / 2
+					beam.Transparency = NumberSequence.new(math.min(avgTransparency + 0.1, 0.8))
+					beam.Brightness = math.max(0.5, 2 * (1 - avgTransparency))
+				else
+					-- Hide beam if segments are too transparent
+					beam.Enabled = false
+				end
 			else
-				beam.Segments = BEAM_SEGMENTS
+				-- Hide beam if segments don't exist or are culled
+				beam.Enabled = false
 			end
-			
-			-- Synchronized transparency
-			local avgTransparency = (trans1 + trans2) / 2
-			local beamTransparency = math.min(avgTransparency + 0.05, 0.9)
-			
-			beam.Transparency = NumberSequence.new{
-				NumberSequenceKeypoint.new(0, beamTransparency),
-				NumberSequenceKeypoint.new(0.5, beamTransparency),
-				NumberSequenceKeypoint.new(1, math.min(beamTransparency + 0.1, 0.95))
-			}
-			beam.Brightness = math.max(0.5, 2 * (1 - avgTransparency))
 		end
 	end
-	
-	-- Handle overlap beams with same strict logic
+
+	-- Handle overlap beams - only show for visible segments
 	for key, beam in pairs(self.Beams) do
 		if type(key) == "string" and beam and beam.Parent then
 			if string.find(key, "overlap") then
-				beam.Enabled = false -- Default to disabled
-				
 				local index = tonumber(string.match(key, "%d+"))
-				if index and index > 0 and index <= actualSegmentCount and index < visibleSegmentCount then
+				if index and index < self.visibleSegmentCount - 2 then
 					local seg = self.Segments[index]
-					if seg and seg.Parent then
-						local segVis = self.segmentVisibility[index] ~= false
-						local segTrans = seg.Transparency or 1
-						
-						if segVis and segTrans < 0.7 then
-							beam.Enabled = true
-							beam.Transparency = NumberSequence.new(math.min(segTrans + 0.3, 0.9))
-						end
+					if seg and seg.Parent and seg.Transparency < 0.7 then
+						beam.Enabled = true
+						beam.Transparency = NumberSequence.new(math.min(seg.Transparency + 0.3, 0.9))
+					else
+						beam.Enabled = false
 					end
+				else
+					beam.Enabled = false
 				end
 			end
 		end
@@ -3482,50 +3400,10 @@ function AISnake:ensureSegmentExists(index)
 			end
 		end
 	end
-	
-	-- CRITICAL: Update actual segment count
-	self.actualSegmentCount = math.max(self.actualSegmentCount or 0, index)
 
 	return segment
 end
 
--- ROBLOX FIX: Memory-efficient segment cleanup
-function AISnake:cleanupInvisibleSegments()
-	-- Only run cleanup every 60 frames
-	self._cleanupFrame = (self._cleanupFrame or 0) + 1
-	if self._cleanupFrame % 60 ~= 0 then return end
-	
-	-- Don't cleanup segments that are close to visible range
-	local cleanupThreshold = self.visibleSegmentCount + 100
-	
-	for i = cleanupThreshold, #self.Segments do
-		local segment = self.Segments[i]
-		if segment and segment.Parent then
-			-- Return segment to pool
-			returnSegment(segment)
-			self.Segments[i] = nil
-			
-			-- Disable associated beam
-			local beam = self.Beams[i - 1]
-			if beam then
-				beam.Enabled = false
-			end
-		end
-	end
-end
 
--- UNIFIED LOD MANAGER: Synchronizes all LOD systems
-function AISnake:updateUnifiedLOD(cameraPosition)
-	-- Update segment visibility with unified logic
-	self:updateSegmentVisibility(cameraPosition)
-	
-	-- Sync beams with segments using unified logic
-	self:syncBeamVisibility()
-	
-	-- Cleanup far segments periodically
-	if self._segmentUpdateFrame and self._segmentUpdateFrame % 300 == 0 then
-		self:cleanupInvisibleSegments()
-	end
-end
 
 return AISnake
