@@ -1076,7 +1076,7 @@ end
 -- === HELPER: Get smart flee direction ===
 function AISnake:getSmartFleeDirection(threats)
 	-- Safety check for head
-	if not self.HeadParts or not self.HeadParts.head then
+	if not self.HeadParts or not self.HeadParts.head or not self.HeadParts.head.Parent then
 		return Vector3new(mathRandom(-1, 1), 0, mathRandom(-1, 1)).Unit
 	end
 
@@ -1146,6 +1146,11 @@ end
 
 -- === MUCH SMARTER AI BRAIN ===
 function AISnake:_determineAction()
+	-- Safety check for head
+	if not self.HeadParts or not self.HeadParts.head or not self.HeadParts.head.Parent then
+		return "WANDER", self.Direction
+	end
+	
 	local headPos = self.HeadParts.head.Position
 	local p = self.Personality
 	local now = tick()
@@ -1672,14 +1677,28 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		-- Wait for model to be ready
 		task.wait(0.1)
 
+		-- Check if snake was destroyed during wait
+		if self._destroyed or not self.RootPart then
+			return
+		end
+
 		-- Gradually move forward to create proper segment spacing
 		local startPos = self.Position
 		for step = 1, 20 do
+			-- Check if destroyed during loop
+			if self._destroyed or not self.RootPart then
+				break
+			end
+
 			-- Move forward slightly
 			local moveDistance = self.SegmentSpacing * 0.1
 			local newPos = self.Position + self.Direction * moveDistance
 			self.Position = newPos
-			self.RootPart.Position = newPos
+			
+			-- Only update RootPart if it still exists
+			if self.RootPart and self.RootPart.Parent then
+				self.RootPart.Position = newPos
+			end
 
 			-- Update head position
 			if self.HeadParts and self.HeadParts.head then
@@ -1694,47 +1713,51 @@ function AISnake.new(startPosition, preservedPersonalityType)
 			task.wait(0.02)
 		end
 
-		-- Clear spawn stabilization flag
-		self._spawnStabilizing = nil
+		-- Clear spawn stabilization flag (only if not destroyed)
+		if not self._destroyed then
+			self._spawnStabilizing = nil
+		end
 
 		-- CRITICAL: Reset AI state after spawn
-		self.State = "WANDER"
-		self.TargetOrb = nil
-		self.TargetSnake = nil
-		self.Avoiding = false
-		self.AvoidExpire = 0
+		if not self._destroyed then
+			self.State = "WANDER"
+			self.TargetOrb = nil
+			self.TargetSnake = nil
+			self.Avoiding = false
+			self.AvoidExpire = 0
 
-		-- Force a random initial direction
-		local randomTurn = mathRandom() * mathPi * 2
-		self.TargetYaw = randomTurn
-		self.CurrentYaw = randomTurn
-		self.Direction = Vector3new(mathSin(randomTurn), 0, mathCos(randomTurn))
+			-- Force a random initial direction
+			local randomTurn = mathRandom() * mathPi * 2
+			self.TargetYaw = randomTurn
+			self.CurrentYaw = randomTurn
+			self.Direction = Vector3new(mathSin(randomTurn), 0, mathCos(randomTurn))
 
-		-- Reset movement timers
-		self.LastTurn = tick()
-		self.BoostCooldown = tick() + 2  -- Wait before first boost
+			-- Reset movement timers
+			self.LastTurn = tick()
+			self.BoostCooldown = tick() + 2  -- Wait before first boost
 
-		-- CRITICAL: Initialize brain update time
-		self._lastBrainUpdate = tick()
+			-- CRITICAL: Initialize brain update time
+			self._lastBrainUpdate = tick()
 
-		-- Force immediate brain update
-		self:updateBrain()
+			-- Force immediate brain update
+			self:updateBrain()
 
-		-- Fade in segments
-		for i, segment in ipairs(self.Segments) do
-			if segment and segment.Parent then
-				task.spawn(function()
-					local fadeSteps = 10
-					for step = 1, fadeSteps do
-						if segment and segment.Parent then
-							segment.Transparency = 1 - (step / fadeSteps)
+			-- Fade in segments
+			for i, segment in ipairs(self.Segments) do
+				if segment and segment.Parent then
+					task.spawn(function()
+						local fadeSteps = 10
+						for step = 1, fadeSteps do
+							if segment and segment.Parent then
+								segment.Transparency = 1 - (step / fadeSteps)
+							end
+							task.wait(0.02)
 						end
-						task.wait(0.02)
-					end
-					if segment and segment.Parent then
-						segment.Transparency = 0
-					end
-				end)
+						if segment and segment.Parent then
+							segment.Transparency = 0
+						end
+					end)
+				end
 			end
 		end
 	end)
@@ -2174,78 +2197,86 @@ function AISnake:updateMovement(dt)
 
 	-- REMOVED: Stuck detection that causes teleporting
 
-	self.RootPart.Position = self.Position
-
-	local headOffset = self.Direction * 1.5
-	local newHeadPos = self.Position + headOffset
-	self.HeadParts.head.CFrame = CFramelookAt(newHeadPos, newHeadPos + self.Direction)
-
-	-- ENSURE AI SNAKE HEAD STAYS INVISIBLE
-	if self.HeadParts.head.Transparency ~= 1 then
-		self.HeadParts.head.Transparency = 1
+	-- Update RootPart position if it exists
+	if self.RootPart and self.RootPart.Parent then
+		self.RootPart.Position = self.Position
 	end
 
-	-- Set velocity for collision detection
-	self.HeadParts.head.AssemblyLinearVelocity = self.Direction * self.Speed
+	-- Update head position and properties if it exists
+	if self.HeadParts and self.HeadParts.head and self.HeadParts.head.Parent then
+		local headOffset = self.Direction * 1.5
+		local newHeadPos = self.Position + headOffset
+		self.HeadParts.head.CFrame = CFramelookAt(newHeadPos, newHeadPos + self.Direction)
+
+		-- ENSURE AI SNAKE HEAD STAYS INVISIBLE
+		if self.HeadParts.head.Transparency ~= 1 then
+			self.HeadParts.head.Transparency = 1
+		end
+
+		-- Set velocity for collision detection
+		self.HeadParts.head.AssemblyLinearVelocity = self.Direction * self.Speed
+	end
 
 	-- CHECK FOR ORB PICKUPS (including upgrade orbs)
 	-- Look for orbs in workspace directly (OrbSpawner puts them there)
-	local headPos = self.HeadParts.head.Position
-	local pickupRadius = 8  -- Increased for better upgrade orb pickup (they're bigger)
+	if self.HeadParts and self.HeadParts.head and self.HeadParts.head.Parent then
+		local headPos = self.HeadParts.head.Position
+		local pickupRadius = 8  -- Increased for better upgrade orb pickup (they're bigger)
 
-	-- Check both workspace and any orb folders
-	local orbsToCheck = {}
+		-- Check both workspace and any orb folders
+		local orbsToCheck = {}
 
-	-- Add orbs from workspace
-	for _, obj in pairs(Workspace:GetChildren()) do
-		if obj:IsA("BasePart") and (obj.Name == "Orb" or obj.Name == "UpgradeOrb" or obj.Name == "DeathOrb") then
-			table.insert(orbsToCheck, obj)
-		end
-	end
-
-	-- Also check OrbFolder if it exists
-	local orbFolder = Workspace:FindFirstChild("OrbFolder") or Workspace:FindFirstChild("Orbs")
-	if orbFolder then
-		for _, orb in pairs(orbFolder:GetChildren()) do
-			if orb:IsA("BasePart") then
-				table.insert(orbsToCheck, orb)
+		-- Add orbs from workspace
+		for _, obj in pairs(Workspace:GetChildren()) do
+			if obj:IsA("BasePart") and (obj.Name == "Orb" or obj.Name == "UpgradeOrb" or obj.Name == "DeathOrb") then
+				table.insert(orbsToCheck, obj)
 			end
 		end
-	end
 
-	-- Now check all orbs
-	for _, orb in pairs(orbsToCheck) do
-		if orb:IsA("BasePart") and orb.Parent then
-			local dist = (orb.Position - headPos).Magnitude
-
-			if dist <= pickupRadius then
-				-- Check if orb is already being collected
-				local isBeingCollected = orb:GetAttribute("BeingCollected")
-				if isBeingCollected then
-					continue -- Skip this orb
+		-- Also check OrbFolder if it exists
+		local orbFolder = Workspace:FindFirstChild("OrbFolder") or Workspace:FindFirstChild("Orbs")
+		if orbFolder then
+			for _, orb in pairs(orbFolder:GetChildren()) do
+				if orb:IsA("BasePart") then
+					table.insert(orbsToCheck, orb)
 				end
+			end
+		end
 
-				-- Mark orb as being collected to prevent double collection
-				orb:SetAttribute("BeingCollected", true)
+		-- Now check all orbs
+		for _, orb in pairs(orbsToCheck) do
+			if orb:IsA("BasePart") and orb.Parent then
+				local dist = (orb.Position - headPos).Magnitude
 
-				-- Handle all orbs the same way
-				local valueObj = orb:FindFirstChild("Value")
-				local orbValue = valueObj and valueObj.Value or 1
-
-				if orb.Name == "UpgradeOrb" then
-					-- Apply upgrade
-					if SnakeUpgrades then
-						print("🎯 AI Snake collecting upgrade orb!")
-						SnakeUpgrades.GiveUpgrade(self)
+				if dist <= pickupRadius then
+					-- Check if orb is already being collected
+					local isBeingCollected = orb:GetAttribute("BeingCollected")
+					if isBeingCollected then
+						continue -- Skip this orb
 					end
-				else
-					-- Regular orb - grow the snake
-					self:grow(orbValue)
-				end
 
-				-- Destroy the orb
-				orb:Destroy()
-				break  -- Only pick up one orb per frame
+					-- Mark orb as being collected to prevent double collection
+					orb:SetAttribute("BeingCollected", true)
+
+					-- Handle all orbs the same way
+					local valueObj = orb:FindFirstChild("Value")
+					local orbValue = valueObj and valueObj.Value or 1
+
+					if orb.Name == "UpgradeOrb" then
+						-- Apply upgrade
+						if SnakeUpgrades then
+							print("🎯 AI Snake collecting upgrade orb!")
+							SnakeUpgrades.GiveUpgrade(self)
+						end
+					else
+						-- Regular orb - grow the snake
+						self:grow(orbValue)
+					end
+
+					-- Destroy the orb
+					orb:Destroy()
+					break  -- Only pick up one orb per frame
+				end
 			end
 		end
 	end
