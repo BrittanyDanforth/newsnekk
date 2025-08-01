@@ -10,7 +10,7 @@ return {
 	SegmentGap = 3.0, -- For SnakeMovement path system
 
 	-- BODY SETTINGS (FOR AI ONLY - Players use SnakeSystemIntegration)
-	InitialLength = 100,      -- ROOT LEVEL: If AI spawns with 100, it uses this
+	InitialLength = 10,      -- AI snakes spawn with this length
 	MaxSegments = 2450,
 
 	-- ENHANCED COLORS (Default skin - better green gradient)
@@ -70,7 +70,6 @@ return {
 		BoostChance = 0.15,      -- Base chance to boost per frame
 
 		-- Growth settings
-		InitialLength = 300,     -- AI TABLE: If AI spawns with 300, it uses this!
 		MaxLength = 2000,        -- AI max length (capped for performance)
 	}
 }
