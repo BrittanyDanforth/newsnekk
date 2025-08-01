@@ -1,5 +1,8 @@
 -- AISnake Module: SMOOTH AI MOVEMENT V4.0 - FIXED ERRATIC BEHAVIOR
 -- Completely redesigned AI brain for smooth, intelligent movement
+-- NOTE: LOD (Level of Detail) system should be implemented CLIENT-SIDE
+-- The updateSegmentVisibility function currently runs on server but should be
+-- moved to a client-side script that modifies transparency locally for each player
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -3161,6 +3164,11 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	-- NEVER cull segments - always show the full snake
 	local segmentsToShow = self.CurrentLength
 	
+	-- Store previous transparencies for smooth transitions
+	if not self._prevTransparencies then
+		self._prevTransparencies = {}
+	end
+	
 	-- Update ALL segments with proper distance-based transparency
 	for i = 0, self.CurrentLength do
 		local segment = self.Segments[i]
@@ -3174,43 +3182,49 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 			local segmentDistance = (segment.Position - cameraPosition).Magnitude
 			
 			-- Progressive transparency based on distance
-			-- MUCH more gradual fading that starts further away
-			local transparency = 0
+			local targetTransparency = 0
 			
 			if i == 0 then
 				-- Head is ALWAYS fully visible
-				transparency = 0
+				targetTransparency = 0
 			else
 				-- Body segments fade based on distance
-				if segmentDistance > 3000 then
-					transparency = 0.7  -- Max transparency
+				if segmentDistance > 3500 then
+					targetTransparency = 0.75  -- Max transparency
+				elseif segmentDistance > 3000 then
+					targetTransparency = 0.7
 				elseif segmentDistance > 2500 then
-					transparency = 0.6
+					targetTransparency = 0.6
 				elseif segmentDistance > 2000 then
-					transparency = 0.5
+					targetTransparency = 0.5
 				elseif segmentDistance > 1500 then
-					transparency = 0.4
+					targetTransparency = 0.4
 				elseif segmentDistance > 1200 then
-					transparency = 0.3
+					targetTransparency = 0.3
 				elseif segmentDistance > 900 then
-					transparency = 0.2
+					targetTransparency = 0.2
 				elseif segmentDistance > 600 then
-					transparency = 0.1
+					targetTransparency = 0.1
 				elseif segmentDistance > 400 then
-					transparency = 0.05
+					targetTransparency = 0.05
 				else
-					transparency = 0  -- Fully visible when close
+					targetTransparency = 0  -- Fully visible when close
 				end
 				
 				-- Additional fade for segments far back in the snake
 				if i > self.CurrentLength * 0.7 then
 					local positionFade = (i - self.CurrentLength * 0.7) / (self.CurrentLength * 0.3)
-					transparency = math.min(0.8, transparency + positionFade * 0.2)
+					targetTransparency = math.min(0.85, targetTransparency + positionFade * 0.15)
 				end
 			end
 			
+			-- Smooth transparency transitions to prevent popping
+			local prevTrans = self._prevTransparencies[i] or targetTransparency
+			local smoothedTransparency = prevTrans + (targetTransparency - prevTrans) * 0.2
+			self._prevTransparencies[i] = smoothedTransparency
+			
 			-- Apply transparency
-			segment.Transparency = transparency
+			segment.Transparency = smoothedTransparency
 			self.segmentVisibility[i] = true
 			self.lodStates[i] = "visible"
 			
@@ -3218,7 +3232,7 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 			if i == 0 then
 				segment.CanTouch = true  -- Head always has collision
 			else
-				segment.CanTouch = (i <= 50) and (transparency < 0.7)
+				segment.CanTouch = (i <= 50) and (smoothedTransparency < 0.7)
 			end
 			segment.CanQuery = false
 			
@@ -3230,10 +3244,10 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 					glow.Enabled = true
 					glow.Brightness = GLOW_INTENSITY
 					glow.Range = GLOW_RANGE_BASE
-				elseif self:shouldHaveGlow(i) and transparency < 0.6 then
+				elseif self:shouldHaveGlow(i) and smoothedTransparency < 0.6 then
 					glow.Enabled = true
-					glow.Brightness = GLOW_INTENSITY * (1 - transparency)
-					glow.Range = GLOW_RANGE_BASE * (1 - transparency * 0.5)
+					glow.Brightness = GLOW_INTENSITY * (1 - smoothedTransparency)
+					glow.Range = GLOW_RANGE_BASE * (1 - smoothedTransparency * 0.5)
 				else
 					glow.Enabled = false
 				end
@@ -3281,10 +3295,30 @@ function AISnake:syncBeamVisibility()
 			if not seg1.Parent then seg1.Parent = self.SegmentFolder end
 			if not seg2.Parent then seg2.Parent = self.SegmentFolder end
 			
-			-- Update attachments
+			-- Update attachments smoothly
 			if self.Attachments[i] and self.Attachments[i + 1] then
-				self.Attachments[i].WorldPosition = seg1.Position
-				self.Attachments[i + 1].WorldPosition = seg2.Position
+				-- Lerp attachment positions for smooth transitions
+				local attach1 = self.Attachments[i]
+				local attach2 = self.Attachments[i + 1]
+				
+				-- Smooth position updates to prevent teleporting
+				local currentPos1 = attach1.WorldPosition
+				local currentPos2 = attach2.WorldPosition
+				local targetPos1 = seg1.Position
+				local targetPos2 = seg2.Position
+				
+				-- Only update if the distance is reasonable (prevent teleporting)
+				if (currentPos1 - targetPos1).Magnitude < 50 then
+					attach1.WorldPosition = currentPos1:Lerp(targetPos1, 0.3)
+				else
+					attach1.WorldPosition = targetPos1
+				end
+				
+				if (currentPos2 - targetPos2).Magnitude < 50 then
+					attach2.WorldPosition = currentPos2:Lerp(targetPos2, 0.3)
+				else
+					attach2.WorldPosition = targetPos2
+				end
 			end
 			
 			-- Calculate beam transparency
@@ -3292,13 +3326,23 @@ function AISnake:syncBeamVisibility()
 			local trans2 = seg2.Transparency or 0
 			local avgTrans = (trans1 + trans2) / 2
 			
-			-- Beams should be visible as long as segments are somewhat visible
-			if avgTrans < 0.8 then
+			-- Special handling for head beam
+			if i == 0 then
 				beam.Enabled = true
-				beam.Transparency = NumberSequence.new(avgTrans)
-				beam.Brightness = math.max(0.5, 2 * (1 - avgTrans))
+				beam.Transparency = NumberSequence.new(0)
+				beam.Brightness = 2
 			else
-				beam.Enabled = false
+				-- Beams should disappear when segments are faded
+				if avgTrans < 0.7 then
+					beam.Enabled = true
+					-- Make beams slightly more transparent than segments
+					local beamTrans = math.min(avgTrans + 0.1, 0.8)
+					beam.Transparency = NumberSequence.new(beamTrans)
+					beam.Brightness = math.max(0.3, 1.5 * (1 - beamTrans))
+				else
+					-- Disable beam when segments are too transparent
+					beam.Enabled = false
+				end
 			end
 		end
 	end
@@ -3316,12 +3360,15 @@ function AISnake:syncBeamVisibility()
 					if seg1 and seg2 and seg3 then
 						local avgTrans = ((seg1.Transparency or 0) + (seg2.Transparency or 0) + (seg3.Transparency or 0)) / 3
 						
-						if avgTrans < 0.75 then
+						-- Overlap beams disappear earlier
+						if avgTrans < 0.6 then
 							beam.Enabled = true
-							beam.Transparency = NumberSequence.new(math.min(0.9, avgTrans + 0.1))
+							beam.Transparency = NumberSequence.new(math.min(0.9, avgTrans + 0.3))
 						else
 							beam.Enabled = false
 						end
+					else
+						beam.Enabled = false
 					end
 				else
 					beam.Enabled = false
