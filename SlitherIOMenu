@@ -623,6 +623,19 @@ local function onCharacterAdded(character)
 		end)
 	end
 end
+
+-- Listen for forced menu show (when revive timer expires)
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local showMenuRemote = remotes:WaitForChild("ShowDeathMenu", 5)
+if showMenuRemote then
+	showMenuRemote.OnClientEvent:Connect(function()
+		print("📺 Showing death menu (revive expired/declined)")
+		-- Show the menu immediately
+		createMenu(function()
+			requestRespawn()
+		end)
+	end)
+end
 if LocalPlayer.Character then
 	onCharacterAdded(LocalPlayer.Character)
 end

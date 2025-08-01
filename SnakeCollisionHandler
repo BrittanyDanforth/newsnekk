@@ -1051,7 +1051,21 @@ task.spawn(function()
 									-- Player declined or didn't respond
 									processingRevive[player] = nil
 									
-									-- Fire normal death event
+									print("⏰ Revive timer expired or player declined")
+									
+									-- Force show the menu since the player's humanoid is already dead
+									-- Create or get ShowDeathMenu remote
+									local showMenuRemote = remotes:FindFirstChild("ShowDeathMenu")
+									if not showMenuRemote then
+										showMenuRemote = Instance.new("RemoteEvent")
+										showMenuRemote.Name = "ShowDeathMenu"
+										showMenuRemote.Parent = remotes
+									end
+									
+									-- Fire to client to show menu
+									showMenuRemote:FireClient(player)
+									
+									-- Also fire the death event for other systems
 									local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
 									if deathEvent then
 										deathEvent:Fire(player)
