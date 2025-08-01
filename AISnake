@@ -4,6 +4,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
 
 local SnakeConfig = require(ReplicatedStorage:WaitForChild("SnakeConfig"))
 local OrbUtils = require(ReplicatedStorage:WaitForChild("OrbUtils"))
@@ -24,6 +25,18 @@ pcall(function()
 	if module then
 		SnakeUpgrades = require(module)
 		-- AI Snakes can now pick up upgrade orbs
+	end
+end)
+
+-- Load AISnakeBodySetup module for V9 visual system
+local AISnakeBodySetup
+pcall(function()
+	local module = ReplicatedStorage:FindFirstChild("AISnakeBodySetup") or game.ServerScriptService:FindFirstChild("AISnakeBodySetup") or script.Parent:FindFirstChild("AISnakeBodySetup")
+	if module then
+		AISnakeBodySetup = require(module)
+		print("✅ Loaded AISnakeBodySetup for V9 visuals")
+	else
+		warn("⚠️ AISnakeBodySetup module not found - using legacy visuals")
 	end
 end)
 
@@ -936,8 +949,7 @@ function AISnake:startBoost(duration)
 		return
 	end
 
-	self.Boosting = true
-	self.IsBoosting = true
+	self:setBoosting(true)
 	self.BoostEndTime = now + duration
 	self.BoostCooldown = self.BoostEndTime + mathRandom(15, 30) / 10 -- INCREASED cooldown
 end
@@ -1164,11 +1176,11 @@ function AISnake:_determineAction()
 	end
 	if self.isConfident and now > self.confidenceEndTime then
 		self.isConfident = false
-		if self.HeadParts and self.HeadParts.headOutline then
-			self.HeadParts.headOutline.Color3 = Color3.fromRGB(255, 255, 255)
-			self.HeadParts.headOutline.LineThickness = 0.1
-			self.HeadParts.headOutline.Transparency = 1
-		end
+		-- if self.HeadParts and self.HeadParts.headOutline then
+		--	head.HeadParts.headOutline.Color3 = Color3.fromRGB(255, 255, 255)
+		--	self.HeadParts.headOutline.LineThickness = 0.1
+		--	self.HeadParts.headOutline.Transparency = 1
+		-- end
 	end
 	if self.TargetOrb and (not self.TargetOrb.Parent or now > self.TargetOrbExpire) then
 		self.TargetOrb = nil
@@ -1550,6 +1562,10 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self.Config.BodyColors = colorData.BodyColors
 	self.Config.HeadMaterial = colorData.HeadMaterial
 	self.Config.BodyMaterial = colorData.BodyMaterial
+	
+	-- Ensure V9 compatibility
+	self.Config.MaxSegments = self.Config.MaxSegments or 2450
+	self.Config.InitialLength = self.Config.InitialLength or 105
 
 	self.Position = startPosition or Vector3new(0, 5, 0)
 	self.Direction = Vector3new(0, 0, 1)
@@ -1618,18 +1634,38 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		obj:Destroy()
 	end
 
-	self.RootPart = Instance.new("Part")
-	self.RootPart.Name = "AISnakeRoot"
-	self.RootPart.Size = Vector3new(2, 2, 2)
-	self.RootPart.Anchored = true
-	self.RootPart.CanCollide = false
-	self.RootPart.Transparency = 1
-	self.RootPart.Position = self.Position
-	self.RootPart.Parent = self.Model
+	-- Use V9 visual system if available
+	if AISnakeBodySetup then
+		-- Initialize required properties for V9 system
+		self.Length = self.Config.InitialLength
+		self.actualLength = self.Config.InitialLength
+		self.targetLength = self.Config.InitialLength
+		self.positionHistory = {}
+		self.Name = "AI_" .. pType .. "_" .. mathRandom(1000, 9999)
+		
+		-- Create unified body using V9 system
+		AISnakeBodySetup.createUnifiedBody(self)
+		
+		-- The V9 system creates these for us
+		self.HeadParts = self.HeadParts or { head = self.head }
+		self.RootPart = self.head -- Use head as root part
+		
+		print("✅ AI Snake created with V9 visuals")
+	else
+		-- Fallback to legacy system
+		self.RootPart = Instance.new("Part")
+		self.RootPart.Name = "AISnakeRoot"
+		self.RootPart.Size = Vector3new(2, 2, 2)
+		self.RootPart.Anchored = true
+		self.RootPart.CanCollide = false
+		self.RootPart.Transparency = 1
+		self.RootPart.Position = self.Position
+		self.RootPart.Parent = self.Model
 
-	self.HeadParts = createVisualHead(self.Config, self.Model)
+		self.HeadParts = createVisualHead(self.Config, self.Model)
+	end
 
-	self.Segments = {}
+	self.Segments = self.segments or {}
 	self.CurrentLength = self.Config.InitialLength
 
 	-- FIXED: Proper position history initialization
@@ -1780,15 +1816,38 @@ end
 -- === OTHER METHODS (simplified) ===
 function AISnake:grow(amount)
 	amount = amount or 5
+	
+	-- Update length
+	self.CurrentLength = math.min(self.CurrentLength + amount, self.Config.MaxSegments)
+	
+	-- V9 system handles growth differently
+	if AISnakeBodySetup then
+		self.targetLength = self.CurrentLength
+		self.pendingGrowth = (self.pendingGrowth or 0) + amount
+		
+		-- Visual feedback
+		if self.head and self.headGlow then
+			local originalBrightness = self.headGlow.Brightness
+			self.headGlow.Brightness = originalBrightness * 2.5
+			
+			TweenService:Create(self.headGlow, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+				Brightness = originalBrightness
+			}):Play()
+		end
+		
+		return
+	end
+	
+	-- Legacy growth system
 	for i = 1, amount do
-		if self.CurrentLength < self.Config.MaxSegments then
-			self.CurrentLength = self.CurrentLength + 1
-			local colorIndex = ((self.CurrentLength - 1) % #self.Config.BodyColors) + 1
+		if #self.Segments < self.Config.MaxSegments then
+			local segmentIndex = #self.Segments + 1
+			local colorIndex = ((segmentIndex - 1) % #self.Config.BodyColors) + 1
 			local color = self.Config.BodyColors[colorIndex]
 			local lastSegment = self.Segments[#self.Segments]
 			local newPos = lastSegment and lastSegment.Position or self.Position
-			local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength)
-			self.Segments[self.CurrentLength] = segment
+			local segment = createSegment(segmentIndex, newPos, color, self.Config, self.Model, segmentIndex)
+			self.Segments[segmentIndex] = segment
 
 			-- Match CharacterSetup's segment growth exactly
 			segment.Transparency = 1
@@ -1831,10 +1890,24 @@ function AISnake:setConfidenceBuff()
 
 	-- REMOVED: Debug yellow outline - keep it invisible
 	-- if self.HeadParts and self.HeadParts.headOutline then
-	--	self.HeadParts.headOutline.Color3 = Color3.fromRGB(255, 255, 0)
+	--	head.HeadParts.headOutline.Color3 = Color3.fromRGB(255, 255, 0)
 	--	self.HeadParts.headOutline.LineThickness = 0.3
 	--	self.HeadParts.headOutline.Transparency = 0.3
 	-- end
+end
+
+function AISnake:setBoosting(boosting)
+	self.Boosting = boosting
+	self.IsBoosting = boosting
+	self.isBoosting = boosting -- V9 system uses lowercase
+	
+	if boosting then
+		self.Speed = self.BoostSpeed
+		self.BoostEndTime = tick() + 2
+		self.BoostCooldown = tick() + 5
+	else
+		self.Speed = self.NormalSpeed
+	end
 end
 
 function AISnake:Destroy()
@@ -1914,6 +1987,13 @@ function AISnake:Destroy()
 
 	-- Destroy model and all its descendants
 	if self.Model and self.Model.Parent then
+		-- Clean up V9 visuals first
+		if AISnakeBodySetup then
+			pcall(function()
+				AISnakeBodySetup.cleanup(self)
+			end)
+		end
+		
 		pcall(function()
 			-- First destroy all descendants to ensure nothing is left
 			for _, descendant in ipairs(self.Model:GetDescendants()) do
@@ -2119,8 +2199,7 @@ function AISnake:updateMovement(dt)
 
 	-- Boost management
 	if self.Boosting and now > self.BoostEndTime then
-		self.Boosting = false
-		self.IsBoosting = false
+		self:setBoosting(false)
 	end
 
 	-- SMART boost usage - less boosting when collecting orbs
@@ -2300,6 +2379,38 @@ function AISnake:updateMovement(dt)
 			end
 		end
 		self:addToHistory({ position = self.Position, lookVector = self.Direction })
+	end
+
+	-- Update V9 visual system if available
+	if AISnakeBodySetup then
+		-- Update visual animations
+		self.glowPulsePhase = (self.glowPulsePhase or 0) + dt * 2
+		self.beamAnimationOffset = (self.beamAnimationOffset or 0) + dt * 2
+		
+		-- Update rainbow mode if enabled
+		if self.rainbowMode then
+			self.currentHue = (self.currentHue or 0) + dt * 0.2
+		end
+		
+		-- Smooth length interpolation
+		if self.actualLength ~= self.targetLength then
+			local diff = self.targetLength - self.actualLength
+			self.actualLength = self.actualLength + diff * 0.15
+			
+			if math.abs(diff) > 0.1 then
+				self.isGrowing = true
+				self.growthStartTime = self.growthStartTime or tick()
+			else
+				self.actualLength = self.targetLength
+				self.isGrowing = false
+			end
+		end
+		
+		-- Update visual body
+		AISnakeBodySetup.updateUnifiedBody(self)
+		
+		-- Legacy segments no longer need updating if using V9
+		return
 	end
 
 	-- Segment following (OPTIMIZED)
