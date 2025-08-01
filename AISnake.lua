@@ -3158,10 +3158,10 @@ end
 function AISnake:updateSegmentVisibility(cameraPosition)
 	if not cameraPosition then return end
 	
-	-- Calculate distance from camera to snake head
+	-- Calculate distance from camera to snake head - this is the key distance
 	local headDistance = (self.HeadParts.head.Position - cameraPosition).Magnitude
 	
-	-- ALWAYS show ALL segments up to the limit - no culling based on distance
+	-- ALWAYS show ALL segments up to the limit
 	local segmentsToShow = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
 	
 	-- Update ALL segments
@@ -3169,55 +3169,78 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 		local segment = self.Segments[i]
 		if segment and segment.Parent then
 			if i <= segmentsToShow then
-				-- Calculate transparency based on distance only
-				local segmentDistance = (segment.Position - cameraPosition).Magnitude
-				
-				-- Simple transparency calculation - NEVER fully invisible
-				local transparency = 0
-				if segmentDistance > 1500 then
-					transparency = 0.6  -- Max 60% transparent
-				elseif segmentDistance > 1000 then
-					transparency = 0.4
-				elseif segmentDistance > 600 then
-					transparency = 0.2
-				elseif segmentDistance > 300 then
-					transparency = 0.1
-				else
-					transparency = 0  -- Fully opaque when close
-				end
-				
-				-- Apply transparency
-				segment.Transparency = transparency
-				self.segmentVisibility[i] = true
-				self.lodStates[i] = "visible"
-				
-				-- Collision is ALWAYS based on segment index, not transparency
-				segment.CanTouch = (i <= 50)  -- Only first 50 segments can collide
-				segment.CanQuery = false  -- Never needed for AI snakes
-				
-				-- Update glow
-				local glow = segment:FindFirstChild("Glow")
-				if glow then
-					if self:shouldHaveGlow(i) and transparency < 0.4 then
+				-- Head (segment 0) is ALWAYS fully visible
+				if i == 0 then
+					segment.Transparency = 0
+					self.segmentVisibility[i] = true
+					self.lodStates[i] = "visible"
+					segment.CanTouch = true
+					segment.CanQuery = false
+					
+					-- Head glow always on
+					local glow = segment:FindFirstChild("Glow")
+					if glow then
 						glow.Enabled = true
-						glow.Brightness = GLOW_INTENSITY * (1 - transparency)
-						glow.Range = GLOW_RANGE_BASE * (1 - transparency * 0.5)
+						glow.Brightness = GLOW_INTENSITY
+						glow.Range = GLOW_RANGE_BASE
+					end
+				else
+					-- Calculate transparency for body segments
+					local segmentDistance = (segment.Position - cameraPosition).Magnitude
+					
+					-- More gradual transparency with adjusted distances for elevated camera
+					local transparency = 0
+					if segmentDistance > 2000 then
+						transparency = 0.6  -- Max 60% transparent
+					elseif segmentDistance > 1500 then
+						transparency = 0.5
+					elseif segmentDistance > 1000 then
+						transparency = 0.4
+					elseif segmentDistance > 700 then
+						transparency = 0.3
+					elseif segmentDistance > 500 then
+						transparency = 0.2
+					elseif segmentDistance > 300 then
+						transparency = 0.1
 					else
-						glow.Enabled = false
+						transparency = 0  -- Fully opaque when close
+					end
+					
+					-- Apply transparency
+					segment.Transparency = transparency
+					self.segmentVisibility[i] = true
+					self.lodStates[i] = "visible"
+					
+					-- Collision for first 50 segments
+					segment.CanTouch = (i <= 50)
+					segment.CanQuery = false
+					
+					-- Update glow
+					local glow = segment:FindFirstChild("Glow")
+					if glow then
+						if self:shouldHaveGlow(i) and transparency < 0.5 then
+							glow.Enabled = true
+							glow.Brightness = GLOW_INTENSITY * (1 - transparency)
+							glow.Range = GLOW_RANGE_BASE * (1 - transparency * 0.5)
+						else
+							glow.Enabled = false
+						end
 					end
 				end
 			else
-				-- Segments beyond limit are completely removed from rendering
-				segment.Parent = nil  -- Remove from workspace
+				-- Segments beyond limit are removed from rendering
+				segment.Parent = nil
 				self.segmentVisibility[i] = false
 				self.lodStates[i] = "removed"
 			end
 		end
 	end
 	
-	-- Update eye visibility based on distance only
+	-- Head parts (eyes, pupils) visibility based on camera distance
 	if self.HeadParts then
-		local eyeTransparency = headDistance > 400 and 1 or 0
+		-- Eyes visible when reasonably close
+		local eyeTransparency = headDistance > 500 and 1 or 0
+		
 		if self.HeadParts.leftEye then
 			self.HeadParts.leftEye.Transparency = eyeTransparency
 		end
@@ -3229,6 +3252,11 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 		end
 		if self.HeadParts.rightPupil then
 			self.HeadParts.rightPupil.Transparency = eyeTransparency
+		end
+		
+		-- Ensure head is always visible
+		if self.HeadParts.head then
+			self.HeadParts.head.Transparency = 0
 		end
 	end
 	
@@ -3252,11 +3280,21 @@ function AISnake:syncBeamVisibility()
 					self.Attachments[i + 1].WorldPosition = seg2.Position
 				end
 				
-				-- Beam visibility matches segment visibility exactly
-				local avgTrans = (seg1.Transparency + seg2.Transparency) / 2
-				beam.Enabled = true
-				beam.Transparency = NumberSequence.new(avgTrans)
-				beam.Brightness = math.max(1, 2 * (1 - avgTrans))
+				-- Special handling for head beam (index 0)
+				if i == 0 then
+					beam.Enabled = true
+					beam.Transparency = NumberSequence.new(0)  -- Head beam always fully visible
+					beam.Brightness = 2
+				else
+					-- Body beams match segment transparency
+					local avgTrans = (seg1.Transparency + seg2.Transparency) / 2
+					beam.Enabled = avgTrans < 0.9  -- Only disable if nearly invisible
+					
+					if beam.Enabled then
+						beam.Transparency = NumberSequence.new(avgTrans)
+						beam.Brightness = math.max(1, 2 * (1 - avgTrans))
+					end
+				end
 			else
 				-- If either segment is removed, disable beam
 				beam.Enabled = false
@@ -3276,8 +3314,10 @@ function AISnake:syncBeamVisibility()
 					
 					if seg and seg.Parent and seg2 and seg2.Parent and seg3 and seg3.Parent then
 						local avgTrans = (seg.Transparency + seg2.Transparency + seg3.Transparency) / 3
-						beam.Enabled = true
-						beam.Transparency = NumberSequence.new(math.min(0.8, avgTrans + 0.2))
+						beam.Enabled = avgTrans < 0.8
+						if beam.Enabled then
+							beam.Transparency = NumberSequence.new(math.min(0.8, avgTrans + 0.2))
+						end
 					else
 						beam.Enabled = false
 					end
