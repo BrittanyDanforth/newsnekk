@@ -267,6 +267,9 @@ local function getOrCreateSnakeModel(aiId)
 	end
 	local model = Instance.new("Model")
 	model.Name = modelName
+	-- CRITICAL: Set streaming properties to prevent culling
+	model:SetAttribute("AlwaysRender", true)
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
 	model.Parent = Workspace
 	return model
 end
@@ -370,6 +373,9 @@ local function createVisualHead(config, parentModel)
 	headPart.BottomSurface = Enum.SurfaceType.Smooth
 	headPart.Transparency = 0  -- Head is visible as first segment
 	headPart.Parent = parentModel
+	
+	-- CRITICAL: Force head to always render regardless of distance
+	headPart:SetAttribute("AlwaysRender", true)
 
 	-- Professional head glow matching OptimizedSnakeSystem
 	local headLight = Instance.new("PointLight")
@@ -465,6 +471,7 @@ local function createSegment(index, position, color, config, parentModel, curren
 	segment:SetAttribute("IsSnakeSegment", true)
 	segment:SetAttribute("SegmentIndex", index)
 	segment:SetAttribute("IsAISnake", true)
+	segment:SetAttribute("AlwaysRender", true)  -- Force render regardless of distance
 
 	-- Strategic glow placement matching OptimizedSnakeSystem
 	local shouldHaveGlow = false
@@ -1820,6 +1827,7 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		end
 
 		beam.Parent = attachmentPart
+		beam:SetAttribute("AlwaysRender", true)  -- Force beam to always render
 		self.Beams[i] = beam
 	end
 
@@ -2016,6 +2024,7 @@ function AISnake:grow(amount)
 						end
 
 						beam.Parent = self.AttachmentPart
+						beam:SetAttribute("AlwaysRender", true)  -- Force beam to always render
 						self.Beams[self.CurrentLength - 1] = beam
 					end
 				end
@@ -3211,6 +3220,7 @@ function AISnake:ensureSegmentExists(index)
 			end
 			
 			beam.Parent = self.AttachmentPart
+			beam:SetAttribute("AlwaysRender", true)  -- Force beam to always render
 			self.Beams[index - 1] = beam
 			
 			-- Initialize beam transparency tracking

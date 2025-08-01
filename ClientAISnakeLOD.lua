@@ -235,13 +235,10 @@ local function updateLOD()
 	if now - lastUpdate < LOD_UPDATE_RATE then return end
 	lastUpdate = now
 	
-	-- Find all AI snakes
-	local snakesFolder = workspace:FindFirstChild("AISnakes")
-	if snakesFolder then
-		for _, snakeModel in pairs(snakesFolder:GetChildren()) do
-			if snakeModel:IsA("Model") then
-				processAISnake(snakeModel)
-			end
+	-- Find all AI snakes (they're directly in workspace with name pattern)
+	for _, obj in pairs(workspace:GetChildren()) do
+		if obj:IsA("Model") and string.find(obj.Name, "AISnakeModel_") then
+			processAISnake(obj)
 		end
 	end
 	
