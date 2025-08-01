@@ -69,7 +69,7 @@ return {
 		BoostChance = 0.15,      -- Base chance to boost per frame
 		
 		-- Growth settings
-		InitialLength = 100,     -- AI starts with reasonable length
+		InitialLength = 500,     -- AI starts with 500 for testing long snakes
 		MaxLength = 2000,        -- AI max length (capped for performance)
 	}
 }
