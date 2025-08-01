@@ -291,8 +291,9 @@ local function createVisualHead(config, parentModel)
 	local BASE_SIZE = 3.5  -- Match OptimizedSnakeSystem base size
 	local HEAD_SIZE_MULTIPLIER = 1.05  -- Slightly larger than body segments
 	
+	-- HEAD IS NOW SEGMENT 0 - Part of the unified body
 	local headPart = Instance.new("Part")
-	headPart.Name = "AISnakeHead"
+	headPart.Name = "Segment0_Head"  -- Match OptimizedSnakeSystem naming
 	headPart.Size = Vector3.new(BASE_SIZE * HEAD_SIZE_MULTIPLIER, BASE_SIZE * HEAD_SIZE_MULTIPLIER, BASE_SIZE * HEAD_SIZE_MULTIPLIER)
 	headPart.Material = Enum.Material.Neon  -- Consistent with OptimizedSnakeSystem
 	headPart.Color = config.HeadColor
@@ -303,10 +304,8 @@ local function createVisualHead(config, parentModel)
 	headPart.Anchored = true
 	headPart.TopSurface = Enum.SurfaceType.Smooth
 	headPart.BottomSurface = Enum.SurfaceType.Smooth
+	headPart.Transparency = 0  -- Head is visible as first segment
 	headPart.Parent = parentModel
-
-	-- Match OptimizedSnakeSystem's transparency approach
-	headPart.Transparency = 0  -- Keep head visible (it's the first segment)
 
 	-- Professional head glow matching OptimizedSnakeSystem
 	local headLight = Instance.new("PointLight")
@@ -341,7 +340,7 @@ local function createVisualHead(config, parentModel)
 	boostParticles.ZOffset = 1
 	boostParticles.Parent = headPart
 
-	-- Eyes (smaller, integrated style like OptimizedSnakeSystem)
+	-- Eyes (smaller, integrated style like OptimizedSnakeSystem - ANCHORED, NOT WELDED)
 	local function createEye(xOffset)
 		local eye = Instance.new("Part")
 		eye.Name = xOffset > 0 and "RightEye" or "LeftEye"
@@ -351,9 +350,9 @@ local function createVisualHead(config, parentModel)
 		eye.Size = Vector3.new(0.5, 0.5, 0.5)
 		eye.Transparency = 0
 		eye.CanCollide = false
-		eye.Anchored = false
+		eye.Anchored = true  -- ANCHORED like OptimizedSnakeSystem
 		eye:SetAttribute("AlwaysRender", true)
-		eye.Parent = parentModel
+		eye.Parent = parentModel  -- Parent to model, not head
 
 		local pupil = Instance.new("Part")
 		pupil.Name = eye.Name .. "Pupil"
@@ -363,73 +362,26 @@ local function createVisualHead(config, parentModel)
 		pupil.Size = Vector3.new(0.25, 0.25, 0.25)
 		pupil.Transparency = 0
 		pupil.CanCollide = false
-		pupil.Anchored = false
+		pupil.Anchored = true  -- ANCHORED like OptimizedSnakeSystem
 		pupil:SetAttribute("AlwaysRender", true)
-		pupil.Parent = parentModel
+		pupil.Parent = parentModel  -- Parent to model, not eye
 
-		-- Position relative to head
-		eye.CFrame = headPart.CFrame * CFramenew(xOffset * 0.6, 0.4, 0.6)
-		pupil.CFrame = eye.CFrame * CFramenew(0, 0, -0.15)
-
-		-- Weld to head
-		local eyeWeld = Instance.new("WeldConstraint")
-		eyeWeld.Part0 = headPart
-		eyeWeld.Part1 = eye
-		eyeWeld.Parent = headPart
-
-		local pupilWeld = Instance.new("WeldConstraint")
-		pupilWeld.Part0 = eye
-		pupilWeld.Part1 = pupil
-		pupilWeld.Parent = eye
-
-		return eye, pupil, eyeWeld, pupilWeld
+		return eye, pupil
 	end
 
-	local leftEye, leftPupil, leftEyeWeld, leftPupilWeld = createEye(-1)
-	local rightEye, rightPupil, rightEyeWeld, rightPupilWeld = createEye(1)
+	local leftEye, leftPupil = createEye(-1)
+	local rightEye, rightPupil = createEye(1)
 
-	-- Selection outline (hidden by default, matching OptimizedSnakeSystem approach)
-	local headOutline = Instance.new("SelectionBox")
-	headOutline.Adornee = headPart
-	headOutline.Color3 = Color3.fromRGB(255, 255, 255)
-	headOutline.LineThickness = 0.1
-	headOutline.Transparency = 1
-	headOutline.Parent = headPart
-
-	-- Debug UI (optional, can be toggled)
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "PersonalityDebug"
-	billboard.Size = UDim2.new(0, 120, 0, 36)
-	billboard.StudsOffset = Vector3.new(0, 3.5, 0)
-	billboard.AlwaysOnTop = true
-	billboard.Parent = headPart
-	billboard.Enabled = false  -- Hidden by default
-
-	local label = Instance.new("TextLabel")
-	label.Name = "PersonalityLabel"
-	label.Size = UDim2.new(1, 0, 1, 0)
-	label.BackgroundTransparency = 1
-	label.TextColor3 = Color3.fromRGB(255,255,255)
-	label.TextStrokeTransparency = 0.4
-	label.TextScaled = true
-	label.Font = Enum.Font.GothamBold
-	label.Text = ""
-	label.Parent = billboard
+	-- Remove selection outline and debug UI - not in OptimizedSnakeSystem
 
 	return {
 		head = headPart,
 		headLight = headLight,
-		headOutline = headOutline,
 		boostParticles = boostParticles,
 		leftEye = leftEye,
 		rightEye = rightEye,
 		leftPupil = leftPupil,
 		rightPupil = rightPupil,
-		leftEyeWeld = leftEyeWeld,
-		rightEyeWeld = rightEyeWeld,
-		leftPupilWeld = leftPupilWeld,
-		rightPupilWeld = rightPupilWeld,
-		debugLabel = label,
 	}
 end
 
@@ -1737,8 +1689,7 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	for i = 1, self.CurrentLength do
 		-- Start ALL segments at the SAME position to prevent gaps
 		local pos = self.Position
-		local colorIndex = ((i - 1) % #self.Config.BodyColors) + 1
-		local color = self.Config.BodyColors[colorIndex]
+		local color = self:getSegmentColor(i)  -- Use the new function
 		local segment = createSegment(i, pos, color, self.Config, self.Model, i)
 		self.Segments[i] = segment
 
@@ -1791,16 +1742,19 @@ function AISnake.new(startPosition, preservedPersonalityType)
 			NumberSequenceKeypoint.new(1, 0.1)  -- Slight fade at edges
 		}
 
-		-- Color matching
-		local color1 = self.Segments[i].Color
-		local color2 = self.Segments[i + 1].Color
-		if color1 == color2 then
-			beam.Color = ColorSequence.new(color1)
-		else
+		-- Color matching with smooth transitions
+		if i == 0 then
+			-- Head to first segment - smooth color transition
+			local headColor = self:getSegmentColor(0)
+			local seg1Color = self:getSegmentColor(1)
 			beam.Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, color1),
-				ColorSequenceKeypoint.new(1, color2)
+				ColorSequenceKeypoint.new(0, headColor),
+				ColorSequenceKeypoint.new(0.3, headColor:Lerp(seg1Color, 0.3)),
+				ColorSequenceKeypoint.new(0.7, headColor:Lerp(seg1Color, 0.7)),
+				ColorSequenceKeypoint.new(1, seg1Color)
 			})
+		else
+			beam.Color = ColorSequence.new(self:getSegmentColor(i))
 		end
 
 		beam.Parent = attachmentPart
@@ -1903,8 +1857,7 @@ function AISnake:grow(amount)
 	for i = 1, amount do
 		if self.CurrentLength < self.Config.MaxSegments then
 			self.CurrentLength = self.CurrentLength + 1
-			local colorIndex = ((self.CurrentLength - 1) % #self.Config.BodyColors) + 1
-			local color = self.Config.BodyColors[colorIndex]
+			local color = self:getSegmentColor(self.CurrentLength)  -- Use the function
 			local lastSegment = self.Segments[#self.Segments]
 			local newPos = lastSegment and lastSegment.Position or self.Position
 			local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength)
@@ -1952,13 +1905,14 @@ function AISnake:grow(amount)
 					}
 
 					-- Color matching
-					local prevColor = self.Segments[self.CurrentLength - 1].Color
-					if prevColor == color then
-						beam.Color = ColorSequence.new(color)
+					local prevColor = self:getSegmentColor(self.CurrentLength - 1)
+					local currColor = self:getSegmentColor(self.CurrentLength)
+					if prevColor == currColor then
+						beam.Color = ColorSequence.new(currColor)
 					else
 						beam.Color = ColorSequence.new({
 							ColorSequenceKeypoint.new(0, prevColor),
-							ColorSequenceKeypoint.new(1, color)
+							ColorSequenceKeypoint.new(1, currColor)
 						})
 					end
 
@@ -2415,6 +2369,27 @@ function AISnake:updateMovement(dt)
 	local newHeadPos = self.Position + headOffset
 	self.HeadParts.head.CFrame = CFramelookAt(newHeadPos, newHeadPos + self.Direction)
 
+	-- Update eyes position (match OptimizedSnakeSystem)
+	if self.HeadParts.leftEye and self.HeadParts.rightEye then
+		local headCF = self.HeadParts.head.CFrame
+		local headSize = self.HeadParts.head.Size.X
+		local eyeScale = headSize / 3.5 * 0.5  -- BASE_SIZE = 3.5
+		local eyeOffset = headSize * 0.3
+		local eyeForward = -headSize * 0.35
+
+		-- Update eye sizes
+		self.HeadParts.leftEye.Size = Vector3.new(eyeScale, eyeScale, eyeScale)
+		self.HeadParts.rightEye.Size = Vector3.new(eyeScale, eyeScale, eyeScale)
+		self.HeadParts.leftPupil.Size = Vector3.new(eyeScale * 0.5, eyeScale * 0.5, eyeScale * 0.5)
+		self.HeadParts.rightPupil.Size = Vector3.new(eyeScale * 0.5, eyeScale * 0.5, eyeScale * 0.5)
+
+		-- Position eyes
+		self.HeadParts.leftEye.CFrame = headCF * CFramenew(-eyeOffset, eyeOffset * 0.5, eyeForward)
+		self.HeadParts.rightEye.CFrame = headCF * CFramenew(eyeOffset, eyeOffset * 0.5, eyeForward)
+		self.HeadParts.leftPupil.CFrame = self.HeadParts.leftEye.CFrame * CFramenew(0, 0, -eyeScale * 0.3)
+		self.HeadParts.rightPupil.CFrame = self.HeadParts.rightEye.CFrame * CFramenew(0, 0, -eyeScale * 0.3)
+	end
+
 	-- Head is now visible like OptimizedSnakeSystem (removed forced invisibility)
 
 	-- Set velocity for collision detection
@@ -2862,6 +2837,22 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 		AISnake._brainUpdateIndex = AISnake._brainUpdateIndex + 1
 	end
 end)
+
+-- Get segment color matching OptimizedSnakeSystem
+function AISnake:getSegmentColor(index)
+	-- For AI snakes, we don't have rainbow mode, but we need the color logic
+	if index == 0 then
+		return self.Config.HeadColor or self.Config.BodyColors[1]
+	elseif index <= 8 then  -- HEAD_BLEND_SEGMENTS = 8
+		local blendFactor = (index / 8) ^ 0.7
+		local headColor = self.Config.HeadColor or self.Config.BodyColors[1]
+		local bodyColor = self.Config.BodyColors[1]
+		return headColor:Lerp(bodyColor, blendFactor)
+	else
+		local colorIndex = ((index - 1) % #self.Config.BodyColors) + 1
+		return self.Config.BodyColors[colorIndex]
+	end
+end
 
 
 
