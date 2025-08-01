@@ -690,35 +690,43 @@ local function onCharacterAdded(character)
 	end
 end
 
--- Listen for forced menu show (when revive timer expires)
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local showMenuRemote = remotes:WaitForChild("ShowDeathMenu", 5)
-if showMenuRemote then
-	showMenuRemote.OnClientEvent:Connect(function()
-		print("📺 Showing death menu (revive expired/declined)")
-		-- Show the menu immediately
-		createMenu(function()
-			requestRespawn()
-		end)
-	end)
-end
-
 if LocalPlayer.Character then
 	onCharacterAdded(LocalPlayer.Character)
 end
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
 -- Listen for forced menu show (when revive timer expires)
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local showMenuRemote = remotes:WaitForChild("ShowDeathMenu", 5)
-if showMenuRemote then
-	showMenuRemote.OnClientEvent:Connect(function()
-		print("📺 Showing death menu (revive expired/declined)")
-		-- Show the menu immediately
-		createMenu(function()
-			requestRespawn()
+print("🔍 Looking for Remotes folder...")
+local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+if remotes then
+	print("✅ Found Remotes folder")
+	local showMenuRemote = remotes:WaitForChild("ShowDeathMenu", 5)
+	if showMenuRemote then
+		print("✅ Found ShowDeathMenu RemoteEvent")
+		showMenuRemote.OnClientEvent:Connect(function()
+			print("📺 Received ShowDeathMenu event - showing menu!")
+			-- Show the menu immediately
+			createMenu(function()
+				requestRespawn()
+			end)
 		end)
-	end)
+	else
+		warn("❌ ShowDeathMenu RemoteEvent not found in Remotes folder")
+		-- Try to listen for it being added
+		remotes.ChildAdded:Connect(function(child)
+			if child.Name == "ShowDeathMenu" and child:IsA("RemoteEvent") then
+				print("✅ ShowDeathMenu RemoteEvent was just created")
+				child.OnClientEvent:Connect(function()
+					print("📺 Received ShowDeathMenu event - showing menu!")
+					createMenu(function()
+						requestRespawn()
+					end)
+				end)
+			end
+		end)
+	end
+else
+	warn("❌ Remotes folder not found in ReplicatedStorage")
 end
 
 -- Enhanced performance monitoring

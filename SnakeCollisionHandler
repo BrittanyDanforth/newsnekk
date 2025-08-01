@@ -970,6 +970,17 @@ task.spawn(function()
 								local reviveRemote = remotes:FindFirstChild("PromptRevive")
 								if not reviveRemote then
 									print("❌ PromptRevive remote not found in Remotes folder!")
+									
+									-- Force show the menu since we can't prompt for revive
+									local showMenuRemote = remotes:FindFirstChild("ShowDeathMenu")
+									if not showMenuRemote then
+										showMenuRemote = Instance.new("RemoteEvent")
+										showMenuRemote.Name = "ShowDeathMenu"
+										showMenuRemote.Parent = remotes
+									end
+									
+									showMenuRemote:FireClient(player)
+									
 									-- Fire normal death event
 									local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
 									if deathEvent then
@@ -1051,7 +1062,7 @@ task.spawn(function()
 									-- Player declined or didn't respond
 									processingRevive[player] = nil
 									
-									print("⏰ Revive timer expired or player declined")
+									print("⏰ Revive timer expired or player declined for", player.Name)
 									
 									-- Force show the menu since the player's humanoid is already dead
 									-- Create or get ShowDeathMenu remote
@@ -1060,19 +1071,53 @@ task.spawn(function()
 										showMenuRemote = Instance.new("RemoteEvent")
 										showMenuRemote.Name = "ShowDeathMenu"
 										showMenuRemote.Parent = remotes
+										print("📤 Created ShowDeathMenu RemoteEvent")
 									end
 									
+									print("📨 Firing ShowDeathMenu to client:", player.Name)
 									-- Fire to client to show menu
-									showMenuRemote:FireClient(player)
+									local success, err = pcall(function()
+										showMenuRemote:FireClient(player)
+									end)
+									
+									if success then
+										print("✅ ShowDeathMenu fired successfully")
+									else
+										warn("❌ Failed to fire ShowDeathMenu:", err)
+									end
 									
 									-- Also fire the death event for other systems
 									local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
 									if deathEvent then
 										deathEvent:Fire(player)
+										print("📢 Fired PlayerDied event")
 									end
 								end
 							else
-								-- No revive available - fire normal death event
+								-- No revive available - show menu immediately
+								print("❌ No revive available for", player.Name)
+								
+								-- Force show the menu
+								local showMenuRemote = remotes:FindFirstChild("ShowDeathMenu")
+								if not showMenuRemote then
+									showMenuRemote = Instance.new("RemoteEvent")
+									showMenuRemote.Name = "ShowDeathMenu"
+									showMenuRemote.Parent = remotes
+									print("📤 Created ShowDeathMenu RemoteEvent")
+								end
+								
+								print("📨 Firing ShowDeathMenu to client (no revive):", player.Name)
+								local success, err = pcall(function()
+									showMenuRemote:FireClient(player)
+								end)
+								
+								if success then
+									print("✅ ShowDeathMenu fired successfully (no revive)")
+								else
+									warn("❌ Failed to fire ShowDeathMenu (no revive):", err)
+								end
+								
+								-- Also fire normal death event
 								local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
 								if deathEvent then
 									deathEvent:Fire(player)
