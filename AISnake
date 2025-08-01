@@ -2657,65 +2657,70 @@ function AISnake:updateMovement(dt)
 		end
 	end
 
-	-- Update only visible segments
-	for _, i in ipairs(segmentsToUpdate) do
-		-- Skip based on frame for performance
-		if (i - 1) % segmentSkip == updateOffset then
-			-- Ensure segment exists (dynamic creation)
-			local segment = self:ensureSegmentExists(i)
-			if segment and segment.Parent then
-				local delay = mathFloor(i * 1.2)
-				local targetData = self:getFromHistory(delay)
-				if targetData then
-					-- Use EXACT same spacing as CharacterSetup
-					local spacingMultiplier = 0.15  -- Base spacing from CharacterSetup
-					if self.CurrentLength > 1500 then
-						spacingMultiplier = 0.2  -- More spacing to show pattern
-					end
-					local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
-					local currentSegmentPos = segment.Position
+	-- Update segments with adaptive skipping and LOD
+	for i = 1 + updateOffset, maxSegmentToUpdate, segmentSkip do
+		-- Ensure segment exists (dynamic creation)
+		local segment = self:ensureSegmentExists(i)
+		if segment and segment.Parent then
+			-- Skip if culled
+			if self.lodStates[i] == "culled" then
+				continue
+			end
+			
+			local delay = mathFloor(i * 1.2)
+			local targetData = self:getFromHistory(delay)
+			if targetData then
+				-- Use EXACT same spacing as CharacterSetup
+				local spacingMultiplier = 0.15  -- Base spacing from CharacterSetup
+				if self.CurrentLength > 1500 then
+					spacingMultiplier = 0.2  -- More spacing to show pattern
+				end
+				local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
+				local currentSegmentPos = segment.Position
 
-					-- Anti-gap check (from CharacterSetup)
-					if i > 1 then
-						local prevSegment = self.Segments[i - 1]
-						if prevSegment and prevSegment.Parent then
-							local gap = (currentSegmentPos - prevSegment.Position).Magnitude
-							if gap > self.Config.SegmentSpacing * 1.5 then
-								-- Too far, pull it closer
-								local dir = (prevSegment.Position - currentSegmentPos).Unit
-								segmentPos = prevSegment.Position - dir * self.Config.SegmentSpacing
-							end
+				-- Anti-gap check (from CharacterSetup)
+				if i > 1 then
+					local prevSegment = self.Segments[i - 1]
+					if prevSegment and prevSegment.Parent then
+						local gap = (currentSegmentPos - prevSegment.Position).Magnitude
+						if gap > self.Config.SegmentSpacing * 1.5 then
+							-- Too far, pull it closer
+							local dir = (prevSegment.Position - currentSegmentPos).Unit
+							segmentPos = prevSegment.Position - dir * self.Config.SegmentSpacing
 						end
 					end
+				end
 
-					-- Use different follow speeds based on LOD
-					local lodState = self.lodStates[i]
-					local lodFollowSpeed = followSpeed
-					if lodState == "far" then
-						lodFollowSpeed = 1 -- Instant update for far segments
-					elseif lodState == "mid" then
-						lodFollowSpeed = math.min(followSpeed * 1.2, 0.99)
-					end
+				-- Use different follow speeds based on LOD
+				local lodState = self.lodStates[i]
+				local lodFollowSpeed = followSpeed
+				if lodState == "far" then
+					lodFollowSpeed = 1 -- Instant update for far segments
+				elseif lodState == "mid" then
+					lodFollowSpeed = math.min(followSpeed * 1.2, 0.99)
+				end
 
-					local newPos = currentSegmentPos:Lerp(segmentPos, lodFollowSpeed)
-					segment.CFrame = CFramenew(newPos)
+				local newPos = currentSegmentPos:Lerp(segmentPos, lodFollowSpeed)
+				segment.CFrame = CFramenew(newPos)
 
-					-- Update attachment position for this segment
-					if self.Attachments and self.Attachments[i] then
-						self.Attachments[i].WorldPosition = newPos
-					end
+				-- Update attachment position for this segment
+				if self.Attachments and self.Attachments[i] then
+					self.Attachments[i].WorldPosition = newPos
 				end
 			end
 		end
 	end
 
-	-- Update attachment positions for segments we skipped (to keep beams smooth)
+	-- Update attachment positions for skipped segments (to keep beams smooth)
 	if segmentSkip > 1 then
-		for _, i in ipairs(segmentsToUpdate) do
-			if (i - 1) % segmentSkip ~= updateOffset then
+		for i = 1, maxSegmentToUpdate do
+			if i % segmentSkip ~= updateOffset then
 				local segment = self.Segments[i]
 				if segment and segment.Parent and self.Attachments and self.Attachments[i] then
-					self.Attachments[i].WorldPosition = segment.Position
+					-- Only update if not culled
+					if self.lodStates[i] ~= "culled" then
+						self.Attachments[i].WorldPosition = segment.Position
+					end
 				end
 			end
 		end
@@ -3135,119 +3140,82 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	-- Calculate distance from camera to snake head
 	local headDistance = (self.HeadParts.head.Position - cameraPosition).Magnitude
 	
-	-- Calculate visibility parameters based on distance
-	local transparency, glowIntensity, segmentSampleRate
-	
+	-- Determine how many segments to show based on distance
+	local segmentsToShow
 	if headDistance < 200 then
-		-- Very close - show everything
-		transparency = 0
-		glowIntensity = 1.0
-		segmentSampleRate = 1  -- Show every segment
+		segmentsToShow = self.CurrentLength  -- Show all
 	elseif headDistance < 400 then
-		-- Medium distance
-		transparency = 0.2
-		glowIntensity = 0.6
-		segmentSampleRate = 1.5  -- Show ~70% of segments
+		segmentsToShow = math.floor(self.CurrentLength * 0.7)  -- 70%
 	elseif headDistance < 600 then
-		-- Far distance
-		transparency = 0.4
-		glowIntensity = 0.2
-		segmentSampleRate = 2.5  -- Show ~40% of segments
+		segmentsToShow = math.floor(self.CurrentLength * 0.4)  -- 40%
 	elseif headDistance < 800 then
-		-- Very far
-		transparency = 0.6
-		glowIntensity = 0
-		segmentSampleRate = 5  -- Show ~20% of segments
+		segmentsToShow = math.max(20, math.floor(self.CurrentLength * 0.2))  -- 20% but at least 20
 	else
-		-- Extreme distance
-		transparency = 0.7
-		glowIntensity = 0
-		segmentSampleRate = 10  -- Show ~10% of segments
+		segmentsToShow = math.max(10, math.floor(self.CurrentLength * 0.1))  -- 10% but at least 10
 	end
+	
+	-- Clamp to limits
+	segmentsToShow = math.min(segmentsToShow, self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
 	
 	-- Always show head at full quality
 	if self.Segments[0] then
 		self:applyLODToSegment(self.Segments[0], "near", 0)
+		self.Segments[0].Transparency = 0  -- Head always fully opaque
 	end
 	
-	-- Calculate which segments to show (sampling across the entire snake)
-	local visibleIndices = {}
-	
-	-- Always include first few segments after head
-	for i = 1, math.min(5, self.CurrentLength) do
-		visibleIndices[i] = true
-	end
-	
-	-- Sample segments across the snake body
-	if segmentSampleRate > 1 then
-		-- Distributed sampling - show segments evenly spaced
-		local step = segmentSampleRate
-		for i = 6, self.CurrentLength, step do
-			local idx = math.floor(i)
-			if idx <= self.CurrentLength then
-				visibleIndices[idx] = true
-				-- Also show adjacent segment for smoother appearance
-				if idx > 1 then
-					visibleIndices[idx - 1] = true
-				end
-			end
-		end
-		
-		-- Always include tail segments for proper snake shape
-		for i = math.max(self.CurrentLength - 5, 6), self.CurrentLength do
-			if i > 0 then
-				visibleIndices[i] = true
-			end
-		end
-	else
-		-- Close enough to show all segments
-		for i = 1, self.CurrentLength do
-			visibleIndices[i] = true
-		end
-	end
-	
-	-- Apply LOD to all segments
+	-- Update segments continuously from head
 	for i = 1, self.CurrentLength do
 		local segment = self.Segments[i]
 		
-		if visibleIndices[i] and segment and segment.Parent then
+		if i <= segmentsToShow then
 			-- This segment should be visible
-			local segmentDistance = (segment.Position - cameraPosition).Magnitude
-			local lodLevel
-			
-			-- Determine LOD level
-			if segmentDistance < LOD_DISTANCE_NEAR then
-				lodLevel = "near"
-			elseif segmentDistance < LOD_DISTANCE_MID then
-				lodLevel = "mid"
-			else
-				lodLevel = "far"
-			end
-			
-			-- Apply LOD with distance-based transparency
-			self:applyLODToSegment(segment, lodLevel, i)
-			
-			-- Override transparency based on overall distance
-			segment.Transparency = transparency
-			
-			-- Update glow based on distance and sampling
-			local glow = segment:FindFirstChild("Glow")
-			if glow then
-				if glowIntensity > 0 and self:shouldHaveGlow(i) then
-					-- Reduce glow frequency based on distance
-					local glowSample = (headDistance < 400) and 2 or 5
-					if i % glowSample == 0 then
+			if segment and segment.Parent then
+				-- Calculate segment-specific distance
+				local segmentDistance = (segment.Position - cameraPosition).Magnitude
+				
+				-- Determine LOD level
+				local lodLevel
+				if segmentDistance < LOD_DISTANCE_NEAR then
+					lodLevel = "near"
+				elseif segmentDistance < LOD_DISTANCE_MID then
+					lodLevel = "mid"
+				else
+					lodLevel = "far"
+				end
+				
+				self:applyLODToSegment(segment, lodLevel, i)
+				
+				-- Fade out segments near the cutoff point for smooth transition
+				local fadeStart = segmentsToShow * 0.8
+				if i > fadeStart then
+					-- Fade out the last 20% of visible segments
+					local fadeProgress = (i - fadeStart) / (segmentsToShow - fadeStart)
+					segment.Transparency = math.min(0.9, fadeProgress * 0.9)
+				else
+					-- Normal distance-based transparency
+					if headDistance < 200 then
+						segment.Transparency = 0
+					elseif headDistance < 400 then
+						segment.Transparency = 0.1
+					elseif headDistance < 600 then
+						segment.Transparency = 0.3
+					else
+						segment.Transparency = 0.5
+					end
+				end
+				
+				-- Update glow based on distance
+				local glow = segment:FindFirstChild("Glow")
+				if glow then
+					if headDistance < 400 and self:shouldHaveGlow(i) then
 						glow.Enabled = true
-						glow.Brightness = GLOW_INTENSITY * glowIntensity
-						glow.Range = GLOW_RANGE_BASE * glowIntensity
+						glow.Brightness = GLOW_INTENSITY * (1 - segment.Transparency)
+						glow.Range = GLOW_RANGE_BASE * (1 - segment.Transparency * 0.5)
 					else
 						glow.Enabled = false
 					end
-				else
-					glow.Enabled = false
 				end
 			end
-			
 		else
 			-- This segment should be hidden
 			if segment and segment.Parent then
@@ -3257,26 +3225,18 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 		end
 	end
 	
-	-- Count actual visible segments for other systems
-	local visibleCount = 0
-	for _ in pairs(visibleIndices) do
-		visibleCount = visibleCount + 1
-	end
-	self.visibleSegmentCount = visibleCount
+	-- Store visible count
+	self.visibleSegmentCount = segmentsToShow
 end
 
--- Sync beam visibility with segments (Slither.io style - hide beams between gaps)
+-- Sync beam visibility with segments (Continuous visibility)
 function AISnake:syncBeamVisibility()
-	for i = 0, self.CurrentLength - 1 do
+	-- Update main beams based on segment visibility
+	for i = 0, math.min(self.CurrentLength - 1, DYNAMIC_SEGMENT_LIMIT - 1) do
 		local beam = self.Beams[i]
 		if beam and beam.Parent then
-			-- Check if both connected segments are visible
-			local seg1Visible = self.segmentVisibility[i] ~= false
-			local seg2Visible = self.segmentVisibility[i + 1] ~= false
-			
-			-- Only show beam if BOTH segments are visible AND adjacent
-			-- This prevents beams from spanning gaps in the sampled segments
-			if seg1Visible and seg2Visible then
+			-- Check if this beam should be visible
+			if i < self.visibleSegmentCount and self.segmentVisibility[i] ~= false and self.segmentVisibility[i + 1] ~= false then
 				beam.Enabled = true
 				
 				-- Get segment transparency for smooth beam fading
@@ -3284,48 +3244,28 @@ function AISnake:syncBeamVisibility()
 				local seg2 = self.Segments[i + 1]
 				
 				if seg1 and seg2 then
-					-- Use the higher transparency of the two segments
-					local maxTransparency = math.max(
-						seg1.Transparency or 0,
-						seg2.Transparency or 0
-					)
-					
-					-- Apply transparency to beam
-					beam.Transparency = NumberSequence.new(maxTransparency)
-					
-					-- Reduce beam brightness based on transparency
-					beam.Brightness = 2 * (1 - maxTransparency)
+					-- Use average transparency
+					local avgTransparency = (seg1.Transparency + seg2.Transparency) / 2
+					beam.Transparency = NumberSequence.new(avgTransparency)
+					beam.Brightness = 2 * (1 - avgTransparency)
 				end
 			else
-				-- Hide beam if there's a gap in visibility
 				beam.Enabled = false
 			end
 		end
 	end
 	
-	-- Handle overlap beams - only show if no gaps
+	-- Handle overlap beams more simply
 	for key, beam in pairs(self.Beams) do
 		if type(key) == "string" and beam and beam.Parent then
 			if string.find(key, "overlap") then
 				local index = tonumber(string.match(key, "%d+"))
-				if index then
-					-- For overlap beams, check all segments in between
-					local allVisible = true
-					local step = string.find(key, "Mid") and 3 or 2
-					
-					for j = index, index + step do
-						if self.segmentVisibility[j] == false then
-							allVisible = false
-							break
-						end
-					end
-					
-					beam.Enabled = allVisible
-					
-					-- Apply transparency if enabled
-					if allVisible and self.Segments[index] then
+				if index and index < self.visibleSegmentCount - 2 then
+					beam.Enabled = true
+					-- Apply transparency
+					if self.Segments[index] then
 						local transparency = self.Segments[index].Transparency or 0
-						beam.Transparency = NumberSequence.new(math.min(transparency + 0.2, 0.8))
+						beam.Transparency = NumberSequence.new(math.min(transparency + 0.2, 0.9))
 					end
 				else
 					beam.Enabled = false
