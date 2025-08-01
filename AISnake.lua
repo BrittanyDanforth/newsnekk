@@ -1956,11 +1956,13 @@ function AISnake:grow(amount)
 				segment.Material = self.Config.BodyMaterial or Enum.Material.Neon
 				segment.Color = color  -- Re-apply color to be sure
 
-				-- Set proper size and visibility
-				segment.Transparency = 0
+				-- Set proper size immediately
 				segment.Size = Vector3new(currentBaseSize, currentBaseSize, currentBaseSize)
+				
+				-- New segments start visible
+				segment.Transparency = 0
 				self.segmentVisibility[self.CurrentLength] = true
-				self.lodStates[self.CurrentLength] = "near"
+				self.lodStates[self.CurrentLength] = "visible"
 
 				-- Create attachment for new segment
 				if self.AttachmentPart and self.Attachments then
@@ -2750,14 +2752,26 @@ function AISnake:updateMovement(dt)
 				continue  -- Skip if distance is too far (false positive)
 			end
 			
-			-- Additional validation to prevent killing from invisible segments
-			if otherPart.Transparency and otherPart.Transparency > 0.8 then
-				continue  -- Skip transparent segments
+			-- STRICT validation - only collide with segments that are:
+			-- 1. Visible (low transparency)
+			-- 2. Have collision enabled
+			-- 3. Actually in the workspace
+			if not otherPart.Parent then
+				continue  -- Skip parts not in workspace
 			end
 			
-			-- Also check if the segment has collision enabled
+			if otherPart.Transparency and otherPart.Transparency > 0.5 then
+				continue  -- Skip semi-transparent segments
+			end
+			
 			if not otherPart.CanTouch then
 				continue  -- Skip segments with collision disabled
+			end
+			
+			-- Double check the segment is actually where it says it is
+			local actualDistance = (myHead.Position - otherPart.Position).Magnitude
+			if actualDistance > 10 then
+				continue  -- Too far for real collision
 			end
 
 			if data.type == "AI_HEAD" then
@@ -2904,10 +2918,10 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 			if snake._active and snake.HeadParts and snake.HeadParts.head then
 				SpatialGrid.Insert(snake.HeadParts.head, snake, "AI_HEAD")
 
-				for i = 1, #snake.Segments, 4 do
+				-- Only insert segments that can actually collide
+				for i = 1, math.min(50, #snake.Segments), 2 do  -- Only first 50 segments, every other one
 					local segment = snake.Segments[i]
-					-- Only insert visible segments with collision enabled into spatial grid
-					if segment and segment.Parent and segment.Transparency < 0.8 and segment.CanTouch then
+					if segment and segment.Parent and segment.CanTouch and segment.Transparency < 0.5 then
 						SpatialGrid.Insert(segment, snake, "AI_SEGMENT")
 					end
 				end
@@ -3147,97 +3161,63 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	-- Calculate distance from camera to snake head
 	local headDistance = (self.HeadParts.head.Position - cameraPosition).Magnitude
 	
-	-- ALWAYS show most of the snake - like slither.io
-	local segmentsToShow = self.CurrentLength
+	-- ALWAYS show ALL segments up to the limit - no culling based on distance
+	local segmentsToShow = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
 	
-	-- Only slightly reduce visible segments when very far
-	if headDistance > 1200 then
-		segmentsToShow = math.max(self.CurrentLength - 20, math.floor(self.CurrentLength * 0.8))
-	elseif headDistance > 800 then
-		segmentsToShow = math.max(self.CurrentLength - 10, math.floor(self.CurrentLength * 0.9))
-	else
-		segmentsToShow = self.CurrentLength  -- Show all when reasonably close
-	end
-	
-	-- Clamp to limits
-	segmentsToShow = math.min(segmentsToShow, DYNAMIC_SEGMENT_LIMIT)
-	
-	-- Update segments with gradual transparency based on distance
+	-- Update ALL segments
 	for i = 0, self.CurrentLength do
 		local segment = self.Segments[i]
 		if segment and segment.Parent then
 			if i <= segmentsToShow then
-				-- Calculate segment-specific distance for transparency
+				-- Calculate transparency based on distance only
 				local segmentDistance = (segment.Position - cameraPosition).Magnitude
 				
-				-- Gradual transparency based on distance - NEVER fully invisible
+				-- Simple transparency calculation - NEVER fully invisible
 				local transparency = 0
-				if segmentDistance > 1000 then
-					transparency = 0.7  -- Max 70% transparent
-				elseif segmentDistance > 800 then
-					transparency = 0.5
+				if segmentDistance > 1500 then
+					transparency = 0.6  -- Max 60% transparent
+				elseif segmentDistance > 1000 then
+					transparency = 0.4
 				elseif segmentDistance > 600 then
-					transparency = 0.3
-				elseif segmentDistance > 400 then
-					transparency = 0.15
+					transparency = 0.2
+				elseif segmentDistance > 300 then
+					transparency = 0.1
 				else
 					transparency = 0  -- Fully opaque when close
 				end
 				
-				-- Fade based on position in snake (tail fades more)
-				if i > segmentsToShow * 0.7 then
-					local fadeFactor = (i - segmentsToShow * 0.7) / (segmentsToShow * 0.3)
-					transparency = math.min(0.8, transparency + fadeFactor * 0.3)
-				end
-				
+				-- Apply transparency
 				segment.Transparency = transparency
 				self.segmentVisibility[i] = true
-				self.lodStates[i] = transparency < 0.5 and "near" or "far"
+				self.lodStates[i] = "visible"
 				
-				-- Only enable collision for visible segments
-				if transparency < 0.8 then
-					segment.CanTouch = (i <= 50)
-					segment.CanQuery = (i <= 10)
-				else
-					-- Disable collision for very transparent segments
-					segment.CanTouch = false
-					segment.CanQuery = false
-				end
+				-- Collision is ALWAYS based on segment index, not transparency
+				segment.CanTouch = (i <= 50)  -- Only first 50 segments can collide
+				segment.CanQuery = false  -- Never needed for AI snakes
 				
-				-- Update glow based on transparency
+				-- Update glow
 				local glow = segment:FindFirstChild("Glow")
-				if glow and self:shouldHaveGlow(i) then
-					if transparency < 0.5 and headDistance < 600 then
+				if glow then
+					if self:shouldHaveGlow(i) and transparency < 0.4 then
 						glow.Enabled = true
 						glow.Brightness = GLOW_INTENSITY * (1 - transparency)
-						glow.Range = GLOW_RANGE_BASE * (1 - transparency)
+						glow.Range = GLOW_RANGE_BASE * (1 - transparency * 0.5)
 					else
 						glow.Enabled = false
 					end
-				elseif glow then
-					glow.Enabled = false
 				end
 			else
-				-- Only hide segments that are way beyond visible count
-				segment.Transparency = 0.9
+				-- Segments beyond limit are completely removed from rendering
+				segment.Parent = nil  -- Remove from workspace
 				self.segmentVisibility[i] = false
-				self.lodStates[i] = "culled"
-				segment.CanTouch = false
-				segment.CanQuery = false
-				
-				-- Disable glow
-				local glow = segment:FindFirstChild("Glow")
-				if glow then
-					glow.Enabled = false
-				end
+				self.lodStates[i] = "removed"
 			end
 		end
 	end
 	
-	-- Update eye visibility
+	-- Update eye visibility based on distance only
 	if self.HeadParts then
-		local eyeVisible = headDistance < 600
-		local eyeTransparency = eyeVisible and 0 or 1
+		local eyeTransparency = headDistance > 400 and 1 or 0
 		if self.HeadParts.leftEye then
 			self.HeadParts.leftEye.Transparency = eyeTransparency
 		end
@@ -3255,41 +3235,30 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	self.visibleSegmentCount = segmentsToShow
 end
 
--- Sync beam visibility with segments (Continuous visibility)
+-- Sync beam visibility with segments
 function AISnake:syncBeamVisibility()
-	-- First, ensure ALL attachments are at correct positions
-	for i = 0, self.CurrentLength do
-		local segment = self.Segments[i]
-		local attachment = self.Attachments[i]
-		if segment and segment.Parent and attachment then
-			attachment.WorldPosition = segment.Position
-		end
-	end
-	
-	-- Update main beams based on segment visibility
+	-- Update ALL beams to match their segments exactly
 	for i = 0, math.min(self.CurrentLength - 1, DYNAMIC_SEGMENT_LIMIT - 1) do
 		local beam = self.Beams[i]
+		local seg1 = self.Segments[i]
+		local seg2 = self.Segments[i + 1]
+		
 		if beam and beam.Parent then
-			local seg1 = self.Segments[i]
-			local seg2 = self.Segments[i + 1]
-			
-			-- Check if both segments exist
-			if seg1 and seg2 and seg1.Parent and seg2.Parent then
-				local trans1 = seg1.Transparency or 0
-				local trans2 = seg2.Transparency or 0
-				local avgTrans = (trans1 + trans2) / 2
-				
-				-- Show beam if segments are reasonably visible
-				if avgTrans < 0.85 then
-					beam.Enabled = true
-					-- Beam transparency matches segment transparency
-					beam.Transparency = NumberSequence.new(avgTrans)
-					beam.Brightness = math.max(0.5, 2 * (1 - avgTrans))
-				else
-					-- Hide beam only if segments are nearly invisible
-					beam.Enabled = false
+			-- Check if both segments exist in workspace
+			if seg1 and seg1.Parent and seg2 and seg2.Parent then
+				-- Update attachments to current positions
+				if self.Attachments[i] and self.Attachments[i + 1] then
+					self.Attachments[i].WorldPosition = seg1.Position
+					self.Attachments[i + 1].WorldPosition = seg2.Position
 				end
+				
+				-- Beam visibility matches segment visibility exactly
+				local avgTrans = (seg1.Transparency + seg2.Transparency) / 2
+				beam.Enabled = true
+				beam.Transparency = NumberSequence.new(avgTrans)
+				beam.Brightness = math.max(1, 2 * (1 - avgTrans))
 			else
+				-- If either segment is removed, disable beam
 				beam.Enabled = false
 			end
 		end
@@ -3300,21 +3269,18 @@ function AISnake:syncBeamVisibility()
 		if type(key) == "string" and beam and beam.Parent then
 			if string.find(key, "overlap") then
 				local index = tonumber(string.match(key, "%d+"))
-				if index and index <= self.visibleSegmentCount - 2 then
+				if index then
 					local seg = self.Segments[index]
-					if seg and seg.Parent then
-						local segTrans = seg.Transparency or 0
-						if segTrans < 0.8 then
-							beam.Enabled = true
-							beam.Transparency = NumberSequence.new(math.min(0.9, segTrans + 0.2))
-						else
-							beam.Enabled = false
-						end
+					local seg2 = self.Segments[index + 1]
+					local seg3 = self.Segments[index + 2]
+					
+					if seg and seg.Parent and seg2 and seg2.Parent and seg3 and seg3.Parent then
+						local avgTrans = (seg.Transparency + seg2.Transparency + seg3.Transparency) / 3
+						beam.Enabled = true
+						beam.Transparency = NumberSequence.new(math.min(0.8, avgTrans + 0.2))
 					else
 						beam.Enabled = false
 					end
-				else
-					beam.Enabled = false
 				end
 			end
 		end
@@ -3329,6 +3295,12 @@ function AISnake:ensureSegmentExists(index)
 	
 	local segment = self.Segments[index]
 	if segment and segment.Parent then
+		return segment
+	end
+	
+	-- If segment was removed, we need to re-parent it
+	if segment and not segment.Parent then
+		segment.Parent = self.SegmentFolder
 		return segment
 	end
 	
