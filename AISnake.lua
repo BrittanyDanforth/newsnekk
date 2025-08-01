@@ -1835,7 +1835,7 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self.lastBeamSync = 0
 	self.lodStates = {} -- Track LOD level for each segment
 	self.forcedRenderSegments = {} -- Segments that should always render
-	self.visibleSegmentCount = self.CurrentLength -- Track actual visible segments
+	-- LOD tracking removed - handled client-side
 	
 
 
@@ -2055,7 +2055,7 @@ function AISnake:grow(amount)
 	end
 
 	-- Update visible segment count
-	self.visibleSegmentCount = math.min(self.CurrentLength, MAX_VISIBLE_SEGMENTS)
+				-- Visible segment count handled client-side
 
 	-- Update all segment sizes with new growth factor to prevent glitching
 	if amount > 0 then
@@ -2651,7 +2651,7 @@ function AISnake:updateMovement(dt)
 	end
 
 	-- Only update visible segments
-	local maxSegmentToUpdate = math.min(self.visibleSegmentCount, DYNAMIC_SEGMENT_LIMIT)
+	local maxSegmentToUpdate = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
 
 	-- Build list of segments to update based on visibility
 	local segmentsToUpdate = {}
@@ -3077,67 +3077,9 @@ function AISnake:getBeamWidth(index, baseSize)
 	return avgSize * beamWidthBase * beamTaper
 end
 
--- Calculate LOD level based on distance (from OptimizedSnakeSystem)
-function AISnake:calculateLODLevel(segmentIndex, cameraPosition)
-	if not cameraPosition then return "near" end
+-- LOD calculations moved to client-side
 
-	local segment = self.Segments[segmentIndex]
-	if not segment or not segment.Parent then return "culled" end
-
-	-- Always full quality for first segments
-	if segmentIndex <= FORCE_RENDER_SEGMENTS then
-		return "near"
-	end
-
-	local distance = (segment.Position - cameraPosition).Magnitude
-
-	if distance <= LOD_DISTANCE_NEAR then
-		return "near"
-	elseif distance <= LOD_DISTANCE_MID then
-		return "mid"
-	elseif distance <= LOD_DISTANCE_FAR then
-		return "far"
-	else
-		return "culled"
-	end
-end
-
--- Apply LOD settings to segment (Simplified for sampling system)
-function AISnake:applyLODToSegment(segment, lodLevel, index)
-	if not segment or not segment.Parent then return end
-
-	-- Store LOD state
-	self.lodStates[index] = lodLevel
-
-	if lodLevel == "culled" then
-		-- Completely hide culled segments
-		segment.Transparency = 1
-		segment.CanTouch = false
-		segment.CanQuery = false
-
-		-- Disable glow
-		local glow = segment:FindFirstChild("Glow")
-		if glow then
-			glow.Enabled = false
-		end
-
-		self.segmentVisibility[index] = false
-	else
-		-- Segment is visible at some level
-		-- Collision only for near segments in the first 50
-		if lodLevel == "near" and index <= 50 then
-			segment.CanTouch = true
-			segment.CanQuery = index <= 10
-		else
-			segment.CanTouch = false
-			segment.CanQuery = false
-		end
-
-		self.segmentVisibility[index] = true
-
-		-- Note: Transparency and glow are handled by updateSegmentVisibility
-	end
-end
+-- LOD is now handled client-side - this function is deprecated
 
 -- Check if segment should have glow
 function AISnake:shouldHaveGlow(index)
@@ -3152,226 +3094,10 @@ function AISnake:shouldHaveGlow(index)
 	end
 end
 
--- Update visibility for all segments
-function AISnake:updateSegmentVisibility(cameraPosition)
-	if not cameraPosition then return end
-	
-	-- NEVER cull segments - always show the full snake
-	local segmentsToShow = self.CurrentLength
-	
-	-- Store previous transparencies for smooth transitions
-	if not self._prevTransparencies then
-		self._prevTransparencies = {}
-	end
-	
-	-- Update ALL segments with proper distance-based transparency
-	for i = 0, self.CurrentLength do
-		local segment = self.Segments[i]
-		if segment then
-			-- Make sure segment is in workspace
-			if not segment.Parent then
-				segment.Parent = self.SegmentFolder
-			end
-			
-			-- Calculate segment distance from camera
-			local segmentDistance = (segment.Position - cameraPosition).Magnitude
-			
-			-- Progressive transparency based on distance
-			local targetTransparency = 0
-			
-			if i == 0 then
-				-- Head is ALWAYS fully visible
-				targetTransparency = 0
-			else
-				-- Body segments fade based on distance
-				if segmentDistance > 3500 then
-					targetTransparency = 0.75  -- Max transparency
-				elseif segmentDistance > 3000 then
-					targetTransparency = 0.7
-				elseif segmentDistance > 2500 then
-					targetTransparency = 0.6
-				elseif segmentDistance > 2000 then
-					targetTransparency = 0.5
-				elseif segmentDistance > 1500 then
-					targetTransparency = 0.4
-				elseif segmentDistance > 1200 then
-					targetTransparency = 0.3
-				elseif segmentDistance > 900 then
-					targetTransparency = 0.2
-				elseif segmentDistance > 600 then
-					targetTransparency = 0.1
-				elseif segmentDistance > 400 then
-					targetTransparency = 0.05
-				else
-					targetTransparency = 0  -- Fully visible when close
-				end
-				
-				-- Additional fade for segments far back in the snake
-				if i > self.CurrentLength * 0.7 then
-					local positionFade = (i - self.CurrentLength * 0.7) / (self.CurrentLength * 0.3)
-					targetTransparency = math.min(0.85, targetTransparency + positionFade * 0.15)
-				end
-			end
-			
-			-- Smooth transparency transitions to prevent popping
-			local prevTrans = self._prevTransparencies[i] or targetTransparency
-			local smoothedTransparency = prevTrans + (targetTransparency - prevTrans) * 0.2
-			self._prevTransparencies[i] = smoothedTransparency
-			
-			-- Apply transparency
-			segment.Transparency = smoothedTransparency
-			self.segmentVisibility[i] = true
-			self.lodStates[i] = "visible"
-			
-			-- Collision settings
-			if i == 0 then
-				segment.CanTouch = true  -- Head always has collision
-			else
-				segment.CanTouch = (i <= 50) and (smoothedTransparency < 0.7)
-			end
-			segment.CanQuery = false
-			
-			-- Update glow
-			local glow = segment:FindFirstChild("Glow")
-			if glow then
-				if i == 0 then
-					-- Head glow always on
-					glow.Enabled = true
-					glow.Brightness = GLOW_INTENSITY
-					glow.Range = GLOW_RANGE_BASE
-				elseif self:shouldHaveGlow(i) and smoothedTransparency < 0.6 then
-					glow.Enabled = true
-					glow.Brightness = GLOW_INTENSITY * (1 - smoothedTransparency)
-					glow.Range = GLOW_RANGE_BASE * (1 - smoothedTransparency * 0.5)
-				else
-					glow.Enabled = false
-				end
-			end
-		end
-	end
-	
-	-- Update eye visibility based on camera distance
-	if self.HeadParts then
-		local headDistance = (self.HeadParts.head.Position - cameraPosition).Magnitude
-		local eyeTransparency = headDistance > 600 and 1 or 0
-		
-		if self.HeadParts.leftEye then
-			self.HeadParts.leftEye.Transparency = eyeTransparency
-		end
-		if self.HeadParts.rightEye then
-			self.HeadParts.rightEye.Transparency = eyeTransparency
-		end
-		if self.HeadParts.leftPupil then
-			self.HeadParts.leftPupil.Transparency = eyeTransparency
-		end
-		if self.HeadParts.rightPupil then
-			self.HeadParts.rightPupil.Transparency = eyeTransparency
-		end
-		
-		-- Ensure head is always visible
-		if self.HeadParts.head then
-			self.HeadParts.head.Transparency = 0
-		end
-	end
-	
-	self.visibleSegmentCount = segmentsToShow
-end
+-- LOD has been moved to ClientAISnakeLOD.lua
+-- This function is deprecated and should not be called
 
--- Sync beam visibility with segments
-function AISnake:syncBeamVisibility()
-	-- Update ALL beams to match their segments
-	for i = 0, self.CurrentLength - 1 do
-		local beam = self.Beams[i]
-		local seg1 = self.Segments[i]
-		local seg2 = self.Segments[i + 1]
-		
-		if beam and beam.Parent and seg1 and seg2 then
-			-- Make sure segments are in workspace
-			if not seg1.Parent then seg1.Parent = self.SegmentFolder end
-			if not seg2.Parent then seg2.Parent = self.SegmentFolder end
-			
-			-- Update attachments smoothly
-			if self.Attachments[i] and self.Attachments[i + 1] then
-				-- Lerp attachment positions for smooth transitions
-				local attach1 = self.Attachments[i]
-				local attach2 = self.Attachments[i + 1]
-				
-				-- Smooth position updates to prevent teleporting
-				local currentPos1 = attach1.WorldPosition
-				local currentPos2 = attach2.WorldPosition
-				local targetPos1 = seg1.Position
-				local targetPos2 = seg2.Position
-				
-				-- Only update if the distance is reasonable (prevent teleporting)
-				if (currentPos1 - targetPos1).Magnitude < 50 then
-					attach1.WorldPosition = currentPos1:Lerp(targetPos1, 0.3)
-				else
-					attach1.WorldPosition = targetPos1
-				end
-				
-				if (currentPos2 - targetPos2).Magnitude < 50 then
-					attach2.WorldPosition = currentPos2:Lerp(targetPos2, 0.3)
-				else
-					attach2.WorldPosition = targetPos2
-				end
-			end
-			
-			-- Calculate beam transparency
-			local trans1 = seg1.Transparency or 0
-			local trans2 = seg2.Transparency or 0
-			local avgTrans = (trans1 + trans2) / 2
-			
-			-- Special handling for head beam
-			if i == 0 then
-				beam.Enabled = true
-				beam.Transparency = NumberSequence.new(0)
-				beam.Brightness = 2
-			else
-				-- Beams should disappear when segments are faded
-				if avgTrans < 0.7 then
-					beam.Enabled = true
-					-- Make beams slightly more transparent than segments
-					local beamTrans = math.min(avgTrans + 0.1, 0.8)
-					beam.Transparency = NumberSequence.new(beamTrans)
-					beam.Brightness = math.max(0.3, 1.5 * (1 - beamTrans))
-				else
-					-- Disable beam when segments are too transparent
-					beam.Enabled = false
-				end
-			end
-		end
-	end
-	
-	-- Handle overlap beams
-	for key, beam in pairs(self.Beams) do
-		if type(key) == "string" and beam and beam.Parent then
-			if string.find(key, "overlap") then
-				local index = tonumber(string.match(key, "%d+"))
-				if index and index < self.CurrentLength - 2 then
-					local seg1 = self.Segments[index]
-					local seg2 = self.Segments[index + 1]
-					local seg3 = self.Segments[index + 2]
-					
-					if seg1 and seg2 and seg3 then
-						local avgTrans = ((seg1.Transparency or 0) + (seg2.Transparency or 0) + (seg3.Transparency or 0)) / 3
-						
-						-- Overlap beams disappear earlier
-						if avgTrans < 0.6 then
-							beam.Enabled = true
-							beam.Transparency = NumberSequence.new(math.min(0.9, avgTrans + 0.3))
-						else
-							beam.Enabled = false
-						end
-					else
-						beam.Enabled = false
-					end
-				else
-					beam.Enabled = false
-				end
-			end
-		end
-	end
-end
+-- Beam visibility is now handled client-side in ClientAISnakeLOD.lua
 
 -- Dynamically create segments if they don't exist yet (with smooth spawning)
 function AISnake:ensureSegmentExists(index)
