@@ -21,9 +21,15 @@ function SnakeUpgrades.GiveUpgrade(snake)
         snake.NormalSpeed = origSpeed * SPEED_BOOST_AMOUNT
         snake.BoostSpeed = origBoost * SPEED_BOOST_AMOUNT
 
-        -- NO COLOR CHANGE - just subtle glow increase
+        -- Store original color and apply temporary orange color
         if snake.HeadParts and snake.HeadParts.head then
-            local headGlow = snake.HeadParts.head:FindFirstChild("PointLight")
+            -- Store the original color
+            snake._originalHeadColor = snake.HeadParts.head.Color
+            
+            -- Apply temporary orange color
+            snake.HeadParts.head.Color = Color3.fromRGB(255, 100, 0)
+            
+            local headGlow = snake.HeadParts.head:FindFirstChild("Glow") or snake.HeadParts.head:FindFirstChild("PointLight")
             if headGlow then
                 headGlow.Brightness = headGlow.Brightness * 1.3
             end
@@ -34,9 +40,12 @@ function SnakeUpgrades.GiveUpgrade(snake)
                 snake.NormalSpeed = origSpeed
                 snake.BoostSpeed = origBoost
                 snake._isSpeedBoosted = false
-                -- Restore glow
-                if snake.HeadParts and snake.HeadParts.head then
-                    local headGlow = snake.HeadParts.head:FindFirstChild("PointLight")
+                -- Restore original color
+                if snake.HeadParts and snake.HeadParts.head and snake._originalHeadColor then
+                    snake.HeadParts.head.Color = snake._originalHeadColor
+                    snake._originalHeadColor = nil
+                    
+                    local headGlow = snake.HeadParts.head:FindFirstChild("Glow") or snake.HeadParts.head:FindFirstChild("PointLight")
                     if headGlow then
                         headGlow.Brightness = headGlow.Brightness / 1.3
                     end
