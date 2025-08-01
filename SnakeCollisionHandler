@@ -986,6 +986,7 @@ task.spawn(function()
 
 								-- Wait for response (5 seconds max)
 								local revived = false
+								local declined = false
 								local reviveConnection
 								reviveConnection = reviveRemote.OnServerEvent:Connect(function(plr, response)
 									if plr == player and response == "revive" then
@@ -993,12 +994,19 @@ task.spawn(function()
 										reviveConnection:Disconnect()
 										print("✅ Player chose to revive!")
 									elseif plr == player and response == "decline" then
+										declined = true
 										reviveConnection:Disconnect()
 										print("❌ Player declined revive")
 									end
 								end)
 
-								task.wait(5) -- Give player 5 seconds to decide
+								-- Wait for response or timeout
+								local waitTime = 0
+								while waitTime < 5 and not revived and not declined do
+									task.wait(0.1)
+									waitTime = waitTime + 0.1
+								end
+								
 								if reviveConnection then
 									reviveConnection:Disconnect()
 								end
@@ -1047,10 +1055,17 @@ task.spawn(function()
 										processingRevive[player] = nil
 									end)
 								else
-									-- Player declined or didn't respond
+									-- Player declined or timer expired
 									processingRevive[player] = nil
 									
-									print("⏰ Revive timer expired or player declined for", player.Name)
+									if declined then
+										print("❌ Player actively declined revive for", player.Name)
+										-- Set attribute so client knows to show menu immediately
+										player:SetAttribute("ReviveDeclined", true)
+									else
+										print("⏰ Revive timer expired for", player.Name)
+									end
+									
 									print("💀 Continuing with normal death - menu should show from humanoid.Died")
 									
 									-- Just let the normal death process continue

@@ -653,11 +653,27 @@ local function onCharacterAdded(character)
 					print("✅ Player is reviving now! Menu will not show.")
 				end
 			end)
+			
+			-- Check for declined revive
+			local showMenuImmediately = false
+			local declineConnection
+			declineConnection = LocalPlayer:GetAttributeChangedSignal("ReviveDeclined"):Connect(function()
+				if LocalPlayer:GetAttribute("ReviveDeclined") then
+					showMenuImmediately = true
+					print("❌ Player declined revive - show menu immediately")
+					-- Clear the attribute
+					LocalPlayer:SetAttribute("ReviveDeclined", false)
+				end
+			end)
 
 			if hasRevive and revivesAvailable > 0 then
-				-- Player has revive - wait longer for revive prompt
+				-- Player has revive - wait for decision
 				print("⏳ Waiting for revive decision...")
-				task.wait(6) -- Give 5 seconds for revive prompt + 1 second buffer
+				local waitTime = 0
+				while waitTime < 6 and not isReviving and not showMenuImmediately do
+					task.wait(0.1)
+					waitTime = waitTime + 0.1
+				end
 			else
 				-- Normal death - show menu after short delay
 				task.wait(1.5)
@@ -669,6 +685,9 @@ local function onCharacterAdded(character)
 			end
 			if revivingNowConnection then
 				revivingNowConnection:Disconnect()
+			end
+			if declineConnection then
+				declineConnection:Disconnect()
 			end
 
 			-- Final check - make sure we're not reviving
