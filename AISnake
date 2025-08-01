@@ -60,6 +60,17 @@ local VERY_LONG_SNAKE_THRESHOLD = 300  -- Even more optimization for very long s
 local AI_UPDATE_DISTANCE = 200  -- Only update AI within this distance of players
 local SEGMENT_POOL_MAX = 500  -- Increased pool size for better reuse
 
+-- LOD Constants from OptimizedSnakeSystem
+local VISIBILITY_CHECK_INTERVAL = 5 -- Check visibility every N frames
+local RENDER_DISTANCE = 500 -- Force render within this distance
+local LOD_DISTANCE_NEAR = 100 -- Full quality
+local LOD_DISTANCE_MID = 250 -- Medium quality
+local LOD_DISTANCE_FAR = 500 -- Low quality
+local BEAM_SYNC_INTERVAL = 3 -- Sync beams with parts every N frames
+local FORCE_RENDER_SEGMENTS = 150 -- Always force render first N segments
+local VISIBILITY_BUFFER_ZONE = 50 -- Extra distance before culling
+local MAX_VISIBLE_SEGMENTS = 500 -- Cap visible segments for performance
+
 -- Visual Constants from OptimizedSnakeSystem
 local BASE_SIZE = 3.5 -- Unified base size for head and segments
 local MAX_SIZE_MULTIPLIER = 3.5 -- Maximum size growth
@@ -1719,8 +1730,11 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	local headSize = self:getSegmentSize(0, currentBaseSize)
 	self.HeadParts.head.Size = Vector3.new(headSize, headSize, headSize)
 
+	-- OPTIMIZED: Only create visible segments initially
+	local initialSegmentCount = math.min(self.CurrentLength, MAX_VISIBLE_SEGMENTS)
+	
 	-- FIXED: Create segments at proper positions WITHOUT GAPS
-	for i = 1, self.CurrentLength do
+	for i = 1, initialSegmentCount do
 		-- Start ALL segments at the SAME position to prevent gaps
 		local pos = self.Position
 		local color = self:getSegmentColor(i)  -- Use the new function
@@ -1744,8 +1758,8 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		self.Attachments[i] = attachment
 	end
 
-	-- Create seamless beams between all segments (like OptimizedSnakeSystem)
-	for i = 0, self.CurrentLength - 1 do
+	-- Create seamless beams between visible segments (like OptimizedSnakeSystem)
+	for i = 0, initialSegmentCount - 1 do
 		local beam = Instance.new("Beam")
 		beam.Name = "Beam" .. i
 		beam.Attachment0 = self.Attachments[i]
@@ -1793,6 +1807,26 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 	-- Store attachment part reference
 	self.AttachmentPart = attachmentPart
+
+	-- Track actual created segments
+	self.actualSegmentCount = initialSegmentCount
+
+	-- LOD and visibility tracking (from OptimizedSnakeSystem)
+	self.segmentVisibility = {} -- Track visibility state of each segment
+	self.lastVisibilityCheck = 0
+	self.lastBeamSync = 0
+	self.lodStates = {} -- Track LOD level for each segment
+	self.forcedRenderSegments = {} -- Segments that should always render
+	self.visibleSegmentCount = self.CurrentLength -- Track actual visible segments
+	
+	-- Initialize all segments as visible
+	for i = 0, self.CurrentLength do
+		self.segmentVisibility[i] = true
+		self.lodStates[i] = "near"
+		if i <= FORCE_RENDER_SEGMENTS then
+			self.forcedRenderSegments[i] = true
+		end
+	end
 
 	-- Spawn sequence to prevent gaps
 	task.defer(function()
@@ -1884,99 +1918,116 @@ end
 -- === OTHER METHODS (simplified) ===
 function AISnake:grow(amount)
 	amount = amount or 5
-	
+
 	-- Update growth factor when growing
 	self.growthFactor = self:calculateGrowthFactor()
 	local currentBaseSize = BASE_SIZE * self.growthFactor
-	
+
 	for i = 1, amount do
 		if self.CurrentLength < self.Config.MaxSegments then
 			self.CurrentLength = self.CurrentLength + 1
-			local color = self:getSegmentColor(self.CurrentLength)  -- Use the function
-			local lastSegment = self.Segments[#self.Segments]
-			local newPos = lastSegment and lastSegment.Position or self.Position
-			local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength)
-			self.Segments[self.CurrentLength] = segment
+			
+			-- Only create physical segment if within visible range
+			if self.CurrentLength <= MAX_VISIBLE_SEGMENTS then
+				local color = self:getSegmentColor(self.CurrentLength)
+				local lastSegment = self.Segments[self.CurrentLength - 1]
+				local newPos = lastSegment and lastSegment.Position or self.Position
+				local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength)
+				self.Segments[self.CurrentLength] = segment
 
-			-- Match CharacterSetup's segment growth exactly
-			segment.Transparency = 1
-			segment.Size = Vector3new(0.1, 0.1, 0.1)
+				-- Match CharacterSetup's segment growth exactly
+				segment.Transparency = 1
+				segment.Size = Vector3new(0.1, 0.1, 0.1)
 
-			-- Create attachment for new segment
-			if self.AttachmentPart and self.Attachments then
-				local attachment = Instance.new("Attachment")
-				attachment.Name = "Attachment" .. self.CurrentLength
-				attachment.Parent = self.AttachmentPart
-				attachment.WorldPosition = newPos
-				self.Attachments[self.CurrentLength] = attachment
+				-- Create attachment for new segment
+				if self.AttachmentPart and self.Attachments then
+					local attachment = Instance.new("Attachment")
+					attachment.Name = "Attachment" .. self.CurrentLength
+					attachment.Parent = self.AttachmentPart
+					attachment.WorldPosition = newPos
+					self.Attachments[self.CurrentLength] = attachment
 
-				-- Create beam from previous segment to this new one
-				if self.CurrentLength > 1 and self.Beams then
-					local beam = Instance.new("Beam")
-					beam.Name = "Beam" .. (self.CurrentLength - 1)
-					beam.Attachment0 = self.Attachments[self.CurrentLength - 1]
-					beam.Attachment1 = attachment
+					-- Create beam from previous segment to this new one
+					if self.CurrentLength > 1 and self.Beams then
+						local beam = Instance.new("Beam")
+						beam.Name = "Beam" .. (self.CurrentLength - 1)
+						beam.Attachment0 = self.Attachments[self.CurrentLength - 1]
+						beam.Attachment1 = attachment
 
-					-- Professional beam properties
-					local beamWidth = self:getBeamWidth(self.CurrentLength - 1, currentBaseSize)
-					beam.Width0 = beamWidth
-					beam.Width1 = beamWidth
-					beam.CurveSize0 = 0
-					beam.CurveSize1 = 0
-					beam.FaceCamera = true
-					beam.Segments = BEAM_SEGMENTS
-					beam.Texture = BEAM_TEXTURES.gradient
-					beam.TextureMode = Enum.TextureMode.Wrap
-					beam.TextureLength = 2
-					beam.TextureSpeed = BEAM_TEXTURE_SPEED
-					beam.LightEmission = 1
-					beam.LightInfluence = 0
-					beam.Brightness = 2
-					beam.Transparency = NumberSequence.new{
-						NumberSequenceKeypoint.new(0, 0),
-						NumberSequenceKeypoint.new(0.5, 0),
-						NumberSequenceKeypoint.new(1, 0.1)
-					}
+						-- Professional beam properties
+						local beamWidth = self:getBeamWidth(self.CurrentLength - 1, currentBaseSize)
+						beam.Width0 = beamWidth
+						beam.Width1 = beamWidth
+						beam.CurveSize0 = 0
+						beam.CurveSize1 = 0
+						beam.FaceCamera = true
+						beam.Segments = BEAM_SEGMENTS
+						beam.Texture = BEAM_TEXTURES.gradient
+						beam.TextureMode = Enum.TextureMode.Wrap
+						beam.TextureLength = 2
+						beam.TextureSpeed = BEAM_TEXTURE_SPEED
+						beam.LightEmission = 1
+						beam.LightInfluence = 0
+						beam.Brightness = 2
+						beam.Transparency = NumberSequence.new{
+							NumberSequenceKeypoint.new(0, 0),
+							NumberSequenceKeypoint.new(0.5, 0),
+							NumberSequenceKeypoint.new(1, 0.1)
+						}
 
-					-- Color matching
-					local prevColor = self:getSegmentColor(self.CurrentLength - 1)
-					local currColor = self:getSegmentColor(self.CurrentLength)
-					if prevColor == currColor then
-						beam.Color = ColorSequence.new(currColor)
-					else
-						beam.Color = ColorSequence.new({
-							ColorSequenceKeypoint.new(0, prevColor),
-							ColorSequenceKeypoint.new(1, currColor)
-						})
+						-- Color matching
+						local prevColor = self:getSegmentColor(self.CurrentLength - 1)
+						local currColor = self:getSegmentColor(self.CurrentLength)
+						if prevColor == currColor then
+							beam.Color = ColorSequence.new(currColor)
+						else
+							beam.Color = ColorSequence.new({
+								ColorSequenceKeypoint.new(0, prevColor),
+								ColorSequenceKeypoint.new(1, currColor)
+							})
+						end
+
+						beam.Parent = self.AttachmentPart
+						self.Beams[self.CurrentLength - 1] = beam
 					end
-
-					beam.Parent = self.AttachmentPart
-					self.Beams[self.CurrentLength - 1] = beam
 				end
-			end
 
-			-- Calculate final size using getSegmentSize
-			local finalSize = self:getSegmentSize(self.CurrentLength, currentBaseSize)
+				-- Calculate final size using getSegmentSize
+				local finalSize = self:getSegmentSize(self.CurrentLength, currentBaseSize)
 
-			task.spawn(function()
-				if not segment or not segment.Parent then return end
-				local growTime = 0.18
-				local t = 0
-				local startSize = Vector3new(0.1, 0.1, 0.1)
-				while t < growTime do
-					t = t + RunService.Heartbeat:Wait()
+				-- Initialize LOD state for new segment
+				self.segmentVisibility[self.CurrentLength] = true
+				self.lodStates[self.CurrentLength] = "near"
+
+				task.spawn(function()
 					if not segment or not segment.Parent then return end
-					local alpha = mathMin(t / growTime, 1)
-					segment.Size = startSize:Lerp(Vector3new(finalSize, finalSize, finalSize), alpha)
-					segment.Transparency = 1 - alpha
-				end
-				if segment and segment.Parent then
-					segment.Size = Vector3new(finalSize, finalSize, finalSize)
-					segment.Transparency = 0
-				end
-			end)
+					local growTime = 0.18
+					local t = 0
+					local startSize = Vector3new(0.1, 0.1, 0.1)
+					while t < growTime do
+						t = t + RunService.Heartbeat:Wait()
+						if not segment or not segment.Parent then return end
+						local alpha = mathMin(t / growTime, 1)
+						segment.Size = startSize:Lerp(Vector3new(finalSize, finalSize, finalSize), alpha)
+						segment.Transparency = 1 - alpha
+					end
+					if segment and segment.Parent then
+						segment.Size = Vector3new(finalSize, finalSize, finalSize)
+						segment.Transparency = 0
+					end
+				end)
+				
+				-- Update actual segment count
+				self.actualSegmentCount = self.CurrentLength
+			else
+				-- Just increase the length counter without creating segments
+				-- These will be "virtual" segments that exist in data but not visually
+			end
 		end
 	end
+	
+	-- Update visible segment count
+	self.visibleSegmentCount = math.min(self.CurrentLength, MAX_VISIBLE_SEGMENTS)
 end
 
 function AISnake:setConfidenceBuff()
@@ -2505,12 +2556,29 @@ function AISnake:updateMovement(dt)
 	-- Initialize frame counter if needed
 	self._segmentUpdateFrame = (self._segmentUpdateFrame or 0) + 1
 
-	-- Adaptive segment update skip based on snake length (less aggressive)
-	local segmentSkip = SEGMENT_UPDATE_SKIP
+	-- Get camera position for LOD
+	local camera = workspace.CurrentCamera
+	local cameraPos = camera and camera.CFrame.Position or self.Position
+	
+	-- Update visibility checks with LOD
+	if self._segmentUpdateFrame % VISIBILITY_CHECK_INTERVAL == 0 then
+		self:updateSegmentVisibility(cameraPos)
+	end
+	
+	-- Sync beams with segment visibility
+	if self._segmentUpdateFrame % BEAM_SYNC_INTERVAL == 0 then
+		self:syncBeamVisibility()
+	end
+
+	-- Calculate current base size with growth factor
+	local currentBaseSize = BASE_SIZE * self.growthFactor
+
+	-- Adaptive segment update skip based on snake length
+	local segmentSkip = 1
 	if self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
-		segmentSkip = 2  -- Only skip every other segment even for very long snakes
+		segmentSkip = 4  -- Skip more for very long snakes
 	elseif self.CurrentLength > LONG_SNAKE_THRESHOLD then
-		segmentSkip = 1  -- No skipping for medium-long snakes
+		segmentSkip = 2  -- Skip every other for long snakes
 	end
 
 	-- Update different segments on different frames to spread the load
@@ -2521,10 +2589,19 @@ function AISnake:updateMovement(dt)
 		self.Attachments[0].WorldPosition = self.HeadParts.head.Position
 	end
 
-	-- Update segments with adaptive skipping
-	for i = 1 + updateOffset, self.CurrentLength, segmentSkip do
+	-- Only update visible segments
+	local maxSegmentToUpdate = math.min(self.CurrentLength, self.visibleSegmentCount)
+
+	-- Update segments with adaptive skipping and LOD
+	for i = 1 + updateOffset, maxSegmentToUpdate, segmentSkip do
 		local segment = self.Segments[i]
 		if segment and segment.Parent then
+			-- Skip update if segment is culled
+			local lodState = self.lodStates[i]
+			if lodState == "culled" then
+				continue
+			end
+			
 			local delay = mathFloor(i * 1.2)
 			local targetData = self:getFromHistory(delay)
 			if targetData then
@@ -2549,7 +2626,15 @@ function AISnake:updateMovement(dt)
 					end
 				end
 
-				local newPos = currentSegmentPos:Lerp(segmentPos, followSpeed)
+				-- Use different follow speeds based on LOD
+				local lodFollowSpeed = followSpeed
+				if lodState == "far" then
+					lodFollowSpeed = 1 -- Instant update for far segments
+				elseif lodState == "mid" then
+					lodFollowSpeed = math.min(followSpeed * 1.2, 0.99)
+				end
+
+				local newPos = currentSegmentPos:Lerp(segmentPos, lodFollowSpeed)
 				segment.CFrame = CFramenew(newPos)
 
 				-- Update attachment position for this segment
@@ -2562,47 +2647,42 @@ function AISnake:updateMovement(dt)
 
 	-- Update attachment positions for skipped segments (to keep beams smooth)
 	if segmentSkip > 1 then
-		for i = 1, self.CurrentLength do
+		for i = 1, maxSegmentToUpdate do
 			if i % segmentSkip ~= updateOffset then
 				local segment = self.Segments[i]
 				if segment and segment.Parent and self.Attachments and self.Attachments[i] then
-					self.Attachments[i].WorldPosition = segment.Position
+					-- Only update if not culled
+					if self.lodStates[i] ~= "culled" then
+						self.Attachments[i].WorldPosition = segment.Position
+					end
 				end
 			end
 		end
 	end
 
-	-- For very long snakes, use even more aggressive optimization
-	if self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
-		-- Only update tail segments every 10 frames
-		if self._segmentUpdateFrame % 10 == 0 then
-			local tailStart = mathFloor(self.CurrentLength * 0.7)  -- Last 30% is tail
-			for i = tailStart, self.CurrentLength, 10 do
+	-- For very long snakes, use batch updates for tail
+	if self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD * 2 then
+		-- Only update tail segments every 20 frames
+		if self._segmentUpdateFrame % 20 == 0 then
+			local tailStart = mathFloor(self.visibleSegmentCount * 0.6)  -- Last 40% is tail
+			local tailEnd = math.min(self.CurrentLength, self.visibleSegmentCount)
+			
+			-- Batch update tail segments
+			for i = tailStart, tailEnd, 20 do
 				local segment = self.Segments[i]
-				if segment and segment.Parent then
+				if segment and segment.Parent and self.lodStates[i] ~= "culled" then
 					local delay = mathFloor(i * 1.2)
 					local targetData = self:getFromHistory(delay)
 					if targetData then
-						-- Same spacing as main segments
-						local spacingMultiplier = 0.15
-						if self.CurrentLength > 1500 then
-							spacingMultiplier = 0.2
-						end
+						local spacingMultiplier = self.CurrentLength > 1500 and 0.2 or 0.15
 						local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
-
-						-- Anti-gap for tail too
-						if i > 300 then
-							local prevSegment = self.Segments[i - 1]
-							if prevSegment and prevSegment.Parent then
-								local gap = (segment.Position - prevSegment.Position).Magnitude
-								if gap > self.Config.SegmentSpacing * 1.5 then
-									local dir = (prevSegment.Position - segment.Position).Unit
-									segmentPos = prevSegment.Position - dir * self.Config.SegmentSpacing
-								end
-							end
+						
+						-- Direct set for tail to reduce calculations
+						segment.Position = segmentPos
+						
+						if self.Attachments and self.Attachments[i] then
+							self.Attachments[i].WorldPosition = segmentPos
 						end
-
-						segment.Position = segmentPos  -- Direct position set for tail
 					end
 				end
 			end
@@ -2938,6 +3018,149 @@ function AISnake:getBeamWidth(index, baseSize)
 	return avgSize * beamWidthBase * beamTaper
 end
 
+-- Calculate LOD level based on distance (from OptimizedSnakeSystem)
+function AISnake:calculateLODLevel(segmentIndex, cameraPosition)
+	if not cameraPosition then return "near" end
+	
+	local segment = self.Segments[segmentIndex]
+	if not segment or not segment.Parent then return "culled" end
+	
+	-- Always full quality for first segments
+	if segmentIndex <= FORCE_RENDER_SEGMENTS then
+		return "near"
+	end
+	
+	local distance = (segment.Position - cameraPosition).Magnitude
+	
+	if distance <= LOD_DISTANCE_NEAR then
+		return "near"
+	elseif distance <= LOD_DISTANCE_MID then
+		return "mid"
+	elseif distance <= LOD_DISTANCE_FAR then
+		return "far"
+	else
+		return "culled"
+	end
+end
+
+-- Apply LOD settings to segment
+function AISnake:applyLODToSegment(segment, lodLevel, index)
+	if not segment or not segment.Parent then return end
+	
+	-- Store LOD state
+	self.lodStates[index] = lodLevel
+	
+	if lodLevel == "culled" then
+		-- Hide distant segments
+		segment.Transparency = 1
+		segment.CanTouch = false
+		segment.CanQuery = false
+		-- Disable glow
+		local glow = segment:FindFirstChild("Glow")
+		if glow then
+			glow.Enabled = false
+		end
+	elseif lodLevel == "far" then
+		segment.Transparency = 0.3
+		segment.CanTouch = false
+		segment.CanQuery = false
+		-- Disable glow
+		local glow = segment:FindFirstChild("Glow")
+		if glow then
+			glow.Enabled = false
+		end
+	elseif lodLevel == "mid" then
+		segment.Transparency = 0
+		segment.CanTouch = index <= 50
+		segment.CanQuery = false
+		-- Strategic glow for mid distance
+		local glow = segment:FindFirstChild("Glow")
+		if glow then
+			glow.Enabled = (index % 3 == 0)
+		end
+	else -- near
+		segment.Transparency = 0
+		segment.CanTouch = index <= 50
+		segment.CanQuery = false
+		-- Full glow for near segments
+		local glow = segment:FindFirstChild("Glow")
+		if glow then
+			glow.Enabled = self:shouldHaveGlow(index)
+		end
+	end
+	
+	-- Mark visibility
+	self.segmentVisibility[index] = lodLevel ~= "culled"
+end
+
+-- Check if segment should have glow
+function AISnake:shouldHaveGlow(index)
+	if index <= GLOW_FALLOFF_START then
+		return true
+	elseif index <= 100 then
+		return index % 2 == 0
+	elseif index <= 200 then
+		return index % 3 == 0
+	else
+		return index % 5 == 0
+	end
+end
+
+-- Update visibility for all segments
+function AISnake:updateSegmentVisibility(cameraPosition)
+	-- Don't render more than MAX_VISIBLE_SEGMENTS
+	local maxToRender = math.min(self.CurrentLength, MAX_VISIBLE_SEGMENTS)
+	
+	for i = 0, maxToRender do
+		local segment = self.Segments[i]
+		if segment and segment.Parent then
+			local lodLevel = self:calculateLODLevel(i, cameraPosition)
+			self:applyLODToSegment(segment, lodLevel, i)
+		end
+	end
+	
+	-- Hide segments beyond MAX_VISIBLE_SEGMENTS
+	for i = maxToRender + 1, self.CurrentLength do
+		local segment = self.Segments[i]
+		if segment and segment.Parent then
+			self:applyLODToSegment(segment, "culled", i)
+		end
+	end
+	
+	-- Update visible segment count
+	self.visibleSegmentCount = maxToRender
+end
+
+-- Sync beam visibility with segments
+function AISnake:syncBeamVisibility()
+	for i, beam in pairs(self.Beams) do
+		if beam and beam.Parent and type(i) == "number" then
+			local seg1Visible = self.segmentVisibility[i] ~= false
+			local seg2Visible = self.segmentVisibility[i + 1] ~= false
+			
+			-- Only show beam if both connected segments are visible
+			beam.Enabled = seg1Visible and seg2Visible
+			
+			-- Adjust transparency based on LOD
+			local lod1 = self.lodStates[i] or "near"
+			local lod2 = self.lodStates[i + 1] or "near"
+			
+			if not beam.Enabled then
+				-- Already hidden
+			elseif lod1 == "far" or lod2 == "far" then
+				beam.Transparency = NumberSequence.new(0.5)
+			elseif lod1 == "mid" or lod2 == "mid" then
+				beam.Transparency = NumberSequence.new(0.2)
+			else
+				beam.Transparency = NumberSequence.new{
+					NumberSequenceKeypoint.new(0, 0),
+					NumberSequenceKeypoint.new(0.5, 0),
+					NumberSequenceKeypoint.new(1, 0.1)
+				}
+			end
+		end
+	end
+end
 
 
 

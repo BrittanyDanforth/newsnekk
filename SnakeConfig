@@ -69,7 +69,7 @@ return {
 		BoostChance = 0.15,      -- Base chance to boost per frame
 		
 		-- Growth settings
-		InitialLength = 10,      -- AI starts same as players
-		MaxLength = 1000,        -- AI max length (performance)
+		InitialLength = 100,     -- AI starts with reasonable length
+		MaxLength = 2000,        -- AI max length (capped for performance)
 	}
 }
