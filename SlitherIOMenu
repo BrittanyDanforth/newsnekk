@@ -11,6 +11,10 @@ local TweenService = game:GetService("TweenService")
 
 
 local LocalPlayer = Players.LocalPlayer
+
+-- Track active death handlers to cancel them when needed
+local activeDeathHandler = nil
+
 -- Hide the default Roblox leaderboard
 StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
 -- Helper to set graphics mode (attribute + remote event)
@@ -611,6 +615,13 @@ createMenu(function()
 end)
 -- Enhanced death handling with better menu timing
 local function onCharacterAdded(character)
+	-- Cancel any active death handler from previous character
+	if activeDeathHandler then
+		task.cancel(activeDeathHandler)
+		activeDeathHandler = nil
+		print("🛑 Cancelled previous death handler")
+	end
+	
 	-- Hide menu when spawning
 	if currentMenu then
 		currentMenu:Destroy()
@@ -633,6 +644,14 @@ local function onCharacterAdded(character)
 	local humanoid = character:FindFirstChild("Humanoid")
 	if humanoid then
 		humanoid.Died:Connect(function()
+			-- Cancel any previous death handler
+			if activeDeathHandler then
+				task.cancel(activeDeathHandler)
+				activeDeathHandler = nil
+			end
+			
+			-- Start new death handler
+			activeDeathHandler = task.spawn(function()
 			-- Check if player has revive gamepass and uses available
 			local hasRevive = LocalPlayer:GetAttribute("HasRevive")
 			local revivesAvailable = LocalPlayer:GetAttribute("RevivesAvailable") or 0
@@ -717,23 +736,40 @@ local function onCharacterAdded(character)
 
 			-- Only show menu if player didn't revive AND is still dead
 			if not isReviving and humanoid.Health <= 0 then
-				print("📋 Showing respawn menu")
-				-- Show the menu again for respawn
-				createMenu(function()
-					requestRespawn()
-				end)
+				-- Double check the player is actually dead and not in a new character
+				local currentChar = LocalPlayer.Character
+				if currentChar and currentChar == character then
+					-- Same character, check if really dead
+					local currentHumanoid = currentChar:FindFirstChild("Humanoid")
+					if currentHumanoid and currentHumanoid.Health <= 0 then
+						print("📋 Showing respawn menu")
+						-- Show the menu again for respawn
+						createMenu(function()
+							requestRespawn()
+						end)
+					else
+						print("⚠️ Character is alive, not showing menu")
+					end
+				else
+					print("⚠️ Character changed, not showing menu for old death")
+				end
 			elseif isReviving then
 				print("🎮 Player revived - not showing menu")
 			else
 				-- Edge case: timer expired but player isn't marked as reviving
 				-- Check if still dead after all that waiting
-				if humanoid.Health <= 0 then
+				local currentChar = LocalPlayer.Character
+				if currentChar and currentChar == character and humanoid.Health <= 0 then
 					print("⏰ Timer expired, player still dead - showing menu")
 					createMenu(function()
 						requestRespawn()
 					end)
 				end
 			end
+			
+			-- Clear the handler reference when done
+			activeDeathHandler = nil
+			end) -- End of task.spawn
 		end)
 	end
 end
