@@ -1,5 +1,6 @@
--- Global SnakeConfig for both Player and AI snakes This is a ModuleScript inside ReplicatedStorage
-
+-- Global SnakeConfig for AI snakes (NOT used by player snakes!)
+-- Player snake config is in SnakeSystemIntegration's DEFAULT_CONFIG
+-- This is a ModuleScript inside ReplicatedStorage
 
 return {
 	-- SNAKE DIMENSIONS
@@ -8,8 +9,8 @@ return {
 	SegmentSpacing = 2.2,
 	SegmentGap = 3.0, -- For SnakeMovement path system
 
-	-- BODY SETTINGS
-	InitialLength = 10,  -- Default starting length for players
+	-- BODY SETTINGS (FOR AI ONLY - Players use SnakeSystemIntegration)
+	InitialLength = 10,      -- NOT USED BY PLAYERS! Only AI uses this
 	MaxSegments = 2450,
 
 	-- ENHANCED COLORS (Default skin - better green gradient)
