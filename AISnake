@@ -3145,13 +3145,13 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	if headDistance < 200 then
 		segmentsToShow = self.CurrentLength  -- Show all
 	elseif headDistance < 400 then
-		segmentsToShow = math.floor(self.CurrentLength * 0.7)  -- 70%
+		segmentsToShow = math.floor(self.CurrentLength * 0.8)  -- 80%
 	elseif headDistance < 600 then
-		segmentsToShow = math.floor(self.CurrentLength * 0.4)  -- 40%
+		segmentsToShow = math.floor(self.CurrentLength * 0.5)  -- 50%
 	elseif headDistance < 800 then
-		segmentsToShow = math.max(20, math.floor(self.CurrentLength * 0.2))  -- 20% but at least 20
+		segmentsToShow = math.max(30, math.floor(self.CurrentLength * 0.3))  -- 30% but at least 30
 	else
-		segmentsToShow = math.max(10, math.floor(self.CurrentLength * 0.1))  -- 10% but at least 10
+		segmentsToShow = math.max(15, math.floor(self.CurrentLength * 0.15))  -- 15% but at least 15
 	end
 	
 	-- Clamp to limits
@@ -3161,6 +3161,23 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	if self.Segments[0] then
 		self:applyLODToSegment(self.Segments[0], "near", 0)
 		self.Segments[0].Transparency = 0  -- Head always fully opaque
+	end
+	
+	-- Update eye visibility based on head distance
+	if self.HeadParts then
+		local eyeVisible = headDistance < 600  -- Hide eyes when far away
+		if self.HeadParts.leftEye then
+			self.HeadParts.leftEye.Transparency = eyeVisible and 0 or 1
+		end
+		if self.HeadParts.rightEye then
+			self.HeadParts.rightEye.Transparency = eyeVisible and 0 or 1
+		end
+		if self.HeadParts.leftPupil then
+			self.HeadParts.leftPupil.Transparency = eyeVisible and 0 or 1
+		end
+		if self.HeadParts.rightPupil then
+			self.HeadParts.rightPupil.Transparency = eyeVisible and 0 or 1
+		end
 	end
 	
 	-- Update segments continuously from head
@@ -3185,39 +3202,44 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 				
 				self:applyLODToSegment(segment, lodLevel, i)
 				
-				-- Fade out segments near the cutoff point for smooth transition
-				local fadeStart = segmentsToShow * 0.8
-				if i > fadeStart then
-					-- Fade out the last 20% of visible segments
-					local fadeProgress = (i - fadeStart) / (segmentsToShow - fadeStart)
-					segment.Transparency = math.min(0.9, fadeProgress * 0.9)
+				-- Calculate transparency - NEVER make segments fully invisible when they should be shown
+				local baseTransparency = 0
+				if headDistance < 200 then
+					baseTransparency = 0
+				elseif headDistance < 400 then
+					baseTransparency = 0.1
+				elseif headDistance < 600 then
+					baseTransparency = 0.2
 				else
-					-- Normal distance-based transparency
-					if headDistance < 200 then
-						segment.Transparency = 0
-					elseif headDistance < 400 then
-						segment.Transparency = 0.1
-					elseif headDistance < 600 then
-						segment.Transparency = 0.3
-					else
-						segment.Transparency = 0.5
-					end
+					baseTransparency = 0.3  -- Max 30% transparent, not 50%
 				end
 				
-				-- Update glow based on distance
+				-- Fade out segments near the cutoff point
+				local fadeStart = segmentsToShow * 0.7  -- Start fading at 70%
+				if i > fadeStart and i < segmentsToShow then
+					-- Gradual fade for last 30% of visible segments
+					local fadeProgress = (i - fadeStart) / (segmentsToShow - fadeStart)
+					segment.Transparency = math.min(0.7, baseTransparency + fadeProgress * 0.5)
+				else
+					segment.Transparency = baseTransparency
+				end
+				
+				-- Update glow based on distance and visibility
 				local glow = segment:FindFirstChild("Glow")
 				if glow then
-					if headDistance < 400 and self:shouldHaveGlow(i) then
+					if headDistance < 600 and self:shouldHaveGlow(i) then
+						-- Scale down glow with distance
+						local glowScale = math.max(0, 1 - (headDistance / 600))
 						glow.Enabled = true
-						glow.Brightness = GLOW_INTENSITY * (1 - segment.Transparency)
-						glow.Range = GLOW_RANGE_BASE * (1 - segment.Transparency * 0.5)
+						glow.Brightness = GLOW_INTENSITY * glowScale * (1 - segment.Transparency)
+						glow.Range = GLOW_RANGE_BASE * glowScale
 					else
 						glow.Enabled = false
 					end
 				end
 			end
 		else
-			-- This segment should be hidden
+			-- This segment should be completely hidden
 			if segment and segment.Parent then
 				self:applyLODToSegment(segment, "culled", i)
 			end
@@ -3235,37 +3257,50 @@ function AISnake:syncBeamVisibility()
 	for i = 0, math.min(self.CurrentLength - 1, DYNAMIC_SEGMENT_LIMIT - 1) do
 		local beam = self.Beams[i]
 		if beam and beam.Parent then
-			-- Check if this beam should be visible
-			if i < self.visibleSegmentCount and self.segmentVisibility[i] ~= false and self.segmentVisibility[i + 1] ~= false then
-				beam.Enabled = true
+			local seg1 = self.Segments[i]
+			local seg2 = self.Segments[i + 1]
+			
+			-- Check if both segments exist and are visible
+			if seg1 and seg2 and seg1.Parent and seg2.Parent and 
+			   i < self.visibleSegmentCount and 
+			   self.segmentVisibility[i] ~= false and 
+			   self.segmentVisibility[i + 1] ~= false then
 				
-				-- Get segment transparency for smooth beam fading
-				local seg1 = self.Segments[i]
-				local seg2 = self.Segments[i + 1]
+				-- Get segment transparencies
+				local trans1 = seg1.Transparency or 0
+				local trans2 = seg2.Transparency or 0
 				
-				if seg1 and seg2 then
-					-- Use average transparency
-					local avgTransparency = (seg1.Transparency + seg2.Transparency) / 2
-					beam.Transparency = NumberSequence.new(avgTransparency)
-					beam.Brightness = 2 * (1 - avgTransparency)
+				-- Only show beam if both segments are reasonably visible
+				if trans1 < 0.9 and trans2 < 0.9 then
+					beam.Enabled = true
+					
+					-- Use average transparency but add a bit more for beams
+					local avgTransparency = (trans1 + trans2) / 2
+					beam.Transparency = NumberSequence.new(math.min(avgTransparency + 0.1, 0.8))
+					beam.Brightness = math.max(0.5, 2 * (1 - avgTransparency))
+				else
+					-- Hide beam if segments are too transparent
+					beam.Enabled = false
 				end
 			else
+				-- Hide beam if segments don't exist or are culled
 				beam.Enabled = false
 			end
 		end
 	end
 	
-	-- Handle overlap beams more simply
+	-- Handle overlap beams - only show for visible segments
 	for key, beam in pairs(self.Beams) do
 		if type(key) == "string" and beam and beam.Parent then
 			if string.find(key, "overlap") then
 				local index = tonumber(string.match(key, "%d+"))
 				if index and index < self.visibleSegmentCount - 2 then
-					beam.Enabled = true
-					-- Apply transparency
-					if self.Segments[index] then
-						local transparency = self.Segments[index].Transparency or 0
-						beam.Transparency = NumberSequence.new(math.min(transparency + 0.2, 0.9))
+					local seg = self.Segments[index]
+					if seg and seg.Parent and seg.Transparency < 0.7 then
+						beam.Enabled = true
+						beam.Transparency = NumberSequence.new(math.min(seg.Transparency + 0.3, 0.9))
+					else
+						beam.Enabled = false
 					end
 				else
 					beam.Enabled = false
