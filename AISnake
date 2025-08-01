@@ -189,7 +189,7 @@ local function resetSegment(segment, config)
 	segment.Shape = Enum.PartType.Ball
 	segment.TopSurface = Enum.SurfaceType.Smooth
 	segment.BottomSurface = Enum.SurfaceType.Smooth
-	segment.Color = config.BodyColors[1]
+	-- Don't set color here - let createSegment handle it
 	segment.Name = "AISegment"
 	-- Clean up children efficiently
 	for _, child in segment:GetChildren() do
@@ -2041,19 +2041,36 @@ function AISnake:grow(amount)
 		self.growthFactor = self:calculateGrowthFactor()
 		local currentBaseSize = BASE_SIZE * self.growthFactor
 		
-		-- Smoothly update existing segment sizes
+		-- Smoothly update existing segment sizes and beam widths
 		task.spawn(function()
+			-- Update segments
 			for i = 0, math.min(self.CurrentLength, FORCE_RENDER_SEGMENTS) do
 				local segment = self.Segments[i]
 				if segment and segment.Parent then
 					local targetSize = self:getSegmentSize(i, currentBaseSize)
 					-- Use TweenService for smooth size transition
-					local tween = game:GetService("TweenService"):Create(
+					local tween = TweenService:Create(
 						segment,
 						TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 						{Size = Vector3.new(targetSize, targetSize, targetSize)}
 					)
 					tween:Play()
+				end
+			end
+			
+			-- Update beam widths to match new segment sizes
+			task.wait(0.1) -- Small delay to let segment tweens start
+			for i = 0, math.min(self.CurrentLength - 1, FORCE_RENDER_SEGMENTS) do
+				local beam = self.Beams[i]
+				if beam and beam.Parent then
+					local beamWidth = self:getBeamWidth(i, currentBaseSize)
+					-- Tween beam width for smooth transition
+					local beamTween = TweenService:Create(
+						beam,
+						TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+						{Width0 = beamWidth, Width1 = beamWidth}
+					)
+					beamTween:Play()
 				end
 			end
 		end)
@@ -3242,6 +3259,10 @@ function AISnake:ensureSegmentExists(index)
 	
 	local segment = createSegment(index, pos, color, self.Config, self.Model, index)
 	self.Segments[index] = segment
+	
+	-- Ensure correct color and material (double-check)
+	segment.Color = color
+	segment.Material = self.Config.BodyMaterial or Enum.Material.Neon
 	
 	-- Set proper size
 	local segmentSize = self:getSegmentSize(index, currentBaseSize)
