@@ -1713,14 +1713,18 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self.growthFactor = self:calculateGrowthFactor()
 
 	-- FIXED: Proper position history initialization
-	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.2) + 20
+	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.5) + 50  -- Increased buffer
 	self.PositionHistory = table.create(self.MaxHistorySize)
 	self.HistoryHead = 1
-
+	
 	-- Initialize history at spawn position to prevent gaps
+	-- CRITICAL: Pre-fill history with slight variations to ensure smooth initial movement
+	local initialDir = self.Direction
 	for i = 1, self.MaxHistorySize do
-		-- All history starts at the same position
-		self.PositionHistory[i] = { position = self.Position, lookVector = self.Direction }
+		-- Create a slight backward trail for initial history
+		local historyOffset = (i - 1) * 0.1  -- Small offset per history entry
+		local historyPos = self.Position - initialDir * historyOffset
+		self.PositionHistory[i] = { position = historyPos, lookVector = initialDir }
 	end
 
 	function self:addToHistory(data)
@@ -1974,17 +1978,35 @@ function AISnake:grow(amount)
 				-- This prevents visual glitches when growing from far away
 				local newPos
 				if self.CurrentLength > 1 then
-					-- Calculate position based on history to ensure proper spacing
-					local historyIndex = math.floor(self.CurrentLength * 1.2)
-					local historyData = self:getFromHistory(historyIndex)
-					if historyData then
-						newPos = historyData.position
+					-- Calculate position based on the tail of the snake
+					-- Use deeper history to ensure new segment appears at the tail
+					local tailDelay = math.floor(self.CurrentLength * 1.2)
+					tailDelay = math.min(tailDelay, self.MaxHistorySize - 5)
+					local tailData = self:getFromHistory(tailDelay)
+					
+					if tailData then
+						-- Place new segment behind the tail position
+						newPos = tailData.position - tailData.lookVector * self.Config.SegmentSpacing * 0.15
 					else
-						-- Fallback to head position with offset
-						newPos = self.Position - self.Direction * (self.Config.SegmentSpacing * self.CurrentLength * 0.15)
+						-- Fallback: calculate based on previous segment
+						local prevSegment = self.Segments[self.CurrentLength - 1]
+						if prevSegment and prevSegment.Parent then
+							local prevPrevSegment = self.Segments[self.CurrentLength - 2]
+							if prevPrevSegment and prevPrevSegment.Parent then
+								-- Use direction from previous segments
+								local dir = (prevSegment.Position - prevPrevSegment.Position).Unit
+								newPos = prevSegment.Position + dir * self.Config.SegmentSpacing
+							else
+								-- Use head direction as fallback
+								newPos = prevSegment.Position - self.Direction * self.Config.SegmentSpacing
+							end
+						else
+							-- Ultimate fallback
+							newPos = self.Position - self.Direction * (self.Config.SegmentSpacing * self.CurrentLength * 0.15)
+						end
 					end
 				else
-					newPos = self.Position
+					newPos = self.Position - self.Direction * self.Config.SegmentSpacing
 				end
 				
 				local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength)
@@ -1994,6 +2016,9 @@ function AISnake:grow(amount)
 					break
 				end
 				self.Segments[self.CurrentLength] = segment
+				
+				-- CRITICAL: Mark segment as just grown for smooth integration
+				segment:SetAttribute("JustGrown", true)
 				
 				-- Ensure segment uses correct material from our config
 				segment.Material = self.Config.BodyMaterial or Enum.Material.Neon
@@ -2817,6 +2842,9 @@ function AISnake:updateMovement(dt)
 			end
 			
 			local delay = mathFloor(i * 1.2)
+			-- CRITICAL FIX: Ensure delay doesn't exceed history size
+			delay = math.min(delay, self.MaxHistorySize - 5)
+			
 			local targetData = self:getFromHistory(delay)
 			if targetData then
 				-- Use EXACT same spacing as CharacterSetup
@@ -2826,7 +2854,19 @@ function AISnake:updateMovement(dt)
 				end
 				local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
 				local currentSegmentPos = segment.Position
-
+				
+				-- CRITICAL FIX: For newly grown segments, ensure smooth initial positioning
+				if segment:GetAttribute("JustGrown") then
+					-- Place new segment directly at target position for smooth integration
+					segment.CFrame = CFramenew(segmentPos)
+					segment:SetAttribute("JustGrown", false)
+					-- Update attachment immediately
+					if self.Attachments and self.Attachments[i] then
+						self.Attachments[i].WorldPosition = segmentPos
+					end
+					continue
+				end
+				
 				-- Anti-gap check (from CharacterSetup)
 				if i > 1 then
 					local prevSegment = self.Segments[i - 1]
@@ -3343,13 +3383,25 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 		end
 	end
 	
-	-- Update segments continuously from head
+	-- Update segments with SMOOTH transitions
 	for i = 1, self.CurrentLength do
-		local segment = self.Segments[i]
-		
 		if i <= segmentsToShow then
-			-- This segment should be visible
+			-- This segment should be visible - ensure it exists first
+			local segment = self.Segments[i]
+			if not segment then
+				-- Create missing segment if within limits
+				if i <= DYNAMIC_SEGMENT_LIMIT then
+					segment = self:ensureSegmentExists(i)
+				end
+			end
+			
 			if segment and segment.Parent then
+				-- CRITICAL: Skip visibility updates for segments that just grew
+				if segment:GetAttribute("JustGrown") then
+					-- Let the growth animation handle visibility
+					continue
+				end
+				
 				-- Calculate segment-specific distance
 				local segmentDistance = (segment.Position - cameraPosition).Magnitude
 				
