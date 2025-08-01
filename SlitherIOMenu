@@ -617,10 +617,16 @@ local function onCharacterAdded(character)
 		currentMenu = nil
 	end
 
-	-- Check if we're reviving - if so, don't set up death handler
-	if LocalPlayer:GetAttribute("RevivingNow") or LocalPlayer:GetAttribute("JustRevived") then
-		print("🔄 Player is reviving - skipping menu setup")
+	-- Check if we're actively reviving right now
+	if LocalPlayer:GetAttribute("RevivingNow") then
+		print("🔄 Player is actively reviving - skipping menu setup")
 		return
+	end
+	
+	-- Clear JustRevived flag since we're now spawned
+	if LocalPlayer:GetAttribute("JustRevived") then
+		print("✅ Clearing JustRevived flag")
+		LocalPlayer:SetAttribute("JustRevived", false)
 	end
 
 	-- Listen for death to show menu again
