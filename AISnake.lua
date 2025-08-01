@@ -2751,8 +2751,13 @@ function AISnake:updateMovement(dt)
 			end
 			
 			-- Additional validation to prevent killing from invisible segments
-			if otherPart.Transparency and otherPart.Transparency > 0.9 then
-				continue  -- Skip nearly invisible segments
+			if otherPart.Transparency and otherPart.Transparency > 0.8 then
+				continue  -- Skip transparent segments
+			end
+			
+			-- Also check if the segment has collision enabled
+			if not otherPart.CanTouch then
+				continue  -- Skip segments with collision disabled
 			end
 
 			if data.type == "AI_HEAD" then
@@ -2901,8 +2906,8 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 
 				for i = 1, #snake.Segments, 4 do
 					local segment = snake.Segments[i]
-					-- Only insert visible segments into spatial grid
-					if segment and segment.Parent and segment.Transparency < 0.9 then
+					-- Only insert visible segments with collision enabled into spatial grid
+					if segment and segment.Parent and segment.Transparency < 0.8 and segment.CanTouch then
 						SpatialGrid.Insert(segment, snake, "AI_SEGMENT")
 					end
 				end
@@ -3142,50 +3147,79 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	-- Calculate distance from camera to snake head
 	local headDistance = (self.HeadParts.head.Position - cameraPosition).Magnitude
 	
-	-- Simple visibility rule - show segments based on distance
-	local maxVisibleDistance = 1000  -- Max distance to show any segments
+	-- ALWAYS show most of the snake - like slither.io
 	local segmentsToShow = self.CurrentLength
 	
-	-- If snake is too far, limit visible segments
-	if headDistance > 800 then
-		segmentsToShow = math.min(20, self.CurrentLength)  -- Show at least head + some body
-	elseif headDistance > 600 then
-		segmentsToShow = math.min(50, self.CurrentLength)
-	elseif headDistance > 400 then
-		segmentsToShow = math.min(100, self.CurrentLength)
+	-- Only slightly reduce visible segments when very far
+	if headDistance > 1200 then
+		segmentsToShow = math.max(self.CurrentLength - 20, math.floor(self.CurrentLength * 0.8))
+	elseif headDistance > 800 then
+		segmentsToShow = math.max(self.CurrentLength - 10, math.floor(self.CurrentLength * 0.9))
 	else
-		segmentsToShow = self.CurrentLength  -- Show all when close
+		segmentsToShow = self.CurrentLength  -- Show all when reasonably close
 	end
 	
 	-- Clamp to limits
 	segmentsToShow = math.min(segmentsToShow, DYNAMIC_SEGMENT_LIMIT)
 	
-	-- Update segments - SIMPLE approach, no fancy fading
+	-- Update segments with gradual transparency based on distance
 	for i = 0, self.CurrentLength do
 		local segment = self.Segments[i]
 		if segment and segment.Parent then
 			if i <= segmentsToShow then
-				-- Segment is visible - set it to fully visible
-				segment.Transparency = 0
+				-- Calculate segment-specific distance for transparency
+				local segmentDistance = (segment.Position - cameraPosition).Magnitude
+				
+				-- Gradual transparency based on distance - NEVER fully invisible
+				local transparency = 0
+				if segmentDistance > 1000 then
+					transparency = 0.7  -- Max 70% transparent
+				elseif segmentDistance > 800 then
+					transparency = 0.5
+				elseif segmentDistance > 600 then
+					transparency = 0.3
+				elseif segmentDistance > 400 then
+					transparency = 0.15
+				else
+					transparency = 0  -- Fully opaque when close
+				end
+				
+				-- Fade based on position in snake (tail fades more)
+				if i > segmentsToShow * 0.7 then
+					local fadeFactor = (i - segmentsToShow * 0.7) / (segmentsToShow * 0.3)
+					transparency = math.min(0.8, transparency + fadeFactor * 0.3)
+				end
+				
+				segment.Transparency = transparency
 				self.segmentVisibility[i] = true
-				self.lodStates[i] = "near"
+				self.lodStates[i] = transparency < 0.5 and "near" or "far"
 				
-				-- Enable collision for first few segments only
-				segment.CanTouch = (i <= 50)
-				segment.CanQuery = (i <= 10)
+				-- Only enable collision for visible segments
+				if transparency < 0.8 then
+					segment.CanTouch = (i <= 50)
+					segment.CanQuery = (i <= 10)
+				else
+					-- Disable collision for very transparent segments
+					segment.CanTouch = false
+					segment.CanQuery = false
+				end
 				
-				-- Update glow
+				-- Update glow based on transparency
 				local glow = segment:FindFirstChild("Glow")
-				if glow and self:shouldHaveGlow(i) and headDistance < 600 then
-					glow.Enabled = true
-					glow.Brightness = GLOW_INTENSITY
-					glow.Range = GLOW_RANGE_BASE
+				if glow and self:shouldHaveGlow(i) then
+					if transparency < 0.5 and headDistance < 600 then
+						glow.Enabled = true
+						glow.Brightness = GLOW_INTENSITY * (1 - transparency)
+						glow.Range = GLOW_RANGE_BASE * (1 - transparency)
+					else
+						glow.Enabled = false
+					end
 				elseif glow then
 					glow.Enabled = false
 				end
 			else
-				-- Segment is not visible - hide it completely
-				segment.Transparency = 1
+				-- Only hide segments that are way beyond visible count
+				segment.Transparency = 0.9
 				self.segmentVisibility[i] = false
 				self.lodStates[i] = "culled"
 				segment.CanTouch = false
@@ -3203,17 +3237,18 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	-- Update eye visibility
 	if self.HeadParts then
 		local eyeVisible = headDistance < 600
+		local eyeTransparency = eyeVisible and 0 or 1
 		if self.HeadParts.leftEye then
-			self.HeadParts.leftEye.Transparency = eyeVisible and 0 or 1
+			self.HeadParts.leftEye.Transparency = eyeTransparency
 		end
 		if self.HeadParts.rightEye then
-			self.HeadParts.rightEye.Transparency = eyeVisible and 0 or 1
+			self.HeadParts.rightEye.Transparency = eyeTransparency
 		end
 		if self.HeadParts.leftPupil then
-			self.HeadParts.leftPupil.Transparency = eyeVisible and 0 or 1
+			self.HeadParts.leftPupil.Transparency = eyeTransparency
 		end
 		if self.HeadParts.rightPupil then
-			self.HeadParts.rightPupil.Transparency = eyeVisible and 0 or 1
+			self.HeadParts.rightPupil.Transparency = eyeTransparency
 		end
 	end
 	
@@ -3238,30 +3273,46 @@ function AISnake:syncBeamVisibility()
 			local seg1 = self.Segments[i]
 			local seg2 = self.Segments[i + 1]
 			
-			-- Check if both segments exist and are visible
-			if seg1 and seg2 and seg1.Parent and seg2.Parent and 
-			   self.segmentVisibility[i] and self.segmentVisibility[i + 1] then
-				-- Both segments are visible - show beam
-				beam.Enabled = true
-				beam.Transparency = NumberSequence.new(0)  -- Fully opaque
-				beam.Brightness = 2
+			-- Check if both segments exist
+			if seg1 and seg2 and seg1.Parent and seg2.Parent then
+				local trans1 = seg1.Transparency or 0
+				local trans2 = seg2.Transparency or 0
+				local avgTrans = (trans1 + trans2) / 2
+				
+				-- Show beam if segments are reasonably visible
+				if avgTrans < 0.85 then
+					beam.Enabled = true
+					-- Beam transparency matches segment transparency
+					beam.Transparency = NumberSequence.new(avgTrans)
+					beam.Brightness = math.max(0.5, 2 * (1 - avgTrans))
+				else
+					-- Hide beam only if segments are nearly invisible
+					beam.Enabled = false
+				end
 			else
-				-- One or both segments hidden - hide beam
 				beam.Enabled = false
 			end
 		end
 	end
 	
-	-- Handle overlap beams - simpler logic
+	-- Handle overlap beams
 	for key, beam in pairs(self.Beams) do
 		if type(key) == "string" and beam and beam.Parent then
 			if string.find(key, "overlap") then
 				local index = tonumber(string.match(key, "%d+"))
-				if index and self.segmentVisibility[index] and 
-				   self.segmentVisibility[index + 1] and 
-				   self.segmentVisibility[index + 2] then
-					beam.Enabled = true
-					beam.Transparency = NumberSequence.new(0.3)
+				if index and index <= self.visibleSegmentCount - 2 then
+					local seg = self.Segments[index]
+					if seg and seg.Parent then
+						local segTrans = seg.Transparency or 0
+						if segTrans < 0.8 then
+							beam.Enabled = true
+							beam.Transparency = NumberSequence.new(math.min(0.9, segTrans + 0.2))
+						else
+							beam.Enabled = false
+						end
+					else
+						beam.Enabled = false
+					end
 				else
 					beam.Enabled = false
 				end
