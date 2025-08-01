@@ -636,12 +636,15 @@ end)
 local function onCharacterAdded(character)
 	-- Cancel any active death handler from previous character
 	if activeDeathHandler then
-		task.cancel(activeDeathHandler)
+		pcall(function()
+			task.cancel(activeDeathHandler)
+		end)
 		activeDeathHandler = nil
+		isProcessingDeath = false
 		print("🛑 Cancelled previous death handler")
 	end
 	
-	-- Reset death processing flag
+	-- Reset death processing flag (in case it wasn't reset above)
 	isProcessingDeath = false
 	
 	-- Hide menu when spawning
@@ -650,12 +653,6 @@ local function onCharacterAdded(character)
 		currentMenu = nil
 	end
 
-	-- Check if we're actively reviving right now
-	if LocalPlayer:GetAttribute("RevivingNow") then
-		print("🔄 Player is actively reviving - skipping menu setup")
-		return
-	end
-	
 	-- Clear JustRevived flag since we're now spawned
 	if LocalPlayer:GetAttribute("JustRevived") then
 		print("✅ Clearing JustRevived flag")
@@ -668,8 +665,16 @@ local function onCharacterAdded(character)
 	-- Listen for death to show menu again
 	local humanoid = character:WaitForChild("Humanoid", 5)
 	if humanoid then
+		print("🎮 Setting up death handler for character")
 		local deathConnection
 		deathConnection = humanoid.Died:Connect(function()
+			print("💀 humanoid.Died event fired")
+			-- Don't process death if we're actively reviving
+			if LocalPlayer:GetAttribute("RevivingNow") then
+				print("⚠️ Death during revive - ignoring")
+				return
+			end
+			
 			-- Prevent multiple death handlers
 			if isProcessingDeath then
 				print("⚠️ Already processing death, ignoring duplicate")
@@ -685,12 +690,18 @@ local function onCharacterAdded(character)
 			
 			-- Start new death handler
 			activeDeathHandler = task.spawn(function()
+				-- Ensure flag is reset when this handler ends
+				local function cleanup()
+					isProcessingDeath = false
+					activeDeathHandler = nil
+				end
 				-- Get death info at time of death
 				local hasRevive = LocalPlayer:GetAttribute("HasRevive")
 				local revivesAvailable = LocalPlayer:GetAttribute("RevivesAvailable") or 0
 				local deathTime = tick()
 				
 				print("💀 Player died - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
+				print("🔍 Death handler started at", os.date("%X"))
 				
 				-- Create flags for tracking
 				local isReviving = false
@@ -753,7 +764,9 @@ local function onCharacterAdded(character)
 						-- Safety check: if too much time has passed, something went wrong
 						if tick() - deathTime > 10 then
 							print("⚠️ Death handler timeout - breaking wait loop")
-							break
+							cleanupConnections()
+							cleanup()
+							return
 						end
 					end
 					
@@ -800,8 +813,7 @@ local function onCharacterAdded(character)
 				end
 				
 				-- Clear processing flag and handler reference
-				isProcessingDeath = false
-				activeDeathHandler = nil
+				cleanup()
 			end)
 		end)
 		
@@ -813,7 +825,9 @@ local function onCharacterAdded(character)
 				end
 				-- Cancel any active death handler when character is removed
 				if activeDeathHandler then
-					task.cancel(activeDeathHandler)
+					pcall(function()
+						task.cancel(activeDeathHandler)
+					end)
 					activeDeathHandler = nil
 				end
 				isProcessingDeath = false
