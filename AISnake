@@ -1669,6 +1669,11 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 	-- Use initial length from config
 	self.CurrentLength = self.Config.InitialLength or 10
+	
+	-- DEBUG: Print which InitialLength is being used
+	print("🐍 AI Snake spawning with length:", self.CurrentLength)
+	print("   - Root InitialLength:", self.Config.InitialLength)
+	print("   - AI.InitialLength:", self.Config.AI and self.Config.AI.InitialLength or "N/A")
 
 	-- Calculate initial growth factor
 	self.growthFactor = self:calculateGrowthFactor()
