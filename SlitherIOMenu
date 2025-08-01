@@ -8,15 +8,25 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
-
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
--- Track active death handlers to cancel them when needed
+-- Track active death handlers and menu state
 local activeDeathHandler = nil
+local currentMenu = nil
+local isProcessingDeath = false
 
 -- Hide the default Roblox leaderboard
 StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
+
+-- Helper to clean up any lingering attributes
+local function cleanupReviveAttributes()
+	LocalPlayer:SetAttribute("ReviveDeclined", false)
+	LocalPlayer:SetAttribute("ReviveTimerExpired", false)
+	LocalPlayer:SetAttribute("JustRevived", false)
+	LocalPlayer:SetAttribute("RevivingNow", false)
+end
 -- Helper to set graphics mode (attribute + remote event)
 local function setGraphicsMode(mode)
 	LocalPlayer:SetAttribute("GraphicsMode", mode)
@@ -41,6 +51,11 @@ local function requestRespawn()
 end
 -- Function to create the menu UI
 local function createMenu(onPlay)
+	-- Destroy any existing menu first
+	if currentMenu then
+		currentMenu:Destroy()
+		currentMenu = nil
+	end
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "SlitherIOMenu"
 	screenGui.ResetOnSpawn = false
@@ -606,6 +621,10 @@ local function createMenu(onPlay)
 	end)
 	-- Parent the menu to the player's PlayerGui
 	screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	
+	-- Track the current menu
+	currentMenu = screenGui
+	
 	-- Block controls and CoreGui until play is pressed
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
 end
@@ -621,6 +640,9 @@ local function onCharacterAdded(character)
 		activeDeathHandler = nil
 		print("🛑 Cancelled previous death handler")
 	end
+	
+	-- Reset death processing flag
+	isProcessingDeath = false
 	
 	-- Hide menu when spawning
 	if currentMenu then
@@ -639,11 +661,22 @@ local function onCharacterAdded(character)
 		print("✅ Clearing JustRevived flag")
 		LocalPlayer:SetAttribute("JustRevived", false)
 	end
+	
+	-- Clean up any other lingering attributes
+	cleanupReviveAttributes()
 
 	-- Listen for death to show menu again
-	local humanoid = character:FindFirstChild("Humanoid")
+	local humanoid = character:WaitForChild("Humanoid", 5)
 	if humanoid then
-		humanoid.Died:Connect(function()
+		local deathConnection
+		deathConnection = humanoid.Died:Connect(function()
+			-- Prevent multiple death handlers
+			if isProcessingDeath then
+				print("⚠️ Already processing death, ignoring duplicate")
+				return
+			end
+			isProcessingDeath = true
+			
 			-- Cancel any previous death handler
 			if activeDeathHandler then
 				task.cancel(activeDeathHandler)
@@ -652,124 +685,139 @@ local function onCharacterAdded(character)
 			
 			-- Start new death handler
 			activeDeathHandler = task.spawn(function()
-			-- Check if player has revive gamepass and uses available
-			local hasRevive = LocalPlayer:GetAttribute("HasRevive")
-			local revivesAvailable = LocalPlayer:GetAttribute("RevivesAvailable") or 0
-
-			print("💀 Player died - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
-
-			-- Create a flag to track if we're reviving
-			local isReviving = false
-
-			-- Listen for revive attribute changes
-			local reviveCheckConnection
-			reviveCheckConnection = LocalPlayer:GetAttributeChangedSignal("JustRevived"):Connect(function()
-				if LocalPlayer:GetAttribute("JustRevived") then
-					isReviving = true
-					print("✅ Player is reviving! Menu will not show.")
+				-- Get death info at time of death
+				local hasRevive = LocalPlayer:GetAttribute("HasRevive")
+				local revivesAvailable = LocalPlayer:GetAttribute("RevivesAvailable") or 0
+				local deathTime = tick()
+				
+				print("💀 Player died - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
+				
+				-- Create flags for tracking
+				local isReviving = false
+				local showMenuNow = false
+				local connections = {}
+				
+				-- Helper to disconnect all connections
+				local function cleanupConnections()
+					for _, conn in pairs(connections) do
+						if conn then
+							conn:Disconnect()
+						end
+					end
+					connections = {}
 				end
-			end)
+				
+				-- Listen for revive attribute changes
+				connections.reviveCheck = LocalPlayer:GetAttributeChangedSignal("JustRevived"):Connect(function()
+					if LocalPlayer:GetAttribute("JustRevived") then
+						isReviving = true
+						showMenuNow = false
+						print("✅ Player is reviving! Menu will not show.")
+					end
+				end)
+				
+				connections.revivingNow = LocalPlayer:GetAttributeChangedSignal("RevivingNow"):Connect(function()
+					if LocalPlayer:GetAttribute("RevivingNow") then
+						isReviving = true
+						showMenuNow = false
+						print("✅ Player is reviving now! Menu will not show.")
+					end
+				end)
+				
+				-- Check for declined revive or timer expiry
+				connections.declined = LocalPlayer:GetAttributeChangedSignal("ReviveDeclined"):Connect(function()
+					if LocalPlayer:GetAttribute("ReviveDeclined") then
+						showMenuNow = true
+						print("❌ Player declined revive - show menu immediately")
+						LocalPlayer:SetAttribute("ReviveDeclined", false)
+					end
+				end)
+				
+				connections.timerExpired = LocalPlayer:GetAttributeChangedSignal("ReviveTimerExpired"):Connect(function()
+					if LocalPlayer:GetAttribute("ReviveTimerExpired") then
+						showMenuNow = true
+						print("⏰ Revive timer expired - show menu immediately")
+						LocalPlayer:SetAttribute("ReviveTimerExpired", false)
+					end
+				end)
 
-			-- Also check RevivingNow
-			local revivingNowConnection
-			revivingNowConnection = LocalPlayer:GetAttributeChangedSignal("RevivingNow"):Connect(function()
-				if LocalPlayer:GetAttribute("RevivingNow") then
-					isReviving = true
-					print("✅ Player is reviving now! Menu will not show.")
-				end
-			end)
-			
-			-- Check for declined revive or timer expiry
-			local showMenuImmediately = false
-			local declineConnection
-			declineConnection = LocalPlayer:GetAttributeChangedSignal("ReviveDeclined"):Connect(function()
-				if LocalPlayer:GetAttribute("ReviveDeclined") then
-					showMenuImmediately = true
-					print("❌ Player declined revive - show menu immediately")
-					-- Clear the attribute
-					LocalPlayer:SetAttribute("ReviveDeclined", false)
-				end
-			end)
-			
-			-- Also check for timer expiry
-			local timerConnection
-			timerConnection = LocalPlayer:GetAttributeChangedSignal("ReviveTimerExpired"):Connect(function()
-				if LocalPlayer:GetAttribute("ReviveTimerExpired") then
-					showMenuImmediately = true
-					print("⏰ Revive timer expired - show menu immediately")
-					-- Clear the attribute
-					LocalPlayer:SetAttribute("ReviveTimerExpired", false)
-				end
-			end)
-
-			if hasRevive and revivesAvailable > 0 then
-				-- Player has revive - wait for decision but not too long
-				print("⏳ Waiting for revive decision...")
-				local waitTime = 0
-				while waitTime < 5.5 and not isReviving and not showMenuImmediately do
-					task.wait(0.05) -- Check more frequently
-					waitTime = waitTime + 0.05
-				end
-			else
-				-- Normal death - show menu after short delay
-				task.wait(1)
-			end
-
-			-- Disconnect the revive checks
-			if reviveCheckConnection then
-				reviveCheckConnection:Disconnect()
-			end
-			if revivingNowConnection then
-				revivingNowConnection:Disconnect()
-			end
-			if declineConnection then
-				declineConnection:Disconnect()
-			end
-			if timerConnection then
-				timerConnection:Disconnect()
-			end
-
-			-- Final check - make sure we're not reviving
-			if LocalPlayer:GetAttribute("RevivingNow") or LocalPlayer:GetAttribute("JustRevived") then
-				isReviving = true
-			end
-
-			-- Only show menu if player didn't revive AND is still dead
-			if not isReviving and humanoid.Health <= 0 then
-				-- Double check the player is actually dead and not in a new character
-				local currentChar = LocalPlayer.Character
-				if currentChar and currentChar == character then
-					-- Same character, check if really dead
-					local currentHumanoid = currentChar:FindFirstChild("Humanoid")
-					if currentHumanoid and currentHumanoid.Health <= 0 then
-						print("📋 Showing respawn menu")
-						-- Show the menu again for respawn
-						createMenu(function()
-							requestRespawn()
-						end)
-					else
-						print("⚠️ Character is alive, not showing menu")
+				-- Wait based on whether they have revive
+				if hasRevive and revivesAvailable > 0 then
+					-- Player has revive - wait up to 5.5 seconds for decision
+					print("⏳ Waiting for revive decision...")
+					local waitTime = 0
+					while waitTime < 5.5 and not isReviving and not showMenuNow do
+						task.wait(0.05)
+						waitTime = waitTime + 0.05
+						
+						-- Safety check: if too much time has passed, something went wrong
+						if tick() - deathTime > 10 then
+							print("⚠️ Death handler timeout - breaking wait loop")
+							break
+						end
+					end
+					
+					-- If timer ran out and not reviving, show menu
+					if waitTime >= 5.5 and not isReviving and not showMenuNow then
+						print("⏰ Wait time exceeded - showing menu")
+						showMenuNow = true
 					end
 				else
-					print("⚠️ Character changed, not showing menu for old death")
+					-- Normal death - show menu after short delay
+					task.wait(1)
+					showMenuNow = true
 				end
-			elseif isReviving then
-				print("🎮 Player revived - not showing menu")
-			else
-				-- Edge case: timer expired but player isn't marked as reviving
-				-- Check if still dead after all that waiting
-				local currentChar = LocalPlayer.Character
-				if currentChar and currentChar == character and humanoid.Health <= 0 then
-					print("⏰ Timer expired, player still dead - showing menu")
-					createMenu(function()
-						requestRespawn()
-					end)
+				
+				-- Clean up connections
+				cleanupConnections()
+				
+				-- Final checks before showing menu
+				if not isReviving and showMenuNow then
+					-- Verify we're still in the same character and actually dead
+					local currentChar = LocalPlayer.Character
+					if currentChar and currentChar == character then
+						local currentHumanoid = currentChar:FindFirstChild("Humanoid")
+						if currentHumanoid and currentHumanoid == humanoid and currentHumanoid.Health <= 0 then
+							-- One more check - make sure we haven't started reviving
+							if not LocalPlayer:GetAttribute("RevivingNow") and not LocalPlayer:GetAttribute("JustRevived") then
+								print("📋 Showing respawn menu")
+								createMenu(function()
+									requestRespawn()
+								end)
+							else
+								print("⚠️ Last second revive detected - not showing menu")
+							end
+						else
+							print("⚠️ Character is alive (health:", currentHumanoid and currentHumanoid.Health or "nil", "), not showing menu")
+						end
+					else
+						print("⚠️ Character changed, not showing menu for old death")
+					end
+				elseif isReviving then
+					print("🎮 Player revived - not showing menu")
+				else
+					print("⚠️ Menu not shown - showMenuNow:", showMenuNow, "isReviving:", isReviving)
 				end
+				
+				-- Clear processing flag and handler reference
+				isProcessingDeath = false
+				activeDeathHandler = nil
+			end)
+		end)
+		
+		-- Store connection for cleanup
+		character.AncestryChanged:Connect(function()
+			if not character.Parent then
+				if deathConnection then
+					deathConnection:Disconnect()
+				end
+				-- Cancel any active death handler when character is removed
+				if activeDeathHandler then
+					task.cancel(activeDeathHandler)
+					activeDeathHandler = nil
+				end
+				isProcessingDeath = false
 			end
-			
-			-- Clear the handler reference when done
-			activeDeathHandler = nil
-			end) -- End of task.spawn
 		end)
 	end
 end

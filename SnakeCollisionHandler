@@ -139,6 +139,23 @@ for _, player in Players:GetPlayers() do
 	end)
 end
 
+-- Clean up when player leaves
+Players.PlayerRemoving:Connect(function(player)
+	-- Clean up any tracking data
+	deadPlayers[player] = nil
+	invinciblePlayers[player] = nil
+	processingRevive[player] = nil
+	
+	-- Clean up any lingering attributes
+	pcall(function()
+		player:SetAttribute("ReviveDeclined", false)
+		player:SetAttribute("ReviveTimerExpired", false) 
+		player:SetAttribute("JustRevived", false)
+		player:SetAttribute("RevivingNow", false)
+		player:SetAttribute("Dead", false)
+	end)
+end)
+
 -- === OPTIMIZED SPATIAL GRID ===
 local SpatialGrid = {}
 SpatialGrid.__index = SpatialGrid
@@ -1046,12 +1063,17 @@ task.spawn(function()
 									-- Set invincibility BEFORE respawn
 									invinciblePlayers[player] = os.clock() + INVINCIBILITY_DURATION
 									
+									-- Mark as reviving NOW
+									player:SetAttribute("RevivingNow", true)
+									
 									-- Just respawn like clicking Play button
 									player:LoadCharacter()
 									
 									-- Clear revive processing flag after character loads
 									task.spawn(function()
-										task.wait(1)
+										task.wait(0.5)
+										player:SetAttribute("RevivingNow", false)
+										task.wait(0.5)
 										processingRevive[player] = nil
 									end)
 								else
