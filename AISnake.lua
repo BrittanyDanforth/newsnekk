@@ -1956,9 +1956,11 @@ function AISnake:grow(amount)
 				segment.Material = self.Config.BodyMaterial or Enum.Material.Neon
 				segment.Color = color  -- Re-apply color to be sure
 
-				-- Match CharacterSetup's segment growth exactly
-				segment.Transparency = 1
-				segment.Size = Vector3new(0.1, 0.1, 0.1)
+				-- Set proper size and visibility
+				segment.Transparency = 0
+				segment.Size = Vector3new(currentBaseSize, currentBaseSize, currentBaseSize)
+				self.segmentVisibility[self.CurrentLength] = true
+				self.lodStates[self.CurrentLength] = "near"
 
 				-- Create attachment for new segment
 				if self.AttachmentPart and self.Attachments then
@@ -2626,10 +2628,8 @@ function AISnake:updateMovement(dt)
 		self:updateSegmentVisibility(cameraPos)
 	end
 
-	-- Sync beams with segment visibility - less frequent to prevent flickering
-	if self._segmentUpdateFrame % 5 == 0 then  -- Every 5 frames instead of every frame
-		self:syncBeamVisibility()
-	end
+	-- Always sync beams with segments to ensure consistency
+	self:syncBeamVisibility()
 
 	-- Calculate current base size with growth factor
 	local currentBaseSize = BASE_SIZE * self.growthFactor
@@ -2715,14 +2715,7 @@ function AISnake:updateMovement(dt)
 		end
 	end
 
-	-- Update ALL attachment positions to prevent beam stretching/glitching
-	for i = 0, maxSegmentToUpdate do
-		local segment = self.Segments[i]
-		if segment and segment.Parent and self.Attachments and self.Attachments[i] then
-			-- Always update attachment to match segment position
-			self.Attachments[i].WorldPosition = segment.Position
-		end
-	end
+	-- Attachment positions are now updated in syncBeamVisibility to ensure consistency
 
 	-- Don't update tail segments that are beyond visible range
 	-- This prevents the tail update logic from affecting invisible segments
@@ -3149,32 +3142,67 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	-- Calculate distance from camera to snake head
 	local headDistance = (self.HeadParts.head.Position - cameraPosition).Magnitude
 	
-	-- Determine how many segments to show based on distance
-	local segmentsToShow
-	if headDistance < 200 then
-		segmentsToShow = self.CurrentLength  -- Show all
-	elseif headDistance < 400 then
-		segmentsToShow = math.floor(self.CurrentLength * 0.8)  -- 80%
-	elseif headDistance < 600 then
-		segmentsToShow = math.floor(self.CurrentLength * 0.5)  -- 50%
-	elseif headDistance < 800 then
-		segmentsToShow = math.max(30, math.floor(self.CurrentLength * 0.3))  -- 30% but at least 30
+	-- Simple visibility rule - show segments based on distance
+	local maxVisibleDistance = 1000  -- Max distance to show any segments
+	local segmentsToShow = self.CurrentLength
+	
+	-- If snake is too far, limit visible segments
+	if headDistance > 800 then
+		segmentsToShow = math.min(20, self.CurrentLength)  -- Show at least head + some body
+	elseif headDistance > 600 then
+		segmentsToShow = math.min(50, self.CurrentLength)
+	elseif headDistance > 400 then
+		segmentsToShow = math.min(100, self.CurrentLength)
 	else
-		segmentsToShow = math.max(15, math.floor(self.CurrentLength * 0.15))  -- 15% but at least 15
+		segmentsToShow = self.CurrentLength  -- Show all when close
 	end
 	
 	-- Clamp to limits
-	segmentsToShow = math.min(segmentsToShow, self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
+	segmentsToShow = math.min(segmentsToShow, DYNAMIC_SEGMENT_LIMIT)
 	
-	-- Always show head at full quality
-	if self.Segments[0] then
-		self:applyLODToSegment(self.Segments[0], "near", 0)
-		self.Segments[0].Transparency = 0  -- Head always fully opaque
+	-- Update segments - SIMPLE approach, no fancy fading
+	for i = 0, self.CurrentLength do
+		local segment = self.Segments[i]
+		if segment and segment.Parent then
+			if i <= segmentsToShow then
+				-- Segment is visible - set it to fully visible
+				segment.Transparency = 0
+				self.segmentVisibility[i] = true
+				self.lodStates[i] = "near"
+				
+				-- Enable collision for first few segments only
+				segment.CanTouch = (i <= 50)
+				segment.CanQuery = (i <= 10)
+				
+				-- Update glow
+				local glow = segment:FindFirstChild("Glow")
+				if glow and self:shouldHaveGlow(i) and headDistance < 600 then
+					glow.Enabled = true
+					glow.Brightness = GLOW_INTENSITY
+					glow.Range = GLOW_RANGE_BASE
+				elseif glow then
+					glow.Enabled = false
+				end
+			else
+				-- Segment is not visible - hide it completely
+				segment.Transparency = 1
+				self.segmentVisibility[i] = false
+				self.lodStates[i] = "culled"
+				segment.CanTouch = false
+				segment.CanQuery = false
+				
+				-- Disable glow
+				local glow = segment:FindFirstChild("Glow")
+				if glow then
+					glow.Enabled = false
+				end
+			end
+		end
 	end
 	
-	-- Update eye visibility based on head distance
+	-- Update eye visibility
 	if self.HeadParts then
-		local eyeVisible = headDistance < 600  -- Hide eyes when far away
+		local eyeVisible = headDistance < 600
 		if self.HeadParts.leftEye then
 			self.HeadParts.leftEye.Transparency = eyeVisible and 0 or 1
 		end
@@ -3189,79 +3217,20 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 		end
 	end
 	
-	-- Update segments continuously from head
-	for i = 1, self.CurrentLength do
-		local segment = self.Segments[i]
-		
-		if i <= segmentsToShow then
-			-- This segment should be visible
-			if segment and segment.Parent then
-				-- Calculate segment-specific distance
-				local segmentDistance = (segment.Position - cameraPosition).Magnitude
-				
-				-- Determine LOD level
-				local lodLevel
-				if segmentDistance < LOD_DISTANCE_NEAR then
-					lodLevel = "near"
-				elseif segmentDistance < LOD_DISTANCE_MID then
-					lodLevel = "mid"
-				else
-					lodLevel = "far"
-				end
-				
-				self:applyLODToSegment(segment, lodLevel, i)
-				
-				-- Calculate transparency - NEVER make segments fully invisible when they should be shown
-				local baseTransparency = 0
-				if headDistance < 200 then
-					baseTransparency = 0
-				elseif headDistance < 400 then
-					baseTransparency = 0.1
-				elseif headDistance < 600 then
-					baseTransparency = 0.2
-				else
-					baseTransparency = 0.3  -- Max 30% transparent, not 50%
-				end
-				
-				-- Fade out segments near the cutoff point
-				local fadeStart = segmentsToShow * 0.7  -- Start fading at 70%
-				if i > fadeStart and i < segmentsToShow then
-					-- Gradual fade for last 30% of visible segments
-					local fadeProgress = (i - fadeStart) / (segmentsToShow - fadeStart)
-					segment.Transparency = math.min(0.7, baseTransparency + fadeProgress * 0.5)
-				else
-					segment.Transparency = baseTransparency
-				end
-				
-				-- Update glow based on distance and visibility
-				local glow = segment:FindFirstChild("Glow")
-				if glow then
-					if headDistance < 600 and self:shouldHaveGlow(i) then
-						-- Scale down glow with distance
-						local glowScale = math.max(0, 1 - (headDistance / 600))
-						glow.Enabled = true
-						glow.Brightness = GLOW_INTENSITY * glowScale * (1 - segment.Transparency)
-						glow.Range = GLOW_RANGE_BASE * glowScale
-					else
-						glow.Enabled = false
-					end
-				end
-			end
-		else
-			-- This segment should be completely hidden
-			if segment and segment.Parent then
-				self:applyLODToSegment(segment, "culled", i)
-			end
-			self.segmentVisibility[i] = false
-		end
-	end
-	
-	-- Store visible count
 	self.visibleSegmentCount = segmentsToShow
 end
 
 -- Sync beam visibility with segments (Continuous visibility)
 function AISnake:syncBeamVisibility()
+	-- First, ensure ALL attachments are at correct positions
+	for i = 0, self.CurrentLength do
+		local segment = self.Segments[i]
+		local attachment = self.Attachments[i]
+		if segment and segment.Parent and attachment then
+			attachment.WorldPosition = segment.Position
+		end
+	end
+	
 	-- Update main beams based on segment visibility
 	for i = 0, math.min(self.CurrentLength - 1, DYNAMIC_SEGMENT_LIMIT - 1) do
 		local beam = self.Beams[i]
@@ -3269,67 +3238,30 @@ function AISnake:syncBeamVisibility()
 			local seg1 = self.Segments[i]
 			local seg2 = self.Segments[i + 1]
 			
-			-- Check if both segments exist
-			if seg1 and seg2 and seg1.Parent and seg2.Parent then
-				-- Simple visibility check - show beam if within visible count
-				if i < self.visibleSegmentCount then
-					-- Make sure attachments are at segment positions
-					if self.Attachments[i] then
-						self.Attachments[i].WorldPosition = seg1.Position
-					end
-					if self.Attachments[i + 1] then
-						self.Attachments[i + 1].WorldPosition = seg2.Position
-					end
-					
-					-- Only enable/disable if state changed to prevent flickering
-					if not beam.Enabled then
-						beam.Enabled = true
-					end
-					
-					-- Simple transparency based on segment visibility
-					local trans1 = seg1.Transparency or 0
-					local trans2 = seg2.Transparency or 0
-					local avgTrans = (trans1 + trans2) / 2
-					
-					-- Only update transparency if it changed significantly
-					if beam.Transparency then
-						local currentTrans = beam.Transparency.Keypoints[1].Value
-						if math.abs(currentTrans - avgTrans) > 0.1 then
-							beam.Transparency = NumberSequence.new(avgTrans)
-							beam.Brightness = math.max(0.5, 2 * (1 - avgTrans))
-						end
-					else
-						beam.Transparency = NumberSequence.new(avgTrans)
-						beam.Brightness = math.max(0.5, 2 * (1 - avgTrans))
-					end
-				else
-					-- Only disable if currently enabled
-					if beam.Enabled then
-						beam.Enabled = false
-					end
-				end
+			-- Check if both segments exist and are visible
+			if seg1 and seg2 and seg1.Parent and seg2.Parent and 
+			   self.segmentVisibility[i] and self.segmentVisibility[i + 1] then
+				-- Both segments are visible - show beam
+				beam.Enabled = true
+				beam.Transparency = NumberSequence.new(0)  -- Fully opaque
+				beam.Brightness = 2
 			else
-				-- Only disable if currently enabled
-				if beam.Enabled then
-					beam.Enabled = false
-				end
+				-- One or both segments hidden - hide beam
+				beam.Enabled = false
 			end
 		end
 	end
 	
-	-- Handle overlap beams - only show for visible segments
+	-- Handle overlap beams - simpler logic
 	for key, beam in pairs(self.Beams) do
 		if type(key) == "string" and beam and beam.Parent then
 			if string.find(key, "overlap") then
 				local index = tonumber(string.match(key, "%d+"))
-				if index and index < self.visibleSegmentCount - 2 then
-					local seg = self.Segments[index]
-					if seg and seg.Parent and seg.Transparency < 0.7 then
-						beam.Enabled = true
-						beam.Transparency = NumberSequence.new(math.min(seg.Transparency + 0.3, 0.9))
-					else
-						beam.Enabled = false
-					end
+				if index and self.segmentVisibility[index] and 
+				   self.segmentVisibility[index + 1] and 
+				   self.segmentVisibility[index + 2] then
+					beam.Enabled = true
+					beam.Transparency = NumberSequence.new(0.3)
 				else
 					beam.Enabled = false
 				end
@@ -3380,40 +3312,10 @@ function AISnake:ensureSegmentExists(index)
 	local segmentSize = self:getSegmentSize(index, currentBaseSize)
 	segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
 	
-	-- Start with high transparency for smooth fade-in
-	segment.Transparency = 0.95
-	
-	-- Initialize transparency tracking for smooth transitions
-	self.targetTransparencies[index] = 0.95
-	self.currentTransparencies[index] = 0.95
-	
-	-- Apply LOD based on camera distance
-	local camera = workspace.CurrentCamera
-	local cameraPos = camera and camera.CFrame.Position
-	if cameraPos then
-		local lodLevel = self:calculateLODLevel(index, cameraPos)
-		self:applyLODToSegment(segment, lodLevel, index)
-		
-		-- Calculate appropriate initial transparency based on distance
-		local segmentDistance = (segment.Position - cameraPos).Magnitude
-		if segmentDistance < LOD_DISTANCE_NEAR then
-			self.targetTransparencies[index] = 0
-		elseif segmentDistance < LOD_DISTANCE_MID then
-			self.targetTransparencies[index] = 0.1
-		elseif segmentDistance < LOD_DISTANCE_FAR then
-			self.targetTransparencies[index] = 0.2
-		else
-			self.targetTransparencies[index] = 0.3
-		end
-	else
-		-- Conservative LOD without camera
-		if index > FORCE_RENDER_SEGMENTS then
-			self:applyLODToSegment(segment, "far", index)
-			self.targetTransparencies[index] = 0.3
-		else
-			self.targetTransparencies[index] = 0
-		end
-	end
+	-- Start fully visible
+	segment.Transparency = 0
+	self.segmentVisibility[index] = true
+	self.lodStates[index] = "near"
 	
 	self.Segments[index] = segment
 	
@@ -3452,10 +3354,10 @@ function AISnake:ensureSegmentExists(index)
 			beam.TextureSpeed = BEAM_TEXTURE_SPEED
 			beam.LightEmission = 1
 			beam.LightInfluence = 0
-			beam.Brightness = 0.5  -- Start with lower brightness
+			beam.Brightness = 2
 			
-			-- Start beam mostly transparent for smooth fade-in
-			beam.Transparency = NumberSequence.new(0.9)
+			-- Start beam fully visible
+			beam.Transparency = NumberSequence.new(0)
 			
 			-- Color matching
 			local prevColor = self:getSegmentColor(index - 1)
