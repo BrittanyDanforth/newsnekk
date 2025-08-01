@@ -2626,8 +2626,8 @@ function AISnake:updateMovement(dt)
 		self:updateSegmentVisibility(cameraPos)
 	end
 
-	-- Sync beams with segment visibility
-	if self._segmentUpdateFrame % BEAM_SYNC_INTERVAL == 0 then
+	-- Sync beams with segment visibility - less frequent to prevent flickering
+	if self._segmentUpdateFrame % 5 == 0 then  -- Every 5 frames instead of every frame
 		self:syncBeamVisibility()
 	end
 
@@ -2715,18 +2715,12 @@ function AISnake:updateMovement(dt)
 		end
 	end
 
-	-- Update attachment positions for skipped segments (to keep beams smooth)
-	if segmentSkip > 1 then
-		for i = 1, maxSegmentToUpdate do
-			if i % segmentSkip ~= updateOffset then
-				local segment = self.Segments[i]
-				if segment and segment.Parent and self.Attachments and self.Attachments[i] then
-					-- Only update if not culled
-					if self.lodStates[i] ~= "culled" then
-						self.Attachments[i].WorldPosition = segment.Position
-					end
-				end
-			end
+	-- Update ALL attachment positions to prevent beam stretching/glitching
+	for i = 0, maxSegmentToUpdate do
+		local segment = self.Segments[i]
+		if segment and segment.Parent and self.Attachments and self.Attachments[i] then
+			-- Always update attachment to match segment position
+			self.Attachments[i].WorldPosition = segment.Position
 		end
 	end
 
@@ -2749,6 +2743,11 @@ function AISnake:updateMovement(dt)
 	for _, data in nearbyEntities do
 		local otherPart = data.part
 		if otherPart == myHead then continue end
+		
+		-- Make sure the other part actually exists and has a position
+		if not otherPart or not otherPart.Parent or not pcall(function() return otherPart.Position end) then
+			continue
+		end
 
 		if isPartsColliding(myHead, otherPart) then
 			local otherOwner = data.owner
@@ -2756,6 +2755,11 @@ function AISnake:updateMovement(dt)
 			-- Add double-check to prevent false positives
 			if (myHead.Position - otherPart.Position).Magnitude > 5 then
 				continue  -- Skip if distance is too far (false positive)
+			end
+			
+			-- Additional validation to prevent killing from invisible segments
+			if otherPart.Transparency and otherPart.Transparency > 0.9 then
+				continue  -- Skip nearly invisible segments
 			end
 
 			if data.type == "AI_HEAD" then
@@ -2904,7 +2908,8 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 
 				for i = 1, #snake.Segments, 4 do
 					local segment = snake.Segments[i]
-					if segment then
+					-- Only insert visible segments into spatial grid
+					if segment and segment.Parent and segment.Transparency < 0.9 then
 						SpatialGrid.Insert(segment, snake, "AI_SEGMENT")
 					end
 				end
@@ -3264,31 +3269,50 @@ function AISnake:syncBeamVisibility()
 			local seg1 = self.Segments[i]
 			local seg2 = self.Segments[i + 1]
 			
-			-- Check if both segments exist and are visible
-			if seg1 and seg2 and seg1.Parent and seg2.Parent and 
-			   i < self.visibleSegmentCount and 
-			   self.segmentVisibility[i] ~= false and 
-			   self.segmentVisibility[i + 1] ~= false then
-				
-				-- Get segment transparencies
-				local trans1 = seg1.Transparency or 0
-				local trans2 = seg2.Transparency or 0
-				
-				-- Only show beam if both segments are reasonably visible
-				if trans1 < 0.9 and trans2 < 0.9 then
-					beam.Enabled = true
+			-- Check if both segments exist
+			if seg1 and seg2 and seg1.Parent and seg2.Parent then
+				-- Simple visibility check - show beam if within visible count
+				if i < self.visibleSegmentCount then
+					-- Make sure attachments are at segment positions
+					if self.Attachments[i] then
+						self.Attachments[i].WorldPosition = seg1.Position
+					end
+					if self.Attachments[i + 1] then
+						self.Attachments[i + 1].WorldPosition = seg2.Position
+					end
 					
-					-- Use average transparency but add a bit more for beams
-					local avgTransparency = (trans1 + trans2) / 2
-					beam.Transparency = NumberSequence.new(math.min(avgTransparency + 0.1, 0.8))
-					beam.Brightness = math.max(0.5, 2 * (1 - avgTransparency))
+					-- Only enable/disable if state changed to prevent flickering
+					if not beam.Enabled then
+						beam.Enabled = true
+					end
+					
+					-- Simple transparency based on segment visibility
+					local trans1 = seg1.Transparency or 0
+					local trans2 = seg2.Transparency or 0
+					local avgTrans = (trans1 + trans2) / 2
+					
+					-- Only update transparency if it changed significantly
+					if beam.Transparency then
+						local currentTrans = beam.Transparency.Keypoints[1].Value
+						if math.abs(currentTrans - avgTrans) > 0.1 then
+							beam.Transparency = NumberSequence.new(avgTrans)
+							beam.Brightness = math.max(0.5, 2 * (1 - avgTrans))
+						end
+					else
+						beam.Transparency = NumberSequence.new(avgTrans)
+						beam.Brightness = math.max(0.5, 2 * (1 - avgTrans))
+					end
 				else
-					-- Hide beam if segments are too transparent
-					beam.Enabled = false
+					-- Only disable if currently enabled
+					if beam.Enabled then
+						beam.Enabled = false
+					end
 				end
 			else
-				-- Hide beam if segments don't exist or are culled
-				beam.Enabled = false
+				-- Only disable if currently enabled
+				if beam.Enabled then
+					beam.Enabled = false
+				end
 			end
 		end
 	end
