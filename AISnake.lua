@@ -3180,6 +3180,7 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	if self.Segments[0] then
 		self:applyLODToSegment(self.Segments[0], "near", 0)
 		self.Segments[0].Transparency = 0  -- Head always fully opaque
+		self.segmentVisibility[0] = true  -- CRITICAL: Mark head as always visible
 	end
 
 	-- Update eye visibility based on head distance
@@ -3208,6 +3209,8 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 
 		if shouldRender then
 			-- This segment should be visible
+			self.segmentVisibility[i] = true  -- CRITICAL: Mark segment as visible
+			
 			if segment and segment.Parent then
 				-- Calculate segment-specific distance
 				local segmentDistance = (segment.Position - cameraPosition).Magnitude
@@ -3273,99 +3276,116 @@ function AISnake:updateSegmentVisibility(cameraPosition)
 	self.visibleSegmentCount = segmentsToShow
 end
 
--- UNIFIED LOD BEAM-SEGMENT SYNCHRONIZATION (Fixed based on Roblox LOD Analysis)
+-- UNIFIED LOD BEAM-SEGMENT SYNCHRONIZATION (FULLY FIXED - NO USERSETTINGS)
 function AISnake:syncBeamVisibility()
-	-- CRITICAL FIX: Only update beams for segments that actually exist
-	local maxBeamIndex = math.min(self.actualSegmentCount or self.CurrentLength, DYNAMIC_SEGMENT_LIMIT) - 1
+	-- CRITICAL FIX: Ensure we have proper bounds
+	if not self.Segments or #self.Segments == 0 then return end
 	
-	-- Get camera for quality calculations
+	local actualSegmentCount = self.actualSegmentCount or 0
+	local visibleSegmentCount = self.visibleSegmentCount or 0
+	
+	-- Ensure we don't exceed actual created segments
+	local maxBeamIndex = math.min(actualSegmentCount - 1, visibleSegmentCount - 1, DYNAMIC_SEGMENT_LIMIT - 1)
+	if maxBeamIndex < 0 then return end
+	
+	-- Get camera for distance calculations (works on both client and server)
 	local camera = workspace.CurrentCamera
-	local cameraPos = camera and camera.CFrame.Position
+	local cameraPos = camera and camera.CFrame.Position or (self.Head and self.Head.Position)
 	
-	-- Update main beams with unified LOD logic
-	for i = 0, maxBeamIndex do
-		local beam = self.Beams[i]
-		if beam and beam.Parent then
-			local seg1 = self.Segments[i]
-			local seg2 = self.Segments[i + 1]
-			
-			-- CRITICAL: Check if both segments actually exist
-			if seg1 and seg2 and seg1.Parent and seg2.Parent then
-				-- Check segment visibility states
-				local vis1 = self.segmentVisibility[i] ~= false
-				local vis2 = self.segmentVisibility[i + 1] ~= false
-				
-				-- Apply unified visibility logic
-				if vis1 and vis2 and i < self.visibleSegmentCount then
-					-- Get segment properties
-					local trans1 = seg1.Transparency or 0
-					local trans2 = seg2.Transparency or 0
-					
-					-- Only show beam if segments are sufficiently visible
-					if trans1 < 0.95 and trans2 < 0.95 then
-						beam.Enabled = true
-						
-						-- ROBLOX LOD FIX: Calculate beam quality based on distance
-						if cameraPos then
-							local distance = (seg1.Position - cameraPos).Magnitude
-							-- Server-side quality calculation (no access to UserSettings)
-							local qualityDistanceScalar = math.clamp(
-								(1 - (distance - BEAM_QUALITY_DISTANCE_SCALAR) / BEAM_QUALITY_FALLOFF), 
-								0.1, 
-								1
-							)
-							
-							-- Apply Roblox beam segment calculation
-							local desiredSegments = beam:GetAttribute("DesiredSegments") or BEAM_SEGMENTS
-							beam.Segments = math.max(MIN_BEAM_SEGMENTS, math.ceil(desiredSegments * qualityDistanceScalar))
-						end
-						
-						-- Synchronized transparency
-						local avgTransparency = (trans1 + trans2) / 2
-						local beamTransparency = math.min(avgTransparency + 0.05, 0.9)
-						
-						beam.Transparency = NumberSequence.new{
-							NumberSequenceKeypoint.new(0, beamTransparency),
-							NumberSequenceKeypoint.new(0.5, beamTransparency),
-							NumberSequenceKeypoint.new(1, math.min(beamTransparency + 0.1, 0.95))
-						}
-						beam.Brightness = math.max(0.5, 2 * (1 - avgTransparency))
-					else
-						beam.Enabled = false
-					end
-				else
-					beam.Enabled = false
-				end
-			else
-				-- CRITICAL: Disable beam if segments don't exist
-				beam.Enabled = false
-			end
-		end
-	end
-	
-	-- CRITICAL: Disable all beams beyond actual segment count
-	for i = maxBeamIndex + 1, #self.Beams do
+	-- First pass: Disable ALL beams by default
+	for i = 0, #self.Beams do
 		local beam = self.Beams[i]
 		if beam and beam.Parent then
 			beam.Enabled = false
 		end
 	end
 	
-	-- Handle overlap beams with unified LOD
+	-- Second pass: Enable only beams that should be visible
+	for i = 0, maxBeamIndex do
+		local beam = self.Beams[i]
+		if not beam or not beam.Parent then continue end
+		
+		-- CRITICAL: Segments are 0-indexed, beams connect i to i+1
+		local seg1Index = i
+		local seg2Index = i + 1
+		
+		-- Check bounds
+		if seg1Index > actualSegmentCount or seg2Index > actualSegmentCount then
+			continue
+		end
+		
+		local seg1 = self.Segments[seg1Index]
+		local seg2 = self.Segments[seg2Index]
+		
+		-- CRITICAL: Both segments must exist and be parented
+		if not seg1 or not seg2 or not seg1.Parent or not seg2.Parent then
+			continue
+		end
+		
+		-- Check if both segments are within visible range
+		if seg1Index >= visibleSegmentCount or seg2Index >= visibleSegmentCount then
+			continue
+		end
+		
+		-- Check segment visibility states
+		local vis1 = self.segmentVisibility[seg1Index] ~= false
+		local vis2 = self.segmentVisibility[seg2Index] ~= false
+		
+		if not vis1 or not vis2 then
+			continue
+		end
+		
+		-- Get segment transparencies
+		local trans1 = seg1.Transparency or 1
+		local trans2 = seg2.Transparency or 1
+		
+		-- Only show beam if BOTH segments are sufficiently visible
+		if trans1 < 0.95 and trans2 < 0.95 then
+			beam.Enabled = true
+			
+			-- Calculate beam quality based on distance (simplified, no UserSettings)
+			if cameraPos then
+				local distance = (seg1.Position - cameraPos).Magnitude
+				local qualityScalar = math.clamp(1 - (distance / 1000), 0.2, 1)
+				
+				-- Apply beam segments
+				local desiredSegments = beam:GetAttribute("DesiredSegments") or BEAM_SEGMENTS
+				beam.Segments = math.max(MIN_BEAM_SEGMENTS or 2, math.ceil(desiredSegments * qualityScalar))
+			else
+				beam.Segments = BEAM_SEGMENTS
+			end
+			
+			-- Synchronized transparency
+			local avgTransparency = (trans1 + trans2) / 2
+			local beamTransparency = math.min(avgTransparency + 0.05, 0.9)
+			
+			beam.Transparency = NumberSequence.new{
+				NumberSequenceKeypoint.new(0, beamTransparency),
+				NumberSequenceKeypoint.new(0.5, beamTransparency),
+				NumberSequenceKeypoint.new(1, math.min(beamTransparency + 0.1, 0.95))
+			}
+			beam.Brightness = math.max(0.5, 2 * (1 - avgTransparency))
+		end
+	end
+	
+	-- Handle overlap beams with same strict logic
 	for key, beam in pairs(self.Beams) do
 		if type(key) == "string" and beam and beam.Parent then
 			if string.find(key, "overlap") then
+				beam.Enabled = false -- Default to disabled
+				
 				local index = tonumber(string.match(key, "%d+"))
-				if index and index < self.visibleSegmentCount - 2 and index <= self.actualSegmentCount then
+				if index and index > 0 and index <= actualSegmentCount and index < visibleSegmentCount then
 					local seg = self.Segments[index]
-					if seg and seg.Parent and seg.Transparency < 0.7 then
-						beam.Enabled = true
-						beam.Transparency = NumberSequence.new(math.min(seg.Transparency + 0.3, 0.9))
-					else
-						beam.Enabled = false
+					if seg and seg.Parent then
+						local segVis = self.segmentVisibility[index] ~= false
+						local segTrans = seg.Transparency or 1
+						
+						if segVis and segTrans < 0.7 then
+							beam.Enabled = true
+							beam.Transparency = NumberSequence.new(math.min(segTrans + 0.3, 0.9))
+						end
 					end
-				else
-					beam.Enabled = false
 				end
 			end
 		end
