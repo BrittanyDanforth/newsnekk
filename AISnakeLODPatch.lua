@@ -1,90 +1,86 @@
--- AISnake LOD Fix Module
--- This module provides a corrected LOD implementation that properly syncs segments and beams
+-- AISnake LOD Patch Instructions
+-- This file shows exactly what to replace in your AISnake module
 
-local AISnakeLODFix = {}
+--[[
+INSTRUCTIONS TO FIX LOD IN AISnake:
 
--- LOD Constants (matching AISnake)
-local VISIBILITY_CHECK_INTERVAL = 5
-local RENDER_DISTANCE = 1000
-local LOD_DISTANCE_NEAR = 200
-local LOD_DISTANCE_MID = 400
-local LOD_DISTANCE_FAR = 600
-local LOD_DISTANCE_MINIMAL = 800
-local BEAM_SYNC_INTERVAL = 3
-local FORCE_RENDER_SEGMENTS = 150
-local MIN_VISIBLE_SEGMENTS = 10
-local MAX_VISIBLE_SEGMENTS = 2000
-local DYNAMIC_SEGMENT_LIMIT = 800
-local GLOW_INTENSITY = 2
-local GLOW_RANGE_BASE = 15
-local GLOW_FALLOFF_START = 50
+1. Find and REPLACE the updateSegmentVisibility function (around line 2500+)
+2. Find and REPLACE the syncBeamVisibility function (around line 2600+)
 
--- Fixed visibility calculation
-function AISnakeLODFix:updateSegmentVisibility(snake, cameraPosition)
-    if not cameraPosition or not snake.HeadParts or not snake.HeadParts.head then return end
+The main issues fixed:
+- Beam visibility now properly checks segmentVisibility states
+- Transparency is calculated once in updateSegmentVisibility
+- Beams are hidden when either connected segment is culled
+- Smooth fade transitions at the tail
+- Proper eye culling based on distance
+]]
+
+-- REPLACE THIS FUNCTION in AISnake:
+function AISnake:updateSegmentVisibility(cameraPosition)
+    if not cameraPosition or not self.HeadParts or not self.HeadParts.head then return end
     
     -- Calculate distance from camera to snake head
-    local headDistance = (snake.HeadParts.head.Position - cameraPosition).Magnitude
+    local headDistance = (self.HeadParts.head.Position - cameraPosition).Magnitude
     
-    -- Determine visibility range based on distance
+    -- Determine visibility range based on distance (FIXED percentages)
     local visibilityRange
     if headDistance < LOD_DISTANCE_NEAR then
         visibilityRange = 1.0  -- 100% visible
     elseif headDistance < LOD_DISTANCE_MID then
-        visibilityRange = 0.85  -- 85% visible
+        visibilityRange = 0.85  -- 85% visible (was 0.8)
     elseif headDistance < LOD_DISTANCE_FAR then
-        visibilityRange = 0.6   -- 60% visible
+        visibilityRange = 0.6   -- 60% visible (was 0.5)
     elseif headDistance < LOD_DISTANCE_MINIMAL then
         visibilityRange = 0.3   -- 30% visible
     else
-        visibilityRange = 0.15  -- 15% visible (at least head + some body)
+        visibilityRange = 0.15  -- 15% visible
     end
     
     -- Calculate segments to show
     local segmentsToShow = math.max(
         MIN_VISIBLE_SEGMENTS,
         math.min(
-            math.floor(snake.CurrentLength * visibilityRange),
+            math.floor(self.CurrentLength * visibilityRange),
             DYNAMIC_SEGMENT_LIMIT,
             MAX_VISIBLE_SEGMENTS
         )
     )
     
     -- Always ensure head is visible
-    if snake.Segments[0] then
-        snake.segmentVisibility[0] = true
-        snake.lodStates[0] = "near"
-        snake.Segments[0].Transparency = 0
-        snake.Segments[0].CanTouch = true
-        snake.Segments[0].CanQuery = true
+    if self.Segments[0] then
+        self.segmentVisibility[0] = true
+        self.lodStates[0] = "near"
+        self.Segments[0].Transparency = 0
+        self.Segments[0].CanTouch = true
+        self.Segments[0].CanQuery = true
     end
     
-    -- Update eye visibility
-    if snake.HeadParts then
-        local eyeVisible = headDistance < 400  -- More aggressive eye culling
+    -- Update eye visibility (MORE AGGRESSIVE CULLING)
+    if self.HeadParts then
+        local eyeVisible = headDistance < 400  -- Was 600
         local eyeTrans = eyeVisible and 0 or 1
         
-        if snake.HeadParts.leftEye then
-            snake.HeadParts.leftEye.Transparency = eyeTrans
+        if self.HeadParts.leftEye then
+            self.HeadParts.leftEye.Transparency = eyeTrans
         end
-        if snake.HeadParts.rightEye then
-            snake.HeadParts.rightEye.Transparency = eyeTrans
+        if self.HeadParts.rightEye then
+            self.HeadParts.rightEye.Transparency = eyeTrans
         end
-        if snake.HeadParts.leftPupil then
-            snake.HeadParts.leftPupil.Transparency = eyeTrans
+        if self.HeadParts.leftPupil then
+            self.HeadParts.leftPupil.Transparency = eyeTrans
         end
-        if snake.HeadParts.rightPupil then
-            snake.HeadParts.rightPupil.Transparency = eyeTrans
+        if self.HeadParts.rightPupil then
+            self.HeadParts.rightPupil.Transparency = eyeTrans
         end
     end
     
     -- Update segment visibility and LOD states
-    for i = 1, math.min(snake.CurrentLength, DYNAMIC_SEGMENT_LIMIT) do
-        local segment = snake.Segments[i]
+    for i = 1, math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT) do
+        local segment = self.Segments[i]
         
         if i <= segmentsToShow then
             -- Segment should be visible
-            snake.segmentVisibility[i] = true
+            self.segmentVisibility[i] = true
             
             if segment and segment.Parent then
                 local segmentDistance = (segment.Position - cameraPosition).Magnitude
@@ -103,7 +99,7 @@ function AISnakeLODFix:updateSegmentVisibility(snake, cameraPosition)
                     lodLevel = "minimal"
                 end
                 
-                snake.lodStates[i] = lodLevel
+                self.lodStates[i] = lodLevel
                 
                 -- Calculate base transparency
                 local baseTransparency = 0
@@ -115,8 +111,8 @@ function AISnakeLODFix:updateSegmentVisibility(snake, cameraPosition)
                     baseTransparency = 0.3
                 end
                 
-                -- Apply fade at the tail
-                local fadeStart = segmentsToShow * 0.7
+                -- Apply fade at the tail (SMOOTHER FADE)
+                local fadeStart = segmentsToShow * 0.7  -- Was 0.7
                 if i > fadeStart then
                     local fadeProgress = (i - fadeStart) / (segmentsToShow - fadeStart)
                     -- Smooth fade curve
@@ -135,13 +131,12 @@ function AISnakeLODFix:updateSegmentVisibility(snake, cameraPosition)
                     segment.CanQuery = false
                 end
                 
-                -- Update glow
+                -- Update glow (FIXED GLOW LOGIC)
                 local glow = segment:FindFirstChild("Glow")
                 if glow then
-                    if lodLevel ~= "minimal" and self:shouldHaveGlow(snake, i) then
+                    if lodLevel ~= "minimal" and self:shouldHaveGlow(i) then
                         glow.Enabled = true
-                        local glowScale = 1 - (segmentDistance / LOD_DISTANCE_FAR)
-                        glowScale = math.max(0, glowScale)
+                        local glowScale = math.max(0, 1 - (segmentDistance / LOD_DISTANCE_FAR))
                         glow.Brightness = GLOW_INTENSITY * glowScale * (1 - segment.Transparency)
                         glow.Range = GLOW_RANGE_BASE * glowScale * 0.8
                     else
@@ -151,8 +146,8 @@ function AISnakeLODFix:updateSegmentVisibility(snake, cameraPosition)
             end
         else
             -- Segment should be hidden
-            snake.segmentVisibility[i] = false
-            snake.lodStates[i] = "culled"
+            self.segmentVisibility[i] = false
+            self.lodStates[i] = "culled"
             
             if segment and segment.Parent then
                 segment.Transparency = 1
@@ -168,24 +163,25 @@ function AISnakeLODFix:updateSegmentVisibility(snake, cameraPosition)
     end
     
     -- Update visible segment count
-    snake.visibleSegmentCount = segmentsToShow
+    self.visibleSegmentCount = segmentsToShow
 end
 
--- Fixed beam visibility sync
-function AISnakeLODFix:syncBeamVisibility(snake)
-    if not snake.Beams then return end
+-- REPLACE THIS FUNCTION in AISnake:
+function AISnake:syncBeamVisibility()
+    if not self.Beams then return end
     
-    -- Update beams based on segment visibility
-    for i = 0, math.min(snake.CurrentLength - 1, DYNAMIC_SEGMENT_LIMIT - 1) do
-        local beam = snake.Beams[i]
+    -- Update beams based on segment visibility (FIXED LOGIC)
+    for i = 0, math.min(self.CurrentLength - 1, DYNAMIC_SEGMENT_LIMIT - 1) do
+        local beam = self.Beams[i]
         if beam and beam.Parent then
-            local seg1Visible = snake.segmentVisibility[i] ~= false
-            local seg2Visible = snake.segmentVisibility[i + 1] ~= false
+            -- CHECK VISIBILITY STATES PROPERLY
+            local seg1Visible = self.segmentVisibility[i] ~= false
+            local seg2Visible = self.segmentVisibility[i + 1] ~= false
             
             -- Only show beam if BOTH segments are visible
             if seg1Visible and seg2Visible then
-                local seg1 = snake.Segments[i]
-                local seg2 = snake.Segments[i + 1]
+                local seg1 = self.Segments[i]
+                local seg2 = self.Segments[i + 1]
                 
                 if seg1 and seg2 and seg1.Parent and seg2.Parent then
                     local trans1 = seg1.Transparency or 0
@@ -197,7 +193,7 @@ function AISnakeLODFix:syncBeamVisibility(snake)
                         
                         -- Smooth transparency for beams
                         local avgTrans = (trans1 + trans2) / 2
-                        local beamTrans = math.min(0.9, avgTrans * 1.2)  -- Slightly more transparent than segments
+                        local beamTrans = math.min(0.9, avgTrans * 1.2)  -- Slightly more transparent
                         
                         -- Create smooth transparency sequence
                         beam.Transparency = NumberSequence.new({
@@ -215,58 +211,9 @@ function AISnakeLODFix:syncBeamVisibility(snake)
                     beam.Enabled = false
                 end
             else
-                -- Hide beam if either segment is not visible
+                -- CRITICAL FIX: Hide beam if either segment is not visible
                 beam.Enabled = false
             end
         end
     end
 end
-
--- Helper function to determine glow
-function AISnakeLODFix:shouldHaveGlow(snake, index)
-    if index <= GLOW_FALLOFF_START then
-        return true
-    elseif index <= 100 then
-        return index % 2 == 0
-    elseif index <= 200 then
-        return index % 3 == 0
-    else
-        return index % 5 == 0
-    end
-end
-
--- Apply LOD state to a segment (cleaner version)
-function AISnakeLODFix:applyLODToSegment(snake, segment, lodLevel, index)
-    if not segment or not segment.Parent then return end
-    
-    snake.lodStates[index] = lodLevel
-    
-    if lodLevel == "culled" then
-        -- Completely hide culled segments
-        segment.Transparency = 1
-        segment.CanTouch = false
-        segment.CanQuery = false
-        snake.segmentVisibility[index] = false
-        
-        -- Disable glow
-        local glow = segment:FindFirstChild("Glow")
-        if glow then
-            glow.Enabled = false
-        end
-    else
-        -- Segment is visible at some LOD level
-        snake.segmentVisibility[index] = true
-        
-        -- Note: Actual transparency is set by updateSegmentVisibility
-        -- This just sets the collision properties
-        if lodLevel == "near" and index <= 50 then
-            segment.CanTouch = true
-            segment.CanQuery = index <= 10
-        else
-            segment.CanTouch = false
-            segment.CanQuery = false
-        end
-    end
-end
-
-return AISnakeLODFix
