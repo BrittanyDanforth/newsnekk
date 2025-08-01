@@ -1,10 +1,10 @@
 -- Slither.io Orb Spawner Script with Performance Optimizations
 
 local OUTER_RING_RADIUS = 500 -- Outer ring for spawn fade
-local SPAWN_RADIUS = 475 -- Where new orbs can spawn
+local SPAWN_RADIUS = 750 -- Increased spawn radius to use more of the map
 local FADE_RING_WIDTH = 25 -- Width of the fade ring
-local CELL_SIZE = 40 -- Size of each cell in the grid (increased for performance)
-local ORB_COUNT = 1200 -- Maximum number of orbs (increased for better gameplay)
+local CELL_SIZE = 30 -- Smaller cells for denser orb placement
+local ORB_COUNT = 2000 -- Further increased for a well-populated map
 local RESPAWN_DELAY = 0.5 -- Delay before respawning an orb (increased slightly)
 local BATCH_SIZE = 20 -- Number of orbs to process per frame
 local UPDATE_INTERVAL = 0.1 -- How often to update orb visibility
@@ -60,8 +60,8 @@ if not OrbCollectedEvent then
 	OrbCollectedEvent.Parent = ReplicatedStorage
 end
 
-local ORB_SPAWN_INTERVAL  = 0.2  -- Faster respawn for more orbs
-local ORB_MAX             = 1200  -- Increased orb count for better gameplay
+local ORB_SPAWN_INTERVAL  = 0.1  -- Very fast respawn to quickly populate map
+local ORB_MAX             = 2000  -- Match the increased ORB_COUNT
 local UPGRADE_ORB_CHANCE  = 0.02  -- Reduced to 2% (very rare)
 
 -- LOD (Level of Detail) settings for performance
@@ -75,7 +75,7 @@ local LOD_UPDATE_RATE = 0.2  -- Slower updates for better performance
 
 -- Performance settings
 local BATCH_PROCESS_COUNT = 50  -- Process orbs in batches
-local ORB_POOL_SIZE = 100  -- Pre-create orbs for pooling
+local ORB_POOL_SIZE = 200  -- Increased pool for faster spawning
 
 ---------------------------------------------------------------------
 -- Dynamic spawn area
@@ -976,7 +976,7 @@ local function randomPosition()
 		local testPos = Vector3.new(testX, a.y, testZ)
 
 		-- Use the existing getOrbsNearPosition function
-		local nearbyOrbs = getOrbsNearPosition(testPos, 40) -- Check within 40 studs
+					local nearbyOrbs = getOrbsNearPosition(testPos, 25) -- Reduced for denser orb placement
 
 		-- If this area has few orbs, use it (fills gaps)
 		if #nearbyOrbs < 3 then
@@ -1129,7 +1129,7 @@ task.spawn(function()
 	while true do 
 		task.wait(ORB_SPAWN_INTERVAL)
 		-- Batch spawn to reduce overhead
-		local orbsToSpawn = math.min(20, ORB_MAX - #orbs)
+		local orbsToSpawn = math.min(50, ORB_MAX - #orbs)
 		for i = 1, orbsToSpawn do
 			if #orbs < ORB_MAX then 
 				createOrb() 
