@@ -747,11 +747,6 @@ end
 
 -- === DEATH HANDLERS (UNCHANGED LOGIC) ===
 local function queuePlayerDeath(player)
-	-- Allow queueing if player has a valid character (might have revived)
-	if deadPlayers[player] and not (player.Character and player.Character:FindFirstChild("Humanoid")) then 
-		return 
-	end
-
 	-- Check if already in queue
 	for _, death in ipairs(deathQueue) do
 		if death.type == "player" and death.target == player then
@@ -806,6 +801,8 @@ task.spawn(function()
 					-- Only process death if player is actually alive
 					print("🔍 Death check for", player.Name, "- Health:", humanoid and humanoid.Health or "nil", "DeadPlayers:", deadPlayers[player])
 					if humanoid and humanoid.Health > 0 and not deadPlayers[player] then
+						-- Mark as dead immediately to prevent duplicate processing
+						deadPlayers[player] = true
 						-- Get snake length from leaderstats
 						local snakeLength = 55
 						if player:FindFirstChild("leaderstats") then
@@ -1608,26 +1605,17 @@ RunService.Stepped:Connect(function()
 				local dotA = velA:Dot(dirAB)
 				local dotB = velB:Dot(dirBA)
 
-				if dotA > 2 and not (dotB > 2) then
-					if DEBUG_COLLISIONS then
-						print(string.format("[DEATH] Player A dies: %s (dotA: %.2f, dotB: %.2f)", playerA.Name, dotA, dotB))
-					end
-					queuePlayerDeath(playerA)
-				elseif dotB > 2 and not (dotA > 2) then
-					if DEBUG_COLLISIONS then
-						print(string.format("[DEATH] Player B dies: %s (dotA: %.2f, dotB: %.2f)", playerB.Name, dotA, dotB))
-					end
-					queuePlayerDeath(playerB)
-				elseif dotA > 2 and dotB > 2 then
-					if DEBUG_COLLISIONS then
-						print(string.format("[DEATH] Both die simultaneously: %s and %s (dotA: %.2f, dotB: %.2f)", playerA.Name, playerB.Name, dotA, dotB))
-					end
-					queuePlayerDeath(playerA)
-					task.spawn(function()
-						task.wait(0.05)
-						queuePlayerDeath(playerB)
-					end)
+				-- FIXED: Head-to-head collision logic
+				-- Both players die in head-to-head collision regardless of velocity
+				-- This matches slither.io behavior where head-to-head always kills both
+				if DEBUG_COLLISIONS then
+					print(string.format("[HEAD-TO-HEAD] Both players die: %s and %s (dist: %.2f)", playerA.Name, playerB.Name, dist))
 				end
+				
+				-- Queue both deaths immediately without pre-marking as dead
+				-- Let the death processor handle the deadPlayers marking
+				queuePlayerDeath(playerA)
+				queuePlayerDeath(playerB)
 			end
 		end
 	end
@@ -1658,25 +1646,15 @@ RunService.Stepped:Connect(function()
 
 				local dist = (head.Position - aiHead.Position).Magnitude
 				if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-					local velPlayer = head.AssemblyLinearVelocity or head.Velocity
-					local velAI = aiHead.AssemblyLinearVelocity or aiHead.Velocity
-					local dirPlayerToAI = (aiHead.Position - head.Position).Unit
-					local dirAIToPlayer = -dirPlayerToAI
-
-					local dotPlayer = velPlayer:Dot(dirPlayerToAI)
-					local dotAI = velAI:Dot(dirAIToPlayer)
-
-					if dotPlayer > 2 and not (dotAI > 2) then
-						queuePlayerDeath(player)
-					elseif dotAI > 2 and not (dotPlayer > 2) then
-						queueAIDeath(aiHead)
-					elseif dotPlayer > 2 and dotAI > 2 then
-						queuePlayerDeath(player)
-						task.spawn(function()
-							task.wait(0.05)
-							queueAIDeath(aiHead)
-						end)
+					-- FIXED: Player vs AI head-to-head collision
+					-- Both die in head-to-head collision
+					if DEBUG_COLLISIONS then
+						print(string.format("[HEAD-TO-HEAD] Player vs AI collision - both die: %s", player.Name))
 					end
+					
+					-- Queue both deaths without pre-marking as dead
+					queuePlayerDeath(player)
+					queueAIDeath(aiHead)
 				end
 			end
 		end
@@ -1691,25 +1669,15 @@ RunService.Stepped:Connect(function()
 				if headB and headB.Parent then
 					local dist = (headA.Position - headB.Position).Magnitude
 					if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-						local velA = headA.AssemblyLinearVelocity or headA.Velocity
-						local velB = headB.AssemblyLinearVelocity or headB.Velocity
-						local dirAB = (headB.Position - headA.Position).Unit
-						local dirBA = -dirAB
-
-						local dotA = velA:Dot(dirAB)
-						local dotB = velB:Dot(dirBA)
-
-						if dotA > 2 and not (dotB > 2) then
-							queueAIDeath(headA)
-						elseif dotB > 2 and not (dotA > 2) then
-							queueAIDeath(headB)
-						elseif dotA > 2 and dotB > 2 then
-							queueAIDeath(headA)
-							task.spawn(function()
-								task.wait(0.05)
-								queueAIDeath(headB)
-							end)
+						-- FIXED: AI vs AI head-to-head collision
+						-- Both die in head-to-head collision
+						if DEBUG_COLLISIONS then
+							print(string.format("[HEAD-TO-HEAD] AI vs AI collision - both die"))
 						end
+						
+						-- Queue both deaths without pre-marking as dead
+						queueAIDeath(headA)
+						queueAIDeath(headB)
 					end
 				end
 			end
