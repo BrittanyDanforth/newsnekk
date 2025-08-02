@@ -1605,15 +1605,51 @@ RunService.Stepped:Connect(function()
 				local dotA = velA:Dot(dirAB)
 				local dotB = velB:Dot(dirBA)
 
-				-- In slither.io, if your head touches ANY part of another snake, you die
-				-- So in head-to-head collision, BOTH die because each head touches the other
-				if DEBUG_COLLISIONS then
-					print(string.format("[HEAD-TO-HEAD] Both players die - %s and %s (dist: %.2f)", playerA.Name, playerB.Name, dist))
+				-- In slither.io, whoever's head penetrated more into the collision dies
+				-- Calculate penetration depth based on velocity and position
+				local penetrationA = 0
+				local penetrationB = 0
+				
+				-- Check who is moving more into the collision
+				if dotA > 0 then
+					penetrationA = dotA * 0.1 -- How much A is pushing into B
+				end
+				if dotB > 0 then
+					penetrationB = dotB * 0.1 -- How much B is pushing into A
 				end
 				
-				-- Queue both deaths
-				queuePlayerDeath(playerA)
-				queuePlayerDeath(playerB)
+				-- Also consider the overlap amount (who is more "inside" the collision)
+				local overlap = HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION - dist
+				
+				-- The one moving more aggressively into the collision has higher penetration
+				if dotA > 1 or dotB > 1 then -- At least one is moving toward the other
+					if penetrationA > penetrationB + 0.5 then
+						-- Player A hit harder
+						if DEBUG_COLLISIONS then
+							print(string.format("[HEAD-TO-HEAD] Player A dies (hit harder): %s (pen: %.2f vs %.2f)", playerA.Name, penetrationA, penetrationB))
+						end
+						queuePlayerDeath(playerA)
+					elseif penetrationB > penetrationA + 0.5 then
+						-- Player B hit harder
+						if DEBUG_COLLISIONS then
+							print(string.format("[HEAD-TO-HEAD] Player B dies (hit harder): %s (pen: %.2f vs %.2f)", playerB.Name, penetrationB, penetrationA))
+						end
+						queuePlayerDeath(playerB)
+					else
+						-- Too close to call - use who has higher velocity toward collision
+						if dotA > dotB then
+							if DEBUG_COLLISIONS then
+								print(string.format("[HEAD-TO-HEAD] Player A dies (higher approach): %s", playerA.Name))
+							end
+							queuePlayerDeath(playerA)
+						else
+							if DEBUG_COLLISIONS then
+								print(string.format("[HEAD-TO-HEAD] Player B dies (higher approach): %s", playerB.Name))
+							end
+							queuePlayerDeath(playerB)
+						end
+					end
+				end
 			end
 		end
 	end
@@ -1652,31 +1688,44 @@ RunService.Stepped:Connect(function()
 					local dotPlayer = velPlayer:Dot(dirPlayerToAI)
 					local dotAI = velAI:Dot(dirAIToPlayer)
 
-					-- The one moving more toward the other dies
-					if dotPlayer > 2 and dotAI <= 2 then
-						-- Player ran into AI
-						if DEBUG_COLLISIONS then
-							print(string.format("[HEAD-TO-HEAD] Player dies (ran into AI): %s (dotPlayer: %.2f, dotAI: %.2f)", player.Name, dotPlayer, dotAI))
-						end
-						queuePlayerDeath(player)
-					elseif dotAI > 2 and dotPlayer <= 2 then
-						-- AI ran into Player
-						if DEBUG_COLLISIONS then
-							print(string.format("[HEAD-TO-HEAD] AI dies (ran into player): %s (dotAI: %.2f, dotPlayer: %.2f)", player.Name, dotAI, dotPlayer))
-						end
-						queueAIDeath(aiHead)
-					elseif dotPlayer > 2 and dotAI > 2 then
-						-- Both moving toward each other - higher dot product loses
-						if dotPlayer > dotAI then
+					-- Calculate who hit harder based on penetration
+					local penetrationPlayer = 0
+					local penetrationAI = 0
+					
+					if dotPlayer > 0 then
+						penetrationPlayer = dotPlayer * 0.1
+					end
+					if dotAI > 0 then
+						penetrationAI = dotAI * 0.1
+					end
+					
+					-- The one who penetrated more into the collision dies
+					if dotPlayer > 1 or dotAI > 1 then
+						if penetrationPlayer > penetrationAI + 0.5 then
+							-- Player hit harder
 							if DEBUG_COLLISIONS then
-								print(string.format("[HEAD-TO-HEAD] Player dies (higher approach): %s (dotPlayer: %.2f > dotAI: %.2f)", player.Name, dotPlayer, dotAI))
+								print(string.format("[HEAD-TO-HEAD] Player dies (hit harder): %s", player.Name))
 							end
 							queuePlayerDeath(player)
-						else
+						elseif penetrationAI > penetrationPlayer + 0.5 then
+							-- AI hit harder
 							if DEBUG_COLLISIONS then
-								print(string.format("[HEAD-TO-HEAD] AI dies (higher approach): %s (dotAI: %.2f > dotPlayer: %.2f)", player.Name, dotAI, dotPlayer))
+								print(string.format("[HEAD-TO-HEAD] AI dies (hit harder)", player.Name))
 							end
 							queueAIDeath(aiHead)
+						else
+							-- Too close to call
+							if dotPlayer > dotAI then
+								if DEBUG_COLLISIONS then
+									print(string.format("[HEAD-TO-HEAD] Player dies (higher velocity): %s", player.Name))
+								end
+								queuePlayerDeath(player)
+							else
+								if DEBUG_COLLISIONS then
+									print(string.format("[HEAD-TO-HEAD] AI dies (higher velocity)", player.Name))
+								end
+								queueAIDeath(aiHead)
+							end
 						end
 					end
 				end
@@ -1701,31 +1750,44 @@ RunService.Stepped:Connect(function()
 						local dotA = velA:Dot(dirAB)
 						local dotB = velB:Dot(dirBA)
 
-						-- The one moving more toward the other dies
-						if dotA > 2 and dotB <= 2 then
-							-- AI A ran into AI B
-							if DEBUG_COLLISIONS then
-								print(string.format("[HEAD-TO-HEAD] AI A dies (ran into B) (dotA: %.2f, dotB: %.2f)", dotA, dotB))
-							end
-							queueAIDeath(headA)
-						elseif dotB > 2 and dotA <= 2 then
-							-- AI B ran into AI A
-							if DEBUG_COLLISIONS then
-								print(string.format("[HEAD-TO-HEAD] AI B dies (ran into A) (dotA: %.2f, dotB: %.2f)", dotA, dotB))
-							end
-							queueAIDeath(headB)
-						elseif dotA > 2 and dotB > 2 then
-							-- Both moving toward each other - higher dot product loses
-							if dotA > dotB then
+						-- Calculate who hit harder
+						local penetrationA = 0
+						local penetrationB = 0
+						
+						if dotA > 0 then
+							penetrationA = dotA * 0.1
+						end
+						if dotB > 0 then
+							penetrationB = dotB * 0.1
+						end
+						
+						-- The one who penetrated more dies
+						if dotA > 1 or dotB > 1 then
+							if penetrationA > penetrationB + 0.5 then
+								-- AI A hit harder
 								if DEBUG_COLLISIONS then
-									print(string.format("[HEAD-TO-HEAD] AI A dies (higher approach) (dotA: %.2f > dotB: %.2f)", dotA, dotB))
+									print(string.format("[HEAD-TO-HEAD] AI A dies (hit harder)"))
 								end
 								queueAIDeath(headA)
-							else
+							elseif penetrationB > penetrationA + 0.5 then
+								-- AI B hit harder
 								if DEBUG_COLLISIONS then
-									print(string.format("[HEAD-TO-HEAD] AI B dies (higher approach) (dotB: %.2f > dotA: %.2f)", dotB, dotA))
+									print(string.format("[HEAD-TO-HEAD] AI B dies (hit harder)"))
 								end
 								queueAIDeath(headB)
+							else
+								-- Too close to call
+								if dotA > dotB then
+									if DEBUG_COLLISIONS then
+										print(string.format("[HEAD-TO-HEAD] AI A dies (higher velocity)"))
+									end
+									queueAIDeath(headA)
+								else
+									if DEBUG_COLLISIONS then
+										print(string.format("[HEAD-TO-HEAD] AI B dies (higher velocity)"))
+									end
+									queueAIDeath(headB)
+								end
 							end
 						end
 					end
