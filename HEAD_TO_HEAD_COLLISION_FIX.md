@@ -1,32 +1,39 @@
 # Head-to-Head Collision Fix Documentation
 
 ## Problem Description
-When a player and AI snake (or two players) collide head-to-head, both were dying but the revive UI wasn't showing up properly for players. This was different from normal deaths where the revive UI worked correctly.
+When a player and AI snake (or two players) collide head-to-head, the revive UI wasn't showing up properly for players. Additionally, the collision logic needed to match slither.io behavior where only the snake that "messed up" dies.
 
 ## Root Causes
 1. **Pre-marking as dead**: The collision system was marking players as dead BEFORE queuing them for death processing
 2. **Death check skip**: The death processor was checking if a player was already marked as dead and skipping them
-3. **Complex velocity-based logic**: The original code had complex velocity checks that could cause inconsistent behavior
+3. **Incorrect collision logic**: Previously both snakes died in head-to-head, but slither.io only kills the one who ran into the other
 
 ## Solutions Implemented
 
-### 1. Simplified Head-to-Head Logic
-- **Before**: Complex velocity dot product calculations to determine who dies
-- **After**: Simple distance check - if heads are close enough, both die (matches slither.io behavior)
+### 1. Proper Head-to-Head Collision Logic
+- **Before**: Both snakes always died in head-to-head collision
+- **After**: Only the snake moving more aggressively toward the other dies (matches slither.io)
 
 ```lua
--- OLD CODE:
-if dotA > 2 and not (dotB > 2) then
+-- The dot product tells us who is moving toward whom
+local dotA = velA:Dot(dirAB)  // A's velocity toward B
+local dotB = velB:Dot(dirBA)  // B's velocity toward A
+
+if dotA > 2 and dotB <= 2 then
+    -- A ran into B (A dies)
     queuePlayerDeath(playerA)
-elseif dotB > 2 and not (dotA > 2) then
+elseif dotB > 2 and dotA <= 2 then
+    -- B ran into A (B dies)
     queuePlayerDeath(playerB)
 elseif dotA > 2 and dotB > 2 then
-    -- Both die
-
--- NEW CODE:
--- Both always die in head-to-head collision
-queuePlayerDeath(playerA)
-queuePlayerDeath(playerB)
+    -- Both moving toward each other
+    -- The one with higher approach speed dies
+    if dotA > dotB then
+        queuePlayerDeath(playerA)
+    else
+        queuePlayerDeath(playerB)
+    end
+end
 ```
 
 ### 2. Fixed Death Marking Order
@@ -34,9 +41,9 @@ queuePlayerDeath(playerB)
 - **After**: Queue death → Process death → Mark as dead (ensures processing happens)
 
 ### 3. Consistent Behavior Across All Collision Types
-- Player vs Player head-to-head: Both die
-- Player vs AI head-to-head: Both die
-- AI vs AI head-to-head: Both die
+- Player vs Player: Only the aggressor dies
+- Player vs AI: Only the aggressor dies
+- AI vs AI: Only the aggressor dies
 
 ## Technical Details
 

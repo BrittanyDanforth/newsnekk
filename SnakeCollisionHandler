@@ -1605,17 +1605,33 @@ RunService.Stepped:Connect(function()
 				local dotA = velA:Dot(dirAB)
 				local dotB = velB:Dot(dirBA)
 
-				-- FIXED: Head-to-head collision logic
-				-- Both players die in head-to-head collision regardless of velocity
-				-- This matches slither.io behavior where head-to-head always kills both
-				if DEBUG_COLLISIONS then
-					print(string.format("[HEAD-TO-HEAD] Both players die: %s and %s (dist: %.2f)", playerA.Name, playerB.Name, dist))
+				-- The player moving more toward the other dies
+				if dotA > 2 and dotB <= 2 then
+					-- Player A ran into Player B
+					if DEBUG_COLLISIONS then
+						print(string.format("[HEAD-TO-HEAD] Player A dies (ran into B): %s (dotA: %.2f, dotB: %.2f)", playerA.Name, dotA, dotB))
+					end
+					queuePlayerDeath(playerA)
+				elseif dotB > 2 and dotA <= 2 then
+					-- Player B ran into Player A
+					if DEBUG_COLLISIONS then
+						print(string.format("[HEAD-TO-HEAD] Player B dies (ran into A): %s (dotA: %.2f, dotB: %.2f)", playerB.Name, dotA, dotB))
+					end
+					queuePlayerDeath(playerB)
+				elseif dotA > 2 and dotB > 2 then
+					-- Both moving toward each other - higher dot product loses
+					if dotA > dotB then
+						if DEBUG_COLLISIONS then
+							print(string.format("[HEAD-TO-HEAD] Player A dies (higher approach): %s (dotA: %.2f > dotB: %.2f)", playerA.Name, dotA, dotB))
+						end
+						queuePlayerDeath(playerA)
+					else
+						if DEBUG_COLLISIONS then
+							print(string.format("[HEAD-TO-HEAD] Player B dies (higher approach): %s (dotB: %.2f > dotA: %.2f)", playerB.Name, dotB, dotA))
+						end
+						queuePlayerDeath(playerB)
+					end
 				end
-				
-				-- Queue both deaths immediately without pre-marking as dead
-				-- Let the death processor handle the deadPlayers marking
-				queuePlayerDeath(playerA)
-				queuePlayerDeath(playerB)
 			end
 		end
 	end
@@ -1646,15 +1662,41 @@ RunService.Stepped:Connect(function()
 
 				local dist = (head.Position - aiHead.Position).Magnitude
 				if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-					-- FIXED: Player vs AI head-to-head collision
-					-- Both die in head-to-head collision
-					if DEBUG_COLLISIONS then
-						print(string.format("[HEAD-TO-HEAD] Player vs AI collision - both die: %s", player.Name))
+					local velPlayer = head.AssemblyLinearVelocity or head.Velocity
+					local velAI = aiHead.AssemblyLinearVelocity or aiHead.Velocity
+					local dirPlayerToAI = (aiHead.Position - head.Position).Unit
+					local dirAIToPlayer = -dirPlayerToAI
+
+					local dotPlayer = velPlayer:Dot(dirPlayerToAI)
+					local dotAI = velAI:Dot(dirAIToPlayer)
+
+					-- The one moving more toward the other dies
+					if dotPlayer > 2 and dotAI <= 2 then
+						-- Player ran into AI
+						if DEBUG_COLLISIONS then
+							print(string.format("[HEAD-TO-HEAD] Player dies (ran into AI): %s (dotPlayer: %.2f, dotAI: %.2f)", player.Name, dotPlayer, dotAI))
+						end
+						queuePlayerDeath(player)
+					elseif dotAI > 2 and dotPlayer <= 2 then
+						-- AI ran into Player
+						if DEBUG_COLLISIONS then
+							print(string.format("[HEAD-TO-HEAD] AI dies (ran into player): %s (dotAI: %.2f, dotPlayer: %.2f)", player.Name, dotAI, dotPlayer))
+						end
+						queueAIDeath(aiHead)
+					elseif dotPlayer > 2 and dotAI > 2 then
+						-- Both moving toward each other - higher dot product loses
+						if dotPlayer > dotAI then
+							if DEBUG_COLLISIONS then
+								print(string.format("[HEAD-TO-HEAD] Player dies (higher approach): %s (dotPlayer: %.2f > dotAI: %.2f)", player.Name, dotPlayer, dotAI))
+							end
+							queuePlayerDeath(player)
+						else
+							if DEBUG_COLLISIONS then
+								print(string.format("[HEAD-TO-HEAD] AI dies (higher approach): %s (dotAI: %.2f > dotPlayer: %.2f)", player.Name, dotAI, dotPlayer))
+							end
+							queueAIDeath(aiHead)
+						end
 					end
-					
-					-- Queue both deaths without pre-marking as dead
-					queuePlayerDeath(player)
-					queueAIDeath(aiHead)
 				end
 			end
 		end
@@ -1669,15 +1711,41 @@ RunService.Stepped:Connect(function()
 				if headB and headB.Parent then
 					local dist = (headA.Position - headB.Position).Magnitude
 					if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-						-- FIXED: AI vs AI head-to-head collision
-						-- Both die in head-to-head collision
-						if DEBUG_COLLISIONS then
-							print(string.format("[HEAD-TO-HEAD] AI vs AI collision - both die"))
+						local velA = headA.AssemblyLinearVelocity or headA.Velocity
+						local velB = headB.AssemblyLinearVelocity or headB.Velocity
+						local dirAB = (headB.Position - headA.Position).Unit
+						local dirBA = -dirAB
+
+						local dotA = velA:Dot(dirAB)
+						local dotB = velB:Dot(dirBA)
+
+						-- The one moving more toward the other dies
+						if dotA > 2 and dotB <= 2 then
+							-- AI A ran into AI B
+							if DEBUG_COLLISIONS then
+								print(string.format("[HEAD-TO-HEAD] AI A dies (ran into B) (dotA: %.2f, dotB: %.2f)", dotA, dotB))
+							end
+							queueAIDeath(headA)
+						elseif dotB > 2 and dotA <= 2 then
+							-- AI B ran into AI A
+							if DEBUG_COLLISIONS then
+								print(string.format("[HEAD-TO-HEAD] AI B dies (ran into A) (dotA: %.2f, dotB: %.2f)", dotA, dotB))
+							end
+							queueAIDeath(headB)
+						elseif dotA > 2 and dotB > 2 then
+							-- Both moving toward each other - higher dot product loses
+							if dotA > dotB then
+								if DEBUG_COLLISIONS then
+									print(string.format("[HEAD-TO-HEAD] AI A dies (higher approach) (dotA: %.2f > dotB: %.2f)", dotA, dotB))
+								end
+								queueAIDeath(headA)
+							else
+								if DEBUG_COLLISIONS then
+									print(string.format("[HEAD-TO-HEAD] AI B dies (higher approach) (dotB: %.2f > dotA: %.2f)", dotB, dotA))
+								end
+								queueAIDeath(headB)
+							end
 						end
-						
-						-- Queue both deaths without pre-marking as dead
-						queueAIDeath(headA)
-						queueAIDeath(headB)
 					end
 				end
 			end
