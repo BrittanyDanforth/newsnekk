@@ -1984,7 +1984,12 @@ function AISnake:grow(amount)
 						-- Color matching
 						local prevColor = self:getSegmentColor(self.CurrentLength - 1)
 						local currColor = self:getSegmentColor(self.CurrentLength)
-						if prevColor == currColor then
+						
+						-- Safety check for colors
+						if not prevColor or not currColor then
+							warn("AISnake:grow - Color is nil for segment", self.CurrentLength)
+							beam.Color = ColorSequence.new(Color3.fromRGB(255, 255, 51)) -- Default yellow
+						elseif prevColor == currColor then
 							beam.Color = ColorSequence.new(currColor)
 						else
 							beam.Color = ColorSequence.new({
@@ -2623,6 +2628,11 @@ function AISnake:updateMovement(dt)
 	end
 
 	-- Update all segments up to current length (LOD handled by client)
+	-- Safety check for CurrentLength
+	if not self.CurrentLength then
+		warn("AISnake:updateMovement - CurrentLength is nil for snake", self.Name)
+		return
+	end
 	local maxSegmentToUpdate = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
 
 	-- Update segments with adaptive skipping
@@ -2934,6 +2944,11 @@ end)
 -- Get segment color matching OptimizedSnakeSystem
 function AISnake:getSegmentColor(index)
 	-- For AI snakes, we don't have rainbow mode, but we need the color logic
+	-- Safety check for missing config
+	if not self.Config or not self.Config.BodyColors or #self.Config.BodyColors == 0 then
+		return Color3.fromRGB(255, 255, 51) -- Default yellow color
+	end
+	
 	if index == 0 then
 		return self.Config.HeadColor or self.Config.BodyColors[1]
 	elseif index <= 8 then  -- HEAD_BLEND_SEGMENTS = 8
