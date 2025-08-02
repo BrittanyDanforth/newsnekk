@@ -10,28 +10,30 @@ When a player and AI snake (or two players) collide head-to-head, the revive UI 
 
 ## Solutions Implemented
 
-### 1. Proper Head-to-Head Collision Logic
+### 1. Accurate Slither.io Collision Logic
 - **Before**: Both snakes always died in head-to-head collision
-- **After**: Only the snake moving more aggressively toward the other dies (matches slither.io)
+- **After**: Only the snake that touched first dies (matches slither.io)
+
+In slither.io: If YOUR head touches ANY part of another snake, YOU die. It's binary - first contact = death.
 
 ```lua
--- The dot product tells us who is moving toward whom
-local dotA = velA:Dot(dirAB)  // A's velocity toward B
-local dotB = velB:Dot(dirBA)  // B's velocity toward A
+-- Determine who is moving toward the collision
+local aMovingToward = dotA > 0  // A has velocity toward B
+local bMovingToward = dotB > 0  // B has velocity toward A
 
-if dotA > 2 and dotB <= 2 then
-    -- A ran into B (A dies)
+if aMovingToward and not bMovingToward then
+    -- A ran into stationary/retreating B
     queuePlayerDeath(playerA)
-elseif dotB > 2 and dotA <= 2 then
-    -- B ran into A (B dies)
+elseif bMovingToward and not aMovingToward then
+    -- B ran into stationary/retreating A
     queuePlayerDeath(playerB)
-elseif dotA > 2 and dotB > 2 then
+elseif aMovingToward and bMovingToward then
     -- Both moving toward each other
-    -- The one with higher approach speed dies
+    -- Higher velocity = touched first
     if dotA > dotB then
-        queuePlayerDeath(playerA)
+        queuePlayerDeath(playerA)  // A touched first
     else
-        queuePlayerDeath(playerB)
+        queuePlayerDeath(playerB)  // B touched first
     end
 end
 ```

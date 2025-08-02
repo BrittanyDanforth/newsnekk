@@ -1605,51 +1605,42 @@ RunService.Stepped:Connect(function()
 				local dotA = velA:Dot(dirAB)
 				local dotB = velB:Dot(dirBA)
 
-				-- In slither.io, whoever's head penetrated more into the collision dies
-				-- Calculate penetration depth based on velocity and position
-				local penetrationA = 0
-				local penetrationB = 0
+				-- In slither.io: if your head touches another snake, you die
+				-- For head-to-head: we need to determine who touched first
+				-- Since they're both in the collision zone, we use velocity to determine who hit first
 				
-				-- Check who is moving more into the collision
-				if dotA > 0 then
-					penetrationA = dotA * 0.1 -- How much A is pushing into B
-				end
-				if dotB > 0 then
-					penetrationB = dotB * 0.1 -- How much B is pushing into A
-				end
+				-- Who is moving toward the collision?
+				local aMovingToward = dotA > 0
+				local bMovingToward = dotB > 0
 				
-				-- Also consider the overlap amount (who is more "inside" the collision)
-				local overlap = HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION - dist
-				
-				-- The one moving more aggressively into the collision has higher penetration
-				if dotA > 1 or dotB > 1 then -- At least one is moving toward the other
-					if penetrationA > penetrationB + 0.5 then
-						-- Player A hit harder
+				if aMovingToward and not bMovingToward then
+					-- A ran into stationary/retreating B
+					if DEBUG_COLLISIONS then
+						print(string.format("[HEAD-TO-HEAD] %s dies (ran into %s)", playerA.Name, playerB.Name))
+					end
+					queuePlayerDeath(playerA)
+				elseif bMovingToward and not aMovingToward then
+					-- B ran into stationary/retreating A
+					if DEBUG_COLLISIONS then
+						print(string.format("[HEAD-TO-HEAD] %s dies (ran into %s)", playerB.Name, playerA.Name))
+					end
+					queuePlayerDeath(playerB)
+				elseif aMovingToward and bMovingToward then
+					-- Both moving toward each other - who would hit first?
+					-- The one with higher velocity toward collision touched first
+					if dotA > dotB then
 						if DEBUG_COLLISIONS then
-							print(string.format("[HEAD-TO-HEAD] Player A dies (hit harder): %s (pen: %.2f vs %.2f)", playerA.Name, penetrationA, penetrationB))
+							print(string.format("[HEAD-TO-HEAD] %s dies (faster approach: %.2f > %.2f)", playerA.Name, dotA, dotB))
 						end
 						queuePlayerDeath(playerA)
-					elseif penetrationB > penetrationA + 0.5 then
-						-- Player B hit harder
+					else
 						if DEBUG_COLLISIONS then
-							print(string.format("[HEAD-TO-HEAD] Player B dies (hit harder): %s (pen: %.2f vs %.2f)", playerB.Name, penetrationB, penetrationA))
+							print(string.format("[HEAD-TO-HEAD] %s dies (faster approach: %.2f > %.2f)", playerB.Name, dotB, dotA))
 						end
 						queuePlayerDeath(playerB)
-					else
-						-- Too close to call - use who has higher velocity toward collision
-						if dotA > dotB then
-							if DEBUG_COLLISIONS then
-								print(string.format("[HEAD-TO-HEAD] Player A dies (higher approach): %s", playerA.Name))
-							end
-							queuePlayerDeath(playerA)
-						else
-							if DEBUG_COLLISIONS then
-								print(string.format("[HEAD-TO-HEAD] Player B dies (higher approach): %s", playerB.Name))
-							end
-							queuePlayerDeath(playerB)
-						end
 					end
 				end
+				-- If neither moving toward each other, no collision should happen
 			end
 		end
 	end
@@ -1688,44 +1679,34 @@ RunService.Stepped:Connect(function()
 					local dotPlayer = velPlayer:Dot(dirPlayerToAI)
 					local dotAI = velAI:Dot(dirAIToPlayer)
 
-					-- Calculate who hit harder based on penetration
-					local penetrationPlayer = 0
-					local penetrationAI = 0
+					-- Simple slither.io logic: who touched first?
+					local playerMovingToward = dotPlayer > 0
+					local aiMovingToward = dotAI > 0
 					
-					if dotPlayer > 0 then
-						penetrationPlayer = dotPlayer * 0.1
-					end
-					if dotAI > 0 then
-						penetrationAI = dotAI * 0.1
-					end
-					
-					-- The one who penetrated more into the collision dies
-					if dotPlayer > 1 or dotAI > 1 then
-						if penetrationPlayer > penetrationAI + 0.5 then
-							-- Player hit harder
+					if playerMovingToward and not aiMovingToward then
+						-- Player ran into AI
+						if DEBUG_COLLISIONS then
+							print(string.format("[HEAD-TO-HEAD] Player %s dies (ran into AI)", player.Name))
+						end
+						queuePlayerDeath(player)
+					elseif aiMovingToward and not playerMovingToward then
+						-- AI ran into player
+						if DEBUG_COLLISIONS then
+							print(string.format("[HEAD-TO-HEAD] AI dies (ran into player %s)", player.Name))
+						end
+						queueAIDeath(aiHead)
+					elseif playerMovingToward and aiMovingToward then
+						-- Both moving toward each other - higher velocity touched first
+						if dotPlayer > dotAI then
 							if DEBUG_COLLISIONS then
-								print(string.format("[HEAD-TO-HEAD] Player dies (hit harder): %s", player.Name))
+								print(string.format("[HEAD-TO-HEAD] Player %s dies (faster: %.2f > %.2f)", player.Name, dotPlayer, dotAI))
 							end
 							queuePlayerDeath(player)
-						elseif penetrationAI > penetrationPlayer + 0.5 then
-							-- AI hit harder
+						else
 							if DEBUG_COLLISIONS then
-								print(string.format("[HEAD-TO-HEAD] AI dies (hit harder)", player.Name))
+								print(string.format("[HEAD-TO-HEAD] AI dies (faster: %.2f > %.2f)", dotAI, dotPlayer))
 							end
 							queueAIDeath(aiHead)
-						else
-							-- Too close to call
-							if dotPlayer > dotAI then
-								if DEBUG_COLLISIONS then
-									print(string.format("[HEAD-TO-HEAD] Player dies (higher velocity): %s", player.Name))
-								end
-								queuePlayerDeath(player)
-							else
-								if DEBUG_COLLISIONS then
-									print(string.format("[HEAD-TO-HEAD] AI dies (higher velocity)", player.Name))
-								end
-								queueAIDeath(aiHead)
-							end
 						end
 					end
 				end
@@ -1750,44 +1731,34 @@ RunService.Stepped:Connect(function()
 						local dotA = velA:Dot(dirAB)
 						local dotB = velB:Dot(dirBA)
 
-						-- Calculate who hit harder
-						local penetrationA = 0
-						local penetrationB = 0
+						-- Simple logic: who touched first?
+						local aMovingToward = dotA > 0
+						local bMovingToward = dotB > 0
 						
-						if dotA > 0 then
-							penetrationA = dotA * 0.1
-						end
-						if dotB > 0 then
-							penetrationB = dotB * 0.1
-						end
-						
-						-- The one who penetrated more dies
-						if dotA > 1 or dotB > 1 then
-							if penetrationA > penetrationB + 0.5 then
-								-- AI A hit harder
+						if aMovingToward and not bMovingToward then
+							-- A ran into B
+							if DEBUG_COLLISIONS then
+								print("[HEAD-TO-HEAD] AI A dies (ran into B)")
+							end
+							queueAIDeath(headA)
+						elseif bMovingToward and not aMovingToward then
+							-- B ran into A
+							if DEBUG_COLLISIONS then
+								print("[HEAD-TO-HEAD] AI B dies (ran into A)")
+							end
+							queueAIDeath(headB)
+						elseif aMovingToward and bMovingToward then
+							-- Both moving - higher velocity touched first
+							if dotA > dotB then
 								if DEBUG_COLLISIONS then
-									print(string.format("[HEAD-TO-HEAD] AI A dies (hit harder)"))
+									print(string.format("[HEAD-TO-HEAD] AI A dies (faster: %.2f > %.2f)", dotA, dotB))
 								end
 								queueAIDeath(headA)
-							elseif penetrationB > penetrationA + 0.5 then
-								-- AI B hit harder
+							else
 								if DEBUG_COLLISIONS then
-									print(string.format("[HEAD-TO-HEAD] AI B dies (hit harder)"))
+									print(string.format("[HEAD-TO-HEAD] AI B dies (faster: %.2f > %.2f)", dotB, dotA))
 								end
 								queueAIDeath(headB)
-							else
-								-- Too close to call
-								if dotA > dotB then
-									if DEBUG_COLLISIONS then
-										print(string.format("[HEAD-TO-HEAD] AI A dies (higher velocity)"))
-									end
-									queueAIDeath(headA)
-								else
-									if DEBUG_COLLISIONS then
-										print(string.format("[HEAD-TO-HEAD] AI B dies (higher velocity)"))
-									end
-									queueAIDeath(headB)
-								end
 							end
 						end
 					end
