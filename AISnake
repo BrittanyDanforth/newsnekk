@@ -2001,9 +2001,7 @@ function AISnake:grow(amount)
 				-- Calculate final size using getSegmentSize
 				local finalSize = self:getSegmentSize(self.CurrentLength, currentBaseSize)
 
-				-- Initialize LOD state for new segment
-				self.segmentVisibility[self.CurrentLength] = true
-				self.lodStates[self.CurrentLength] = "near"
+				-- LOD handled by ClientAISnakeLOD
 
 				task.spawn(function()
 					if not segment or not segment.Parent then return end
@@ -2032,8 +2030,7 @@ function AISnake:grow(amount)
 		end
 	end
 	
-	-- Update visible segment count
-	self.visibleSegmentCount = math.min(self.CurrentLength, MAX_VISIBLE_SEGMENTS)
+	-- LOD tracking removed - handled by ClientAISnakeLOD
 	
 	-- Update all segment sizes with new growth factor to prevent glitching
 	if amount > 0 then
@@ -2625,27 +2622,14 @@ function AISnake:updateMovement(dt)
 		self.Attachments[0].WorldPosition = self.HeadParts.head.Position
 	end
 
-	-- Only update visible segments
-	local maxSegmentToUpdate = math.min(self.visibleSegmentCount, DYNAMIC_SEGMENT_LIMIT)
+	-- Update all segments up to current length (LOD handled by client)
+	local maxSegmentToUpdate = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
 
-	-- Build list of segments to update based on visibility
-	local segmentsToUpdate = {}
-	for i = 1, math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT) do
-		if self.segmentVisibility[i] ~= false then
-			table.insert(segmentsToUpdate, i)
-		end
-	end
-
-	-- Update segments with adaptive skipping and LOD
+	-- Update segments with adaptive skipping
 	for i = 1 + updateOffset, maxSegmentToUpdate, segmentSkip do
 		-- Ensure segment exists (dynamic creation)
 		local segment = self:ensureSegmentExists(i)
 		if segment and segment.Parent then
-			-- Skip if culled
-			if self.lodStates[i] == "culled" then
-				continue
-			end
-			
 			local delay = mathFloor(i * 1.2)
 			local targetData = self:getFromHistory(delay)
 			if targetData then
@@ -2670,16 +2654,8 @@ function AISnake:updateMovement(dt)
 					end
 				end
 
-				-- Use different follow speeds based on LOD
-				local lodState = self.lodStates[i]
-				local lodFollowSpeed = followSpeed
-				if lodState == "far" then
-					lodFollowSpeed = 1 -- Instant update for far segments
-				elseif lodState == "mid" then
-					lodFollowSpeed = math.min(followSpeed * 1.2, 0.99)
-				end
-
-				local newPos = currentSegmentPos:Lerp(segmentPos, lodFollowSpeed)
+				-- Use consistent follow speed for all segments
+				local newPos = currentSegmentPos:Lerp(segmentPos, followSpeed)
 				segment.CFrame = CFramenew(newPos)
 
 				-- Update attachment position for this segment
@@ -2696,10 +2672,7 @@ function AISnake:updateMovement(dt)
 			if i % segmentSkip ~= updateOffset then
 				local segment = self.Segments[i]
 				if segment and segment.Parent and self.Attachments and self.Attachments[i] then
-					-- Only update if not culled
-					if self.lodStates[i] ~= "culled" then
-						self.Attachments[i].WorldPosition = segment.Position
-					end
+					self.Attachments[i].WorldPosition = segment.Position
 				end
 			end
 		end
@@ -3011,7 +2984,7 @@ function AISnake:getSegmentSize(index, baseSize)
 		return (headSize + (bodySize - headSize) * (blendFactor ^ 0.5)) * sizeMult
 	else
 		-- Body with gradual taper
-		local taperFactor = 1 - (index / visibleSegmentCount) * 0.2
+		local taperFactor = 1 - (index / self.CurrentLength) * 0.2
 		-- Apply exponential smoothing to taper
 		taperFactor = 1 - (1 - taperFactor) ^ 1.5
 		return baseSize * taperFactor * sizeMult
@@ -3037,29 +3010,11 @@ function AISnake:getBeamWidth(index, baseSize)
 	return avgSize * beamWidthBase * beamTaper
 end
 
--- Calculate LOD level based on distance (from OptimizedSnakeSystem)
+-- LOD is now handled by ClientAISnakeLOD
+-- This function is kept for compatibility but does nothing
 function AISnake:calculateLODLevel(segmentIndex, cameraPosition)
-	if not cameraPosition then return "near" end
-	
-	local segment = self.Segments[segmentIndex]
-	if not segment or not segment.Parent then return "culled" end
-	
-	-- Always full quality for first segments
-	if segmentIndex <= FORCE_RENDER_SEGMENTS then
-		return "near"
-	end
-	
-	local distance = (segment.Position - cameraPosition).Magnitude
-	
-	if distance <= LOD_DISTANCE_NEAR then
-		return "near"
-	elseif distance <= LOD_DISTANCE_MID then
-		return "mid"
-	elseif distance <= LOD_DISTANCE_FAR then
-		return "far"
-	else
-		return "culled"
-	end
+	-- Deprecated: LOD level calculation handled client-side
+	return "near"  -- Always return near since client handles actual LOD
 end
 
 -- LOD is now handled by ClientAISnakeLOD
