@@ -2729,63 +2729,9 @@ function AISnake:updateMovement(dt)
 	-- Don't update tail segments that are beyond visible range
 	-- This prevents the tail update logic from affecting invisible segments
 
-	-- Collision detection (handled by SnakeCollisionHandler)
-	local myHead = self.HeadParts and self.HeadParts.head
-	if not myHead or not myHead.Parent then return end
-
-	-- Skip collision detection during spawn protection
-	if isSpawnProtected then return end
-
-	self._collisionCheckFrame = (self._collisionCheckFrame or 0) + 1
-	if self._collisionCheckFrame % 6 ~= 0 then return end  -- Check even less often
-
-	local searchRadius = 3.5
-	local nearbyEntities = SpatialGrid.QueryRadius(myHead.Position, searchRadius)
-
-	for _, data in nearbyEntities do
-		local otherPart = data.part
-		if otherPart == myHead then continue end
-
-		if isPartsColliding(myHead, otherPart) then
-			local otherOwner = data.owner
-
-			-- Add double-check to prevent false positives
-			if (myHead.Position - otherPart.Position).Magnitude > 5 then
-				continue  -- Skip if distance is too far (false positive)
-			end
-
-			if data.type == "AI_HEAD" then
-				if tostring(self) < tostring(otherOwner) then
-					if self.CurrentLength > otherOwner.CurrentLength then
-						otherOwner:Destroy()
-						self:setConfidenceBuff()
-					elseif otherOwner.CurrentLength > self.CurrentLength then
-						self:Destroy()
-						otherOwner:setConfidenceBuff()
-					else
-						otherOwner:Destroy()
-						self:Destroy()
-					end
-				end
-				return
-			elseif data.type == "AI_SEGMENT" then
-				if otherOwner ~= self then
-					self:Destroy()
-					otherOwner:setConfidenceBuff()
-					return
-				end
-			elseif data.type == "PLAYER_HEAD" then
-				if otherOwner.Character and otherOwner.Character:FindFirstChildOfClass("Humanoid") then
-					otherOwner.Character:FindFirstChildOfClass("Humanoid").Health = 0
-				end
-				self:Destroy()
-				return
-			elseif data.type == "PLAYER_SEGMENT" then
-				self:Destroy()
-				return
-			end
-		end
-	end
+	-- COLLISION DETECTION REMOVED - Handled by SnakeCollisionHandler
+	-- The collision code that was here was causing conflicts and unfair deaths
+	-- All collision detection is now centralized in SnakeCollisionHandler
 
 	-- Debug display (DISABLED FOR PERFORMANCE)
 	if false and self.HeadParts and self.HeadParts.debugLabel then
@@ -3404,6 +3350,7 @@ function AISnake:ensureSegmentExists(index)
 	return segment
 end
 
-
+print("✅ AISnake Module Loaded - Collision detection REMOVED (handled by SnakeCollisionHandler)")
+print("🎯 This prevents duplicate collision detection and unfair deaths")
 
 return AISnake
