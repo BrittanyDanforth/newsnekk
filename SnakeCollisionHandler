@@ -76,6 +76,22 @@ local function setPlayerInvincible(player)
 end
 
 local function isPlayerInvincible(player)
+	-- Check if player is in revive process
+	if processingRevive[player] then
+		if DEBUG_COLLISIONS then
+			print(string.format("[INVINCIBLE] %s is in revive process", player.Name))
+		end
+		return true
+	end
+
+	-- Check if player is dead
+	if deadPlayers[player] then
+		if DEBUG_COLLISIONS then
+			print(string.format("[INVINCIBLE] %s is dead (protected from collisions)", player.Name))
+		end
+		return true
+	end
+
 	-- Simple timer-based invincibility
 	local expire = invinciblePlayers[player]
 	if expire and os.clock() < expire then
@@ -92,7 +108,25 @@ local function isPlayerInvincible(player)
 
 	-- Check ghost mode gamepass
 	if player:GetAttribute("ActiveGhostMode") then
+		if DEBUG_COLLISIONS then
+			print(string.format("[INVINCIBLE] %s has active ghost mode", player.Name))
+		end
 		return true
+	end
+
+	-- Check if player just spawned (additional safety)
+	if player.Character then
+		local humanoid = player.Character:FindFirstChild("Humanoid")
+		if humanoid and humanoid.Health > 0 then
+			-- Check spawn time
+			local spawnTime = player.Character:GetAttribute("SpawnTime")
+			if spawnTime and (tick() - spawnTime) < INVINCIBILITY_DURATION then
+				if DEBUG_COLLISIONS then
+					print(string.format("[INVINCIBLE] %s recently spawned (%.1fs ago)", player.Name, tick() - spawnTime))
+				end
+				return true
+			end
+		end
 	end
 
 	return false
@@ -162,11 +196,21 @@ end
 
 -- Invincibility setup (preserved from V7)
 Players.PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(function()
-		-- CRITICAL: Clear dead state when spawning (for revive or normal spawn)
-		resetPlayerCollisionState(player)
+	player.CharacterAdded:Connect(function(character)
+		-- Set spawn time for additional invincibility check
+		character:SetAttribute("SpawnTime", tick())
 		
 		setPlayerInvincible(player)
+		-- Clear processing revive flag when character spawns
+		processingRevive[player] = nil
+		deadPlayers[player] = nil -- Clear dead state on respawn
+		
+		-- Ensure HumanoidRootPart starts in a safe state
+		local root = character:WaitForChild("HumanoidRootPart", 5)
+		if root then
+			root:SetAttribute("Dead", false)
+		end
+		
 		task.spawn(function()
 			local expire = invinciblePlayers[player]
 			if expire then
@@ -177,19 +221,30 @@ Players.PlayerAdded:Connect(function(player)
 		end)
 	end)
 	player.AncestryChanged:Connect(function()
-		if not player.Parent then
+		if not player:IsDescendantOf(game) then
 			clearPlayerInvincibility(player)
+			processingRevive[player] = nil
 			deadPlayers[player] = nil
 		end
 	end)
 end)
 
 for _, player in Players:GetPlayers() do
-	player.CharacterAdded:Connect(function()
-		-- CRITICAL: Clear dead state when spawning
-		resetPlayerCollisionState(player)
+	player.CharacterAdded:Connect(function(character)
+		-- Set spawn time for additional invincibility check
+		character:SetAttribute("SpawnTime", tick())
 		
 		setPlayerInvincible(player)
+		-- Clear processing revive flag when character spawns
+		processingRevive[player] = nil
+		deadPlayers[player] = nil -- Clear dead state on respawn
+		
+		-- Ensure HumanoidRootPart starts in a safe state
+		local root = character:WaitForChild("HumanoidRootPart", 5)
+		if root then
+			root:SetAttribute("Dead", false)
+		end
+		
 		task.spawn(function()
 			local expire = invinciblePlayers[player]
 			if expire then
@@ -374,21 +429,37 @@ local function getPlayerHeads()
 					if snakeHead.Anchored then
 						heads[#heads + 1] = {player = player, part = snakeHead}
 						if DEBUG_COLLISIONS then
-							print(string.format("[HEAD] Player %s using visual snake head", player.Name))
+							print(string.format("[HEAD] Player %s using visual snake head at %s", player.Name, tostring(snakeHead.Position)))
 						end
-						continue
+						continue -- IMPORTANT: Skip HumanoidRootPart if we have a visual head
 					end
 				end
 			end
 
-			-- Fallback to HumanoidRootPart if no snake head found
+			-- ONLY use HumanoidRootPart if NO visual snake exists
+			-- This prevents duplicate collision points
 			local root = player.Character:FindFirstChild("HumanoidRootPart")
 			if root and root.Parent then
 				-- Only use if not marked as dead
 				if not root:GetAttribute("Dead") then
-					heads[#heads + 1] = {player = player, part = root}
-					if DEBUG_COLLISIONS then
-						print(string.format("[HEAD] Player %s using HumanoidRootPart (fallback)", player.Name))
+					-- Additional check: Make sure we're not in spawn protection
+					local humanoid = player.Character:FindFirstChild("Humanoid")
+					if humanoid and humanoid.Health > 0 then
+						-- Move HumanoidRootPart far away if we shouldn't be using it
+						-- This prevents false collisions when the visual snake is active
+						if snakeModel then
+							-- Visual snake exists but head wasn't valid, move HumanoidRootPart away
+							root.CFrame = CFrame.new(0, -1000, 0)
+							if DEBUG_COLLISIONS then
+								print(string.format("[HEAD] Player %s has visual snake but invalid head, moving HumanoidRootPart away", player.Name))
+							end
+						else
+							-- No visual snake at all, use HumanoidRootPart
+							heads[#heads + 1] = {player = player, part = root}
+							if DEBUG_COLLISIONS then
+								print(string.format("[HEAD] Player %s using HumanoidRootPart (no visual snake)", player.Name))
+							end
+						end
 					end
 				end
 			end
@@ -397,7 +468,27 @@ local function getPlayerHeads()
 
 	headCache.players = heads
 	headCache.lastUpdate = currentTime
-	return heads
+	
+	-- CRITICAL: Deduplicate heads to prevent self-collision bugs
+	local deduplicatedHeads = {}
+	local seenPlayers = {}
+	
+	for _, headData in ipairs(heads) do
+		if not seenPlayers[headData.player] then
+			seenPlayers[headData.player] = true
+			deduplicatedHeads[#deduplicatedHeads + 1] = headData
+		else
+			if DEBUG_COLLISIONS then
+				print(string.format("[HEAD] WARNING: Duplicate head detected for %s, using first instance only", headData.player.Name))
+			end
+		end
+	end
+	
+	if DEBUG_COLLISIONS and #deduplicatedHeads ~= #heads then
+		print(string.format("[HEAD] Deduplication: %d heads -> %d unique heads", #heads, #deduplicatedHeads))
+	end
+	
+	return deduplicatedHeads
 end
 
 local function getAISnakeHeads()
@@ -1582,6 +1673,14 @@ RunService.Stepped:Connect(function()
 			local playerB = dataB.player
 			local headB = dataB.part
 
+			-- CRITICAL: Skip if same player (prevents self-collision bug)
+			if playerA == playerB then
+				if DEBUG_COLLISIONS then
+					print(string.format("[COLLISION] Skipping self-collision for %s", playerA.Name))
+				end
+				continue
+			end
+
 			local playerAInvincible = isPlayerInvincible(playerA)
 			local playerBInvincible = isPlayerInvincible(playerB)
 
@@ -1597,16 +1696,50 @@ RunService.Stepped:Connect(function()
 				continue
 			end
 
+			-- Additional safety: Check if parts are marked as dead
+			if headA:GetAttribute("Dead") or headB:GetAttribute("Dead") then
+				if DEBUG_COLLISIONS then
+					print(string.format("[COLLISION] Skipping dead parts - %s: %s, %s: %s", 
+						playerA.Name, tostring(headA:GetAttribute("Dead")),
+						playerB.Name, tostring(headB:GetAttribute("Dead"))))
+				end
+				continue
+			end
+
 			local dist = (headA.Position - headB.Position).Magnitude
 
 			if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-				local velA = headA.AssemblyLinearVelocity or headA.Velocity
-				local velB = headB.AssemblyLinearVelocity or headB.Velocity
+				-- Additional validation: Make sure positions are reasonable
+				if headA.Position.Y < -500 or headB.Position.Y < -500 then
+					if DEBUG_COLLISIONS then
+						print(string.format("[COLLISION] Skipping invalid positions - %s: Y=%f, %s: Y=%f", 
+							playerA.Name, headA.Position.Y, playerB.Name, headB.Position.Y))
+					end
+					continue
+				end
+
+				local velA = headA.AssemblyLinearVelocity or headA.Velocity or Vector3.zero
+				local velB = headB.AssemblyLinearVelocity or headB.Velocity or Vector3.zero
+				
+				-- Ensure valid velocity
+				if velA.Magnitude > 1000 or velB.Magnitude > 1000 then
+					if DEBUG_COLLISIONS then
+						print(string.format("[COLLISION] Skipping extreme velocities - %s: %f, %s: %f", 
+							playerA.Name, velA.Magnitude, playerB.Name, velB.Magnitude))
+					end
+					continue
+				end
+				
 				local dirAB = (headB.Position - headA.Position).Unit
 				local dirBA = -dirAB
 
 				local dotA = velA:Dot(dirAB)
 				local dotB = velB:Dot(dirBA)
+
+				if DEBUG_COLLISIONS then
+					print(string.format("[COLLISION] Head-to-head check - %s vs %s: dist=%.2f, dotA=%.2f, dotB=%.2f", 
+						playerA.Name, playerB.Name, dist, dotA, dotB))
+				end
 
 				if dotA > 2 and not (dotB > 2) then
 					if DEBUG_COLLISIONS then
@@ -1817,31 +1950,31 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 FINAL - FULLY POLISHED")
-print("🚀 All V7 functionality preserved with performance optimizations")
-print("💎 FIXED: Death orbs properly spawn along snake segments")
-print("🧲 FIXED: MAGNET EFFECT CLEARED ON DEATH!")
-print("⚰️ FIXED: Dead players can't kill others!")
-print("📏 FIXED: Death orbs spawn at correct height (Y=5)")
-print("✨ FIXED: Smooth death transition (no camera issues)")
-print("🔄 FIXED: Collision detection after revive (resetPlayerCollisionState)")
-print("🛡️ DEATH HANDLING:")
-print("   - Dead players marked with Dead=true attribute")
-print("   - Character moved down 10 studs + anchored")
-print("   - Magnet attributes reset immediately")
-print("   - Character fades out smoothly (0.5s)")
-print("   - Death orbs spawn at Y=5 (matches normal orbs)")
-print("   - 1-second delay for spawn protection")
-print("🔧 Optimizations: Batched spawning, aggressive LOD")
-print("📊 Performance: 12Hz collision checks, 96 chunk size")
+print("⚡ SnakeCollisionHandler V7.1 - HEAD-TO-HEAD COLLISION FIX")
+print("🚀 All V7 functionality preserved with critical collision fixes")
+print("🎯 FIXED: Head-to-head collision detection now properly handles visual snakes")
+print("🛡️ FIXED: Prevents duplicate collision points for same player")
+print("⚰️ FIXED: HumanoidRootPart moved away when visual snake is active")
+print("🔍 FIXED: Added self-collision prevention checks")
+print("✨ FIXED: Enhanced invincibility validation with spawn time tracking")
+print("📊 NEW SAFETY FEATURES:")
+print("   - Deduplication of player heads to prevent bugs")
+print("   - Position validation (Y > -500) to skip invalid collisions")
+print("   - Velocity validation to prevent extreme values")
+print("   - Dead part attribute checking")
+print("   - Self-collision prevention (playerA == playerB check)")
+print("🔧 To enable debug mode: Set workspace.ToggleCollisionDebug.Value = 'debug'")
 
 -- Debug command (unchanged from V7)
 local function toggleDebug()
 	DEBUG_COLLISIONS = not DEBUG_COLLISIONS
 	print("🔍 Collision debug mode: " .. (DEBUG_COLLISIONS and "ENABLED" or "DISABLED"))
 	if DEBUG_COLLISIONS then
-		print("   - Orb spawning debug enabled")
+		print("   - Head detection debug enabled")
+		print("   - Invincibility check debug enabled") 
 		print("   - Collision detection debug enabled")
+		print("   - Orb spawning debug enabled")
+		print("   - Revive process debug enabled")
 	end
 end
 
