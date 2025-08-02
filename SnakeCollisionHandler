@@ -413,55 +413,46 @@ local function getPlayerHeads()
 
 	local heads = {}
 	for _, player in Players:GetPlayers() do
-		if player.Character then
-			-- Skip dead players
-			if deadPlayers[player] then
-				continue
-			end
+		-- Skip dead players
+		if deadPlayers[player] then
+			continue
+		end
 
-			-- First try to get the actual snake head from the new system
-			local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
-			if snakeModel then
-				local snakeHead = snakeModel:FindFirstChild("Segment0_Head")
-				if snakeHead and snakeHead.Parent then
-					-- CRITICAL: Verify this is the current snake model
-					-- Check if the snake head is anchored (all snake parts are anchored)
-					if snakeHead.Anchored then
-						heads[#heads + 1] = {player = player, part = snakeHead}
-						if DEBUG_COLLISIONS then
-							print(string.format("[HEAD] Player %s using visual snake head at %s", player.Name, tostring(snakeHead.Position)))
-						end
-						continue -- IMPORTANT: Skip HumanoidRootPart if we have a visual head
-					end
+		-- Skip if no character
+		if not player.Character then
+			continue
+		end
+
+		-- ONLY CHECK FOR VISUAL SNAKE HEAD - NO HUMANOIDROOTPART!
+		local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
+		if snakeModel then
+			local snakeHead = snakeModel:FindFirstChild("Segment0_Head")
+			if snakeHead and snakeHead.Parent and snakeHead.Anchored then
+				heads[#heads + 1] = {player = player, part = snakeHead}
+				if DEBUG_COLLISIONS then
+					print(string.format("[HEAD] Player %s using visual snake head at %s", player.Name, tostring(snakeHead.Position)))
+				end
+			else
+				-- NO VISUAL HEAD = NO COLLISION DETECTION AT ALL!
+				if DEBUG_COLLISIONS then
+					print(string.format("[HEAD] Player %s has no valid visual snake head - SKIPPING COLLISION ENTIRELY", player.Name))
 				end
 			end
-
-			-- ONLY use HumanoidRootPart if NO visual snake exists
-			-- This prevents duplicate collision points
-			local root = player.Character:FindFirstChild("HumanoidRootPart")
-			if root and root.Parent then
-				-- Only use if not marked as dead
-				if not root:GetAttribute("Dead") then
-					-- Additional check: Make sure we're not in spawn protection
-					local humanoid = player.Character:FindFirstChild("Humanoid")
-					if humanoid and humanoid.Health > 0 then
-						-- Move HumanoidRootPart far away if we shouldn't be using it
-						-- This prevents false collisions when the visual snake is active
-						if snakeModel then
-							-- Visual snake exists but head wasn't valid, move HumanoidRootPart away
-							root.CFrame = CFrame.new(0, -1000, 0)
-							if DEBUG_COLLISIONS then
-								print(string.format("[HEAD] Player %s has visual snake but invalid head, moving HumanoidRootPart away", player.Name))
-							end
-						else
-							-- No visual snake at all, use HumanoidRootPart
-							heads[#heads + 1] = {player = player, part = root}
-							if DEBUG_COLLISIONS then
-								print(string.format("[HEAD] Player %s using HumanoidRootPart (no visual snake)", player.Name))
-							end
-						end
-					end
-				end
+		else
+			-- NO SNAKE MODEL = NO COLLISION DETECTION!
+			if DEBUG_COLLISIONS then
+				print(string.format("[HEAD] Player %s has no snake model - SKIPPING COLLISION ENTIRELY", player.Name))
+			end
+		end
+		
+		-- CRITICAL FIX: Move HumanoidRootPart FAR AWAY to prevent ANY collision
+		local root = player.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			-- Move it so far away it can NEVER collide
+			root.CFrame = CFrame.new(math.random(-10000, -9000), -5000, math.random(-10000, -9000))
+			root.Anchored = true -- Anchor it so it can't move back
+			if DEBUG_COLLISIONS then
+				print(string.format("[HEAD] Moved %s's HumanoidRootPart to %s", player.Name, tostring(root.Position)))
 			end
 		end
 	end
@@ -469,26 +460,8 @@ local function getPlayerHeads()
 	headCache.players = heads
 	headCache.lastUpdate = currentTime
 	
-	-- CRITICAL: Deduplicate heads to prevent self-collision bugs
-	local deduplicatedHeads = {}
-	local seenPlayers = {}
-	
-	for _, headData in ipairs(heads) do
-		if not seenPlayers[headData.player] then
-			seenPlayers[headData.player] = true
-			deduplicatedHeads[#deduplicatedHeads + 1] = headData
-		else
-			if DEBUG_COLLISIONS then
-				print(string.format("[HEAD] WARNING: Duplicate head detected for %s, using first instance only", headData.player.Name))
-			end
-		end
-	end
-	
-	if DEBUG_COLLISIONS and #deduplicatedHeads ~= #heads then
-		print(string.format("[HEAD] Deduplication: %d heads -> %d unique heads", #heads, #deduplicatedHeads))
-	end
-	
-	return deduplicatedHeads
+	-- No need for deduplication since we only add one head per player now
+	return heads
 end
 
 local function getAISnakeHeads()
@@ -1336,6 +1309,41 @@ task.spawn(function()
 	end
 end)
 
+-- === HUMANOIDROOTPART SAFETY SYSTEM ===
+-- This ensures HumanoidRootParts stay FAR away from collision zones
+task.spawn(function()
+	while true do
+		task.wait(0.5) -- Check every half second
+		
+		for _, player in Players:GetPlayers() do
+			if player.Character then
+				local root = player.Character:FindFirstChild("HumanoidRootPart")
+				local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
+				
+				-- If player has a visual snake, keep HumanoidRootPart FAR away
+				if root and snakeModel then
+					-- Check if it's too close to play area
+					if root.Position.Y > -1000 then
+						root.CFrame = CFrame.new(
+							math.random(-10000, -9000), 
+							-5000, 
+							math.random(-10000, -9000)
+						)
+						root.Anchored = true
+						
+						if DEBUG_COLLISIONS then
+							print(string.format("[SAFETY] Moved %s's HumanoidRootPart away from play area", player.Name))
+						end
+					end
+				elseif root and root.Anchored then
+					-- No snake model but root is anchored, unanchor it
+					root.Anchored = false
+				end
+			end
+		end
+	end
+end)
+
 -- === COLLISION VALIDATION (UNCHANGED FROM V7) ===
 local function checkBoundsOverlap(bounds1, bounds2, margin)
 	return not (
@@ -1478,8 +1486,20 @@ RunService.Stepped:Connect(function()
 
 	-- === ALL COLLISION CHECKS FROM V7 (UNCHANGED LOGIC) ===
 
-	-- Player vs AI body collisions
+	-- CRITICAL: Pre-filter invincible players to prevent ANY collision checks
+	local activePlayerHeads = {}
 	for _, headData in ipairs(playerHeads) do
+		if not isPlayerInvincible(headData.player) then
+			activePlayerHeads[#activePlayerHeads + 1] = headData
+		else
+			if DEBUG_COLLISIONS then
+				print(string.format("[COLLISION] Excluding invincible player %s from ALL collision checks", headData.player.Name))
+			end
+		end
+	end
+
+	-- Player vs AI body collisions
+	for _, headData in ipairs(activePlayerHeads) do
 		local player = headData.player
 		local head = headData.part
 
@@ -1554,8 +1574,8 @@ RunService.Stepped:Connect(function()
 	end
 
 	-- Player vs Player body collisions
-	for i = 1, #playerHeads do
-		local headDataA = playerHeads[i]
+	for i = 1, #activePlayerHeads do
+		local headDataA = activePlayerHeads[i]
 		local playerA = headDataA.player
 		local headA = headDataA.part
 
@@ -1573,9 +1593,9 @@ RunService.Stepped:Connect(function()
 
 			local headPosA = headA.Position
 
-			for j = 1, #playerHeads do
+			for j = 1, #activePlayerHeads do
 				if i ~= j then
-					local headDataB = playerHeads[j]
+					local headDataB = activePlayerHeads[j]
 					local playerB = headDataB.player
 
 					local segmentData = getPlayerSegments(playerB)
@@ -1624,7 +1644,7 @@ RunService.Stepped:Connect(function()
 				continue
 			end
 
-			for _, headData in ipairs(playerHeads) do
+			for _, headData in ipairs(activePlayerHeads) do
 				local player = headData.player
 
 				if not isPlayerInvincible(player) then
@@ -1663,13 +1683,13 @@ RunService.Stepped:Connect(function()
 
 	-- Head-to-head collisions (UNCHANGED FROM V7)
 	-- Player vs Player
-	for i = 1, #playerHeads - 1 do
-		local dataA = playerHeads[i]
+	for i = 1, #activePlayerHeads - 1 do
+		local dataA = activePlayerHeads[i]
 		local playerA = dataA.player
 		local headA = dataA.part
 
-		for j = i + 1, #playerHeads do
-			local dataB = playerHeads[j]
+		for j = i + 1, #activePlayerHeads do
+			local dataB = activePlayerHeads[j]
 			local playerB = dataB.player
 			local headB = dataB.part
 
@@ -1707,6 +1727,13 @@ RunService.Stepped:Connect(function()
 			end
 
 			local dist = (headA.Position - headB.Position).Magnitude
+
+			if DEBUG_COLLISIONS then
+				print(string.format("\n[HEAD-TO-HEAD] Checking %s vs %s", playerA.Name, playerB.Name))
+				print(string.format("  - Distance: %.2f (threshold: %.2f)", dist, HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION))
+				print(string.format("  - HeadA type: %s at %s", headA.Name, tostring(headA.Position)))
+				print(string.format("  - HeadB type: %s at %s", headB.Name, tostring(headB.Position)))
+			end
 
 			if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
 				-- Additional validation: Make sure positions are reasonable
@@ -1766,7 +1793,7 @@ RunService.Stepped:Connect(function()
 	end
 
 	-- Player vs AI head
-	for _, headData in ipairs(playerHeads) do
+	for _, headData in ipairs(activePlayerHeads) do
 		local player = headData.player
 		local head = headData.part
 
@@ -1950,20 +1977,29 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.1 - HEAD-TO-HEAD COLLISION FIX")
-print("🚀 All V7 functionality preserved with critical collision fixes")
-print("🎯 FIXED: Head-to-head collision detection now properly handles visual snakes")
-print("🛡️ FIXED: Prevents duplicate collision points for same player")
-print("⚰️ FIXED: HumanoidRootPart moved away when visual snake is active")
-print("🔍 FIXED: Added self-collision prevention checks")
-print("✨ FIXED: Enhanced invincibility validation with spawn time tracking")
-print("📊 NEW SAFETY FEATURES:")
-print("   - Deduplication of player heads to prevent bugs")
-print("   - Position validation (Y > -500) to skip invalid collisions")
-print("   - Velocity validation to prevent extreme values")
-print("   - Dead part attribute checking")
-print("   - Self-collision prevention (playerA == playerB check)")
-print("🔧 To enable debug mode: Set workspace.ToggleCollisionDebug.Value = 'debug'")
+print("⚡ SnakeCollisionHandler V7.2 - COMPLETE HEAD-TO-HEAD COLLISION FIX")
+print("🚀 MAJOR CHANGES:")
+print("🎯 CRITICAL: Now ONLY uses visual snake heads for collision - NO HumanoidRootPart!")
+print("🛡️ CRITICAL: HumanoidRootParts moved to Y=-5000 when visual snake exists")
+print("⚰️ CRITICAL: Continuous monitoring keeps HumanoidRootParts away")
+print("🔍 CRITICAL: If no visual snake head, player has NO collision detection")
+print("✨ All invincibility systems preserved and enhanced")
+print("")
+print("📊 HOW IT WORKS NOW:")
+print("   1. Only Snake_[PlayerName]/Segment0_Head is used for collisions")
+print("   2. HumanoidRootPart is moved to (-10000, -5000, -10000) and anchored")
+print("   3. No fallback to HumanoidRootPart - no snake = no collisions")
+print("   4. Continuous monitoring prevents HumanoidRootPart from returning")
+print("")
+print("🔧 TO TEST:")
+print("   1. Enable debug: workspace.ToggleCollisionDebug.Value = 'debug'")
+print("   2. Watch console to see which parts are being used for collision")
+print("   3. You should ONLY see 'visual snake head' entries, NEVER HumanoidRootPart")
+print("")
+print("⚠️ IMPORTANT: If you still die with invincibility, check if:")
+print("   - Your visual snake is properly spawned (Snake_YourName exists)")
+print("   - Segment0_Head exists and is anchored")
+print("   - No other scripts are interfering with collision detection")
 
 -- Debug command (unchanged from V7)
 local function toggleDebug()
