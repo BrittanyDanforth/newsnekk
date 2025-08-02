@@ -1955,9 +1955,25 @@ function AISnake:grow(amount)
 
 					-- Create beam from previous segment to this new one
 					if self.CurrentLength > 1 and self.Beams then
+						-- Ensure previous attachment exists
+						local prevAttachment = self.Attachments[self.CurrentLength - 1]
+						if not prevAttachment then
+							-- Create missing attachment for previous segment
+							prevAttachment = Instance.new("Attachment")
+							prevAttachment.Name = "Attachment" .. (self.CurrentLength - 1)
+							prevAttachment.Parent = self.AttachmentPart
+							local prevSegment = self.Segments[self.CurrentLength - 1]
+							if prevSegment and prevSegment.Parent then
+								prevAttachment.WorldPosition = prevSegment.Position
+							else
+								prevAttachment.WorldPosition = newPos
+							end
+							self.Attachments[self.CurrentLength - 1] = prevAttachment
+						end
+						
 						local beam = Instance.new("Beam")
 						beam.Name = "Beam" .. (self.CurrentLength - 1)
-						beam.Attachment0 = self.Attachments[self.CurrentLength - 1]
+						beam.Attachment0 = prevAttachment
 						beam.Attachment1 = attachment
 
 						-- Professional beam properties
