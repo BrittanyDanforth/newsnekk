@@ -1,11 +1,12 @@
--- SnakeCollisionHandler V7.0 FINAL - FULLY POLISHED
+-- SnakeCollisionHandler V7.0 FINAL - FULLY POLISHED WITH REVIVE FIX
 -- All V7 functionality preserved with performance optimizations
 -- FIXED: Death orb spawning now properly distributes orbs along snake path
 -- FIXED: MAGNET EFFECT CLEARED ON DEATH (prevents orbs being pulled to dead character)
 -- FIXED: Smooth death transition without camera disruption
 -- FIXED: Dead players can't kill others (marked with Dead attribute)
 -- FIXED: Death orbs spawn at correct height (Y=5)
--- FIXED: Collision detection after revive (resetPlayerCollisionState)
+-- FIXED: Revive process properly separated from death handling
+-- FIXED: Head-to-head collisions now only kill one snake (matches slither.io)
 -- 
 -- Death Handling Features:
 --   - Dead players excluded from collision detection
@@ -15,6 +16,7 @@
 --   - Character smoothly fades out (0.5s)
 --   - Death orbs spawn at Y=5 (matches normal orbs)
 --   - 1-second delay for spawn protection
+--   - Revive handled AFTER death processing completes
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -62,32 +64,26 @@ local orbSpawnQueue = {}
 local isProcessingDeaths = false
 local deadAISnakes = {}
 local deadPlayers = {}
+local processingRevive = {} -- Track players currently in revive process
 
 -- === INVINCIBILITY SYSTEM (UNCHANGED FROM V7) ===
 local INVINCIBILITY_DURATION = 5
 local invinciblePlayers = {}
-
--- Forward declare CollisionCache and headCache
-local CollisionCache
-local headCache
 
 local function setPlayerInvincible(player)
 	invinciblePlayers[player] = os.clock() + INVINCIBILITY_DURATION
 end
 
 local function isPlayerInvincible(player)
-	-- Simple timer-based invincibility
-	local expire = invinciblePlayers[player]
-	if expire and os.clock() < expire then
-		if DEBUG_COLLISIONS then
-			print(string.format("[INVINCIBLE] %s is invincible for %.1f more seconds", player.Name, expire - os.clock()))
-		end
+	-- Check if player is in revive process
+	if processingRevive[player] then
 		return true
 	end
 
-	-- Clean up expired invincibility
-	if expire and os.clock() >= expire then
-		invinciblePlayers[player] = nil
+	-- Simple timer-based invincibility
+	local expire = invinciblePlayers[player]
+	if expire and os.clock() < expire then
+		return true
 	end
 
 	-- Check ghost mode gamepass
@@ -102,71 +98,13 @@ local function clearPlayerInvincibility(player)
 	invinciblePlayers[player] = nil
 end
 
--- === UTILITY: Reset player collision state after revive or respawn ===
-local function resetPlayerCollisionState(player)
-	print("🔄 Resetting collision state for", player.Name)
-	
-	-- Clear dead player tracking
-	deadPlayers[player] = nil
-	
-	-- Reset character parts
-	if player.Character then
-		local root = player.Character:FindFirstChild("HumanoidRootPart")
-		if root then
-			root:SetAttribute("Dead", false)
-			root.Anchored = false
-			root.CanCollide = true
-			root.CanTouch = true
-			root.CanQuery = true
-			root.Transparency = 0
-		end
-		
-		-- Reset all parts
-		for _, part in pairs(player.Character:GetDescendants()) do
-			if part:IsA("BasePart") and part ~= root then
-				part.CanCollide = true
-				part.CanTouch = true
-				part.CanQuery = true
-				if part.Transparency < 1 then
-					part.Transparency = 0
-				end
-			elseif part:IsA("Decal") or part:IsA("Texture") then
-				if part.Transparency < 1 then
-					part.Transparency = 0
-				end
-			end
-		end
-	end
-	
-	-- Clear global snake reference
-	if _G and _G.PlayerSnakes then
-		_G.PlayerSnakes[player] = nil
-	end
-	
-	-- Clear collision caches
-	if CollisionCache then
-		CollisionCache.playerSegments[player] = nil
-		CollisionCache.spatialGrid:clear()
-		CollisionCache.frameCache = {}
-	end
-	
-	-- Force head cache refresh
-	if headCache then
-		headCache.lastUpdate = 0
-		headCache.players = {}
-		headCache.ai = {}
-	end
-	
-	print("✅ Collision state reset complete for", player.Name)
-end
-
 -- Invincibility setup (preserved from V7)
 Players.PlayerAdded:Connect(function(player)
 	player.CharacterAdded:Connect(function()
-		-- CRITICAL: Clear dead state when spawning (for revive or normal spawn)
-		resetPlayerCollisionState(player)
-		
 		setPlayerInvincible(player)
+		-- Clear processing revive flag when character spawns
+		processingRevive[player] = nil
+		deadPlayers[player] = nil -- Clear dead state on respawn
 		task.spawn(function()
 			local expire = invinciblePlayers[player]
 			if expire then
@@ -177,8 +115,9 @@ Players.PlayerAdded:Connect(function(player)
 		end)
 	end)
 	player.AncestryChanged:Connect(function()
-		if not player.Parent then
+		if not player:IsDescendantOf(game) then
 			clearPlayerInvincibility(player)
+			processingRevive[player] = nil
 			deadPlayers[player] = nil
 		end
 	end)
@@ -186,10 +125,10 @@ end)
 
 for _, player in Players:GetPlayers() do
 	player.CharacterAdded:Connect(function()
-		-- CRITICAL: Clear dead state when spawning
-		resetPlayerCollisionState(player)
-		
 		setPlayerInvincible(player)
+		-- Clear processing revive flag when character spawns
+		processingRevive[player] = nil
+		deadPlayers[player] = nil -- Clear dead state on respawn
 		task.spawn(function()
 			local expire = invinciblePlayers[player]
 			if expire then
@@ -200,6 +139,23 @@ for _, player in Players:GetPlayers() do
 		end)
 	end)
 end
+
+-- Clean up when player leaves
+Players.PlayerRemoving:Connect(function(player)
+	-- Clean up any tracking data
+	deadPlayers[player] = nil
+	invinciblePlayers[player] = nil
+	processingRevive[player] = nil
+
+	-- Clean up any lingering attributes
+	pcall(function()
+		player:SetAttribute("ReviveDeclined", false)
+		player:SetAttribute("ReviveTimerExpired", false) 
+		player:SetAttribute("JustRevived", false)
+		player:SetAttribute("RevivingNow", false)
+		player:SetAttribute("Dead", false)
+	end)
+end)
 
 -- === OPTIMIZED SPATIAL GRID ===
 local SpatialGrid = {}
@@ -274,7 +230,7 @@ function SpatialGrid:clear()
 end
 
 -- === COLLISION CACHE ===
-CollisionCache = {
+local CollisionCache = {
 	playerSegments = {},
 	aiSegments = {},
 	spatialGrid = SpatialGrid.new(),
@@ -344,7 +300,7 @@ local function spawnOrbDirect(position, value)
 end
 
 -- === HEAD RETRIEVAL (OPTIMIZED) ===
-headCache = {
+local headCache = {
 	players = {},
 	ai = {},
 	lastUpdate = 0
@@ -358,38 +314,31 @@ local function getPlayerHeads()
 
 	local heads = {}
 	for _, player in Players:GetPlayers() do
-		if player.Character then
-			-- Skip dead players
-			if deadPlayers[player] then
-				continue
-			end
+		-- Skip dead players
+		if deadPlayers[player] then
+			continue
+		end
 
+		if player.Character then
 			-- First try to get the actual snake head from the new system
 			local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
 			if snakeModel then
 				local snakeHead = snakeModel:FindFirstChild("Segment0_Head")
 				if snakeHead and snakeHead.Parent then
-					-- CRITICAL: Verify this is the current snake model
-					-- Check if the snake head is anchored (all snake parts are anchored)
-					if snakeHead.Anchored then
-						heads[#heads + 1] = {player = player, part = snakeHead}
-						if DEBUG_COLLISIONS then
-							print(string.format("[HEAD] Player %s using visual snake head", player.Name))
-						end
-						continue
+					heads[#heads + 1] = {player = player, part = snakeHead}
+					if DEBUG_COLLISIONS then
+						print(string.format("[HEAD] Player %s using visual snake head", player.Name))
 					end
+					continue
 				end
 			end
 
 			-- Fallback to HumanoidRootPart if no snake head found
 			local root = player.Character:FindFirstChild("HumanoidRootPart")
-			if root and root.Parent then
-				-- Only use if not marked as dead
-				if not root:GetAttribute("Dead") then
-					heads[#heads + 1] = {player = player, part = root}
-					if DEBUG_COLLISIONS then
-						print(string.format("[HEAD] Player %s using HumanoidRootPart (fallback)", player.Name))
-					end
+			if root and root.Parent and not root:GetAttribute("Dead") then
+				heads[#heads + 1] = {player = player, part = root}
+				if DEBUG_COLLISIONS then
+					print(string.format("[HEAD] Player %s using HumanoidRootPart (fallback)", player.Name))
 				end
 			end
 		end
@@ -553,9 +502,10 @@ local function getActualSnakeSegments(player)
 	local snakeModel = Workspace:FindFirstChild("Snake_" .. player.Name)
 	if snakeModel then
 		local segments = {}
-		local i = 1
+		local i = 0
 		while true do
-			local segment = snakeModel:FindFirstChild("Segment" .. i)
+			local segmentName = i == 0 and "Segment0_Head" or "Segment" .. i
+			local segment = snakeModel:FindFirstChild(segmentName)
 			if segment and segment:IsA("BasePart") then
 				segments[#segments + 1] = segment
 				i = i + 1
@@ -745,8 +695,16 @@ local function getAISnakeSegments(snake)
 	return cacheData
 end
 
--- === DEATH HANDLERS (UNCHANGED LOGIC) ===
+-- === DEATH HANDLERS ===
 local function queuePlayerDeath(player)
+	-- Don't queue if already processing revive
+	if processingRevive[player] then
+		if DEBUG_COLLISIONS then
+			print("💫 Skipping death queue for", player.Name, "- currently reviving")
+		end
+		return
+	end
+
 	-- Check if already in queue
 	for _, death in ipairs(deathQueue) do
 		if death.type == "player" and death.target == player then
@@ -759,8 +717,7 @@ local function queuePlayerDeath(player)
 	table.insert(deathQueue, {
 		type = "player",
 		target = player,
-		timestamp = tick(),
-		checkRevive = true  -- Flag to check for revive after death
+		timestamp = tick()
 	})
 end
 
@@ -796,13 +753,20 @@ task.spawn(function()
 			if death.type == "player" then
 				local player = death.target
 				local character = player.Character
+
+				-- Skip if player is already reviving
+				if processingRevive[player] then
+					isProcessingDeaths = false
+					continue
+				end
+
 				if character then
 					local humanoid = character:FindFirstChild("Humanoid")
-					-- Only process death if player is actually alive
-					print("🔍 Death check for", player.Name, "- Health:", humanoid and humanoid.Health or "nil", "DeadPlayers:", deadPlayers[player])
+					-- Only process death if player is actually alive and not already dead
 					if humanoid and humanoid.Health > 0 and not deadPlayers[player] then
-						-- Mark as dead immediately to prevent duplicate processing
+						-- Mark as dead immediately to prevent further collisions
 						deadPlayers[player] = true
+
 						-- Get snake length from leaderstats
 						local snakeLength = 55
 						if player:FindFirstChild("leaderstats") then
@@ -961,11 +925,7 @@ task.spawn(function()
 						end
 
 						-- Also set humanoid health to 0 to stop movement
-						local humanoid = character:FindFirstChild("Humanoid")
-						if humanoid then
-							print("💀 Setting health to 0 for", player.Name, "- Current health:", humanoid.Health)
-							humanoid.Health = 0
-						end
+						humanoid.Health = 0
 
 						-- Smooth death handling - disable character without teleporting
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -1005,27 +965,41 @@ task.spawn(function()
 							end
 						end
 
-						-- Check for revive gamepass
-						local hasRevive = player:GetAttribute("HasRevive")
-						local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
+						-- SEPARATE REVIVE CHECK - Do this AFTER death processing completes
+						task.spawn(function()
+							-- Wait to ensure death is fully processed
+							task.wait(0.2)
 
-						print("🔍 Death check - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
+							-- Check for revive gamepass
+							local hasRevive = player:GetAttribute("HasRevive")
+							local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
 
-						if hasRevive and revivesAvailable > 0 then
-							print("✅ Player has revive! Sending prompt to", player.Name)
+							print("🔍 Death check - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
 
-							-- Get revive prompt from remotes folder
-							local reviveRemote = remotes:FindFirstChild("PromptRevive")
-							if not reviveRemote then
-								print("❌ PromptRevive remote not found in Remotes folder!")
-								-- Continue with normal death
-							else
+							if hasRevive and revivesAvailable > 0 then
+								print("✅ Player has revive! Sending prompt to", player.Name)
+
+								-- Get revive prompt from remotes folder
+								local reviveRemote = remotes:FindFirstChild("PromptRevive")
+								if not reviveRemote then
+									print("❌ PromptRevive remote not found in Remotes folder!")
+									print("💀 Can't prompt for revive - continuing with normal death")
+
+									-- Just let the normal death process continue
+									-- The player's humanoid is already dead, so the menu will show from humanoid.Died event
+									return
+								end
+
+								-- Mark player as processing revive
+								processingRevive[player] = true
+
 								-- Fire revive prompt to client
 								reviveRemote:FireClient(player)
 								print("🚀 Revive prompt sent to client!")
 
 								-- Wait for response (5 seconds max)
 								local revived = false
+								local declined = false
 								local reviveConnection
 								reviveConnection = reviveRemote.OnServerEvent:Connect(function(plr, response)
 									if plr == player and response == "revive" then
@@ -1033,30 +1007,32 @@ task.spawn(function()
 										reviveConnection:Disconnect()
 										print("✅ Player chose to revive!")
 									elseif plr == player and response == "decline" then
+										declined = true
 										reviveConnection:Disconnect()
 										print("❌ Player declined revive")
 									end
 								end)
 
-								task.wait(5) -- Give player 5 seconds to decide
+								-- Wait for response or timeout
+								local waitTime = 0
+								while waitTime < 5 and not revived and not declined do
+									task.wait(0.1)
+									waitTime = waitTime + 0.1
+								end
+
 								if reviveConnection then
 									reviveConnection:Disconnect()
 								end
 
 								if revived then
 									print("🎉 REVIVING", player.Name)
-
-									-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
-									isProcessingDeaths = false
-
 									-- Revive the player
 									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
 
 									-- Store current position and snake length
 									local deathPosition = rootPart and rootPart.Position or Vector3.new(0, 10, 0)
-									if deathPosition.Y < 5 then
-										deathPosition = Vector3.new(deathPosition.X, 5, deathPosition.Z)
-									end
+									-- Adjust Y position to ensure spawn above ground
+									deathPosition = Vector3.new(deathPosition.X, math.max(deathPosition.Y + 10, 5), deathPosition.Z)
 
 									local currentSnakeLength = 500
 									local leaderstats = player:FindFirstChild("leaderstats")
@@ -1069,75 +1045,70 @@ task.spawn(function()
 
 									print("📍 Revive at position:", deathPosition, "with length:", currentSnakeLength)
 
-									-- Clear dead state and reset collision state
-									resetPlayerCollisionState(player)
-
-									-- Clear from death queue if any pending
-									for i = #deathQueue, 1, -1 do
-										if deathQueue[i].type == "player" and deathQueue[i].target == player then
-											table.remove(deathQueue, i)
-										end
+									-- Clear dead state BEFORE respawning
+									deadPlayers[player] = nil
+									if rootPart then
+										rootPart:SetAttribute("Dead", false)
 									end
-
-									print("🧹 Cleared collision caches for", player.Name)
 
 									-- Store revive data
 									player:SetAttribute("RevivePosition", tostring(deathPosition))
 									player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
 									player:SetAttribute("JustRevived", true)
 
-									-- Simple invincibility
-									invinciblePlayers[player] = os.clock() + 5
+									-- Set invincibility BEFORE respawn
+									invinciblePlayers[player] = os.clock() + INVINCIBILITY_DURATION
+
+									-- Mark as reviving NOW
+									player:SetAttribute("RevivingNow", true)
 
 									-- Just respawn like clicking Play button
 									player:LoadCharacter()
 
-									-- CRITICAL: Wait for new snake to be created before clearing invincibility
+									-- Clear revive processing flag after character loads
 									task.spawn(function()
-										-- Wait for character to load and snake to be created
-										task.wait(2) -- Give time for snake creation
-
-										-- Force cache refresh after snake is created
-										resetPlayerCollisionState(player)
-
-										-- Continue invincibility for remaining time
-										task.wait(3)
-										invinciblePlayers[player] = nil
-										print("✅ Invincibility ended for", player.Name)
-
-										-- Final cache clear to ensure fresh detection
-										headCache.lastUpdate = 0
+										task.wait(0.5)
+										player:SetAttribute("RevivingNow", false)
+										task.wait(0.5)
+										processingRevive[player] = nil
 									end)
+								else
+									-- Player declined or timer expired
+									processingRevive[player] = nil
 
-									return -- Don't proceed with normal death
+									if declined then
+										print("❌ Player actively declined revive for", player.Name)
+										-- Set attribute so client knows to show menu immediately
+										player:SetAttribute("ReviveDeclined", true)
+									else
+										print("⏰ Revive timer expired for", player.Name)
+										-- Also set attribute for timer expiry so menu shows quickly
+										player:SetAttribute("ReviveTimerExpired", true)
+									end
+
+									print("💀 Continuing with normal death - menu should show from humanoid.Died")
+
+									-- Just let the normal death process continue
+									-- The player's humanoid is already dead, so the menu will show from humanoid.Died event
+									-- No need to do anything special here
 								end
+							else
+								-- No revive available
+								print("❌ No revive available for", player.Name)
+								print("💀 Normal death - menu should show from humanoid.Died")
+
+								-- Just let the normal death process continue
+								-- The player's humanoid is already dead, so the menu will show from humanoid.Died event
 							end
-						end
+						end)
 
-						-- ONLY mark as dead if NOT reviving
-						deadPlayers[player] = true
-
-						-- Clear collision caches when dying
-						if CollisionCache and CollisionCache.playerSegments then
-							CollisionCache.playerSegments[player] = nil
-						end
-
-						-- Clean death with proper timing for menu
-						humanoid.Health = 0
-
-						-- Fire death event for menu system
-						local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
-						if deathEvent then
-							deathEvent:Fire(player)
-						end
-
+						-- Clear dead state after delay (only if not reviving)
 						task.spawn(function()
 							task.wait(5)
-							deadPlayers[player] = nil
+							if not processingRevive[player] then
+								deadPlayers[player] = nil
+							end
 						end)
-					else
-						-- Player is already dead or has no humanoid, skip this death
-						print("⚠️ Skipping death for", player.Name, "- Already dead or no humanoid")
 					end
 				end
 			elseif death.type == "ai" then
@@ -1525,11 +1496,6 @@ RunService.Stepped:Connect(function()
 		if aiHead and aiHead.Parent then
 			local aiPos = aiHead.Position
 
-			-- Skip dead AI snakes
-			if deadAISnakes[aiHead] then
-				continue
-			end
-
 			for _, headData in ipairs(playerHeads) do
 				local player = headData.player
 
@@ -1567,7 +1533,7 @@ RunService.Stepped:Connect(function()
 		end
 	end
 
-	-- Head-to-head collisions (UNCHANGED FROM V7)
+	-- Head-to-head collisions - FIXED TO MATCH SLITHER.IO
 	-- Player vs Player
 	for i = 1, #playerHeads - 1 do
 		local dataA = playerHeads[i]
@@ -1605,11 +1571,8 @@ RunService.Stepped:Connect(function()
 				local dotA = velA:Dot(dirAB)
 				local dotB = velB:Dot(dirBA)
 
-				-- In slither.io: if your head touches another snake, you die
-				-- For head-to-head: we need to determine who touched first
-				-- Since they're both in the collision zone, we use velocity to determine who hit first
-				
-				-- Who is moving toward the collision?
+				-- In slither.io: only one snake dies based on who touched first
+				-- Determine this by who is moving more toward the collision
 				local aMovingToward = dotA > 0
 				local bMovingToward = dotB > 0
 				
@@ -1626,8 +1589,7 @@ RunService.Stepped:Connect(function()
 					end
 					queuePlayerDeath(playerB)
 				elseif aMovingToward and bMovingToward then
-					-- Both moving toward each other - who would hit first?
-					-- The one with higher velocity toward collision touched first
+					-- Both moving toward each other - higher velocity touched first
 					if dotA > dotB then
 						if DEBUG_COLLISIONS then
 							print(string.format("[HEAD-TO-HEAD] %s dies (faster approach: %.2f > %.2f)", playerA.Name, dotA, dotB))
@@ -1846,6 +1808,13 @@ task.spawn(function()
 				deadPlayers[player] = nil
 			end
 		end
+
+		-- Clean revive tracking
+		for player, _ in pairs(processingRevive) do
+			if not player or not player.Parent then
+				processingRevive[player] = nil
+			end
+		end
 	end
 end)
 
@@ -1868,14 +1837,15 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.0 FINAL - FULLY POLISHED")
+print("⚡ SnakeCollisionHandler V7.0 FINAL - FULLY POLISHED WITH REVIVE FIX")
 print("🚀 All V7 functionality preserved with performance optimizations")
 print("💎 FIXED: Death orbs properly spawn along snake segments")
 print("🧲 FIXED: MAGNET EFFECT CLEARED ON DEATH!")
 print("⚰️ FIXED: Dead players can't kill others!")
 print("📏 FIXED: Death orbs spawn at correct height (Y=5)")
 print("✨ FIXED: Smooth death transition (no camera issues)")
-print("🔄 FIXED: Collision detection after revive (resetPlayerCollisionState)")
+print("🔄 FIXED: Revive process separated from death handling")
+print("🎯 FIXED: Head-to-head collisions now only kill one snake (matches slither.io)")
 print("🛡️ DEATH HANDLING:")
 print("   - Dead players marked with Dead=true attribute")
 print("   - Character moved down 10 studs + anchored")
@@ -1883,6 +1853,7 @@ print("   - Magnet attributes reset immediately")
 print("   - Character fades out smoothly (0.5s)")
 print("   - Death orbs spawn at Y=5 (matches normal orbs)")
 print("   - 1-second delay for spawn protection")
+print("   - Revive check happens AFTER death processing")
 print("🔧 Optimizations: Batched spawning, aggressive LOD")
 print("📊 Performance: 12Hz collision checks, 96 chunk size")
 
@@ -1893,6 +1864,7 @@ local function toggleDebug()
 	if DEBUG_COLLISIONS then
 		print("   - Orb spawning debug enabled")
 		print("   - Collision detection debug enabled")
+		print("   - Revive process debug enabled")
 	end
 end
 
