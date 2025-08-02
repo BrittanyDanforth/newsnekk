@@ -9,7 +9,7 @@ local TweenService = game:GetService("TweenService")
 local SnakeConfig = require(ReplicatedStorage:WaitForChild("SnakeConfig"))
 local OrbUtils = require(ReplicatedStorage:WaitForChild("OrbUtils"))
 
--- Load the orb pickup module  
+-- Load the orb pickup module
 local AISnakeOrbPickup
 pcall(function()
 	local module = ReplicatedStorage:FindFirstChild("AISnakeOrbPickup") or game.ServerScriptService:FindFirstChild("AISnakeOrbPickup")
@@ -50,37 +50,37 @@ local AISnake = {}
 AISnake.__index = AISnake
 
 -- === OPTIMIZED SETTINGS ===
-local MAX_AI_SNAKES = 10  -- Reduced from 14 for better performance
-local SPATIAL_GRID_UPDATE_RATE = 1.0  -- Increased from 0.5 (update less often)
-local BRAIN_UPDATES_PER_FRAME = 3  -- Update 3 snakes per frame to prevent freezing
-local DEBUG_UPDATE_RATE = 5.0  -- Increased from 2.0 (debug less often)
+local MAX_AI_SNAKES = 15 -- Reduced from 14 for better performance
+local SPATIAL_GRID_UPDATE_RATE = 1.0 -- Increased from 0.5 (update less often)
+local BRAIN_UPDATES_PER_FRAME = 3 -- Update 3 snakes per frame to prevent freezing
+local DEBUG_UPDATE_RATE = 5.0 -- Increased from 2.0 (debug less often)
 local AI_HEIGHT = 5
-local SEGMENT_UPDATE_SKIP = 2  -- Update every other segment for performance
-local LONG_SNAKE_THRESHOLD = 100  -- Snakes longer than this use more aggressive optimization
-local VERY_LONG_SNAKE_THRESHOLD = 300  -- Even more optimization for very long snakes
-local AI_UPDATE_DISTANCE = 200  -- Only update AI within this distance of players
-local SEGMENT_POOL_MAX = 500  -- Increased pool size for better reuse
+local SEGMENT_UPDATE_SKIP = 2 -- Update every other segment for performance
+local LONG_SNAKE_THRESHOLD = 100 -- Snakes longer than this use more aggressive optimization
+local VERY_LONG_SNAKE_THRESHOLD = 300 -- Even more optimization for very long snakes
+local AI_UPDATE_DISTANCE = 200 -- Only update AI within this distance of players
+local SEGMENT_POOL_MAX = 500 -- Increased pool size for better reuse
 
 -- LOD Constants (ENHANCED for progressive visibility like slither.io)
-local VISIBILITY_CHECK_INTERVAL = 5  -- Check visibility every N frames
-local RENDER_DISTANCE = 1000  -- Maximum render distance
-local LOD_DISTANCE_NEAR = 200   -- Full snake visible
-local LOD_DISTANCE_MID = 400    -- 70% of snake visible
-local LOD_DISTANCE_FAR = 600    -- 40% of snake visible
+local VISIBILITY_CHECK_INTERVAL = 5 -- Check visibility every N frames
+local RENDER_DISTANCE = 1000 -- Maximum render distance
+local LOD_DISTANCE_NEAR = 200 -- Full snake visible
+local LOD_DISTANCE_MID = 400 -- 70% of snake visible
+local LOD_DISTANCE_FAR = 600 -- 40% of snake visible
 local LOD_DISTANCE_MINIMAL = 800 -- 20% of snake visible (head + some body)
-local BEAM_SYNC_INTERVAL = 3    -- Sync beams with parts every N frames
-local FORCE_RENDER_SEGMENTS = 150  -- Always force render first N segments for nearby snakes
-local MIN_VISIBLE_SEGMENTS = 10    -- Minimum segments to show even from far away
-local MAX_VISIBLE_SEGMENTS = 2000  -- Maximum visible segments at once
-local DYNAMIC_SEGMENT_LIMIT = 800  -- Initial physical segment creation limit
+local BEAM_SYNC_INTERVAL = 3 -- Sync beams with parts every N frames
+local FORCE_RENDER_SEGMENTS = 150 -- Always force render first N segments for nearby snakes
+local MIN_VISIBLE_SEGMENTS = 10 -- Minimum segments to show even from far away
+local MAX_VISIBLE_SEGMENTS = 2000 -- Maximum visible segments at once
+local DYNAMIC_SEGMENT_LIMIT = 800 -- Initial physical segment creation limit
 
 -- Progressive visibility percentages based on distance
 local VISIBILITY_PERCENTAGES = {
-	near = 1.0,      -- 100% of snake visible
-	mid = 0.7,       -- 70% of snake visible
-	far = 0.4,       -- 40% of snake visible
-	minimal = 0.2,   -- 20% of snake visible
-	veryFar = 0.1    -- 10% of snake visible (at least head + few segments)
+	near = 1.0, -- 100% of snake visible
+	mid = 0.7, -- 70% of snake visible
+	far = 0.4, -- 40% of snake visible
+	minimal = 0.2, -- 20% of snake visible
+	veryFar = 0.1 -- 10% of snake visible (at least head + few segments)
 }
 
 -- Visual Constants from OptimizedSnakeSystem
@@ -117,7 +117,7 @@ local DESKTOP_PARTICLE_RATE = 200
 -- Professional Texture Library
 local BEAM_TEXTURES = {
 	gradient = "rbxasset://textures/ui/LuaChat/9-slice/kit-modal-highlight.png",
-	flow = "rbxasset://textures/ui/GuiImagePlaceholder.png", 
+	flow = "rbxasset://textures/ui/GuiImagePlaceholder.png",
 	energy = "rbxasset://textures/particles/sparkles_main.dds",
 	smooth = "rbxasset://textures/ui/LuaChat/icons/ic-gift.png"
 }
@@ -168,7 +168,7 @@ do
 			if grid[x] then
 				for z = minZ, maxZ do
 					if grid[x][z] then
-						for _, entity in grid[x][z] do
+						for _, entity in ipairs(grid[x][z]) do
 							if (entity.part.Position - position).Magnitude <= radius then
 								table.insert(results, entity)
 							end
@@ -191,8 +191,8 @@ SEGMENT_PARENT.Name = "AISegmentContainer"
 local function resetSegment(segment, config)
 	segment.Anchored = true
 	segment.CanCollide = false
-	segment.CanTouch = false  -- Only head needs touch
-	segment.CanQuery = false  -- Segments don't need query
+	segment.CanTouch = false -- Only head needs touch
+	segment.CanQuery = false -- Segments don't need query
 	segment.Transparency = 0
 	segment.Size = config.SegmentSize
 	segment.Material = config.BodyMaterial or Enum.Material.Neon
@@ -202,7 +202,7 @@ local function resetSegment(segment, config)
 	-- Don't set color here - let createSegment handle it
 	segment.Name = "AISegment"
 	-- Clean up children efficiently
-	for _, child in segment:GetChildren() do
+	for _, child in ipairs(segment:GetChildren()) do
 		if child:IsA("PointLight") or child:IsA("Attachment") then
 			child:Destroy()
 		end
@@ -266,19 +266,16 @@ local function getOrCreateSnakeModel(aiId)
 	return model
 end
 
-
-
-
 -- AI Snake color combinations - using patterns similar to SnakeData
 local AISnakeColors = {
 	{
 		-- Yellow (Classic smooth)
 		HeadColor = Color3.fromRGB(255, 255, 102),
 		BodyColors = {
-			Color3.fromRGB(255, 255, 51), 
+			Color3.fromRGB(255, 255, 51),
 			Color3.fromRGB(255, 255, 102),
-			Color3.fromRGB(255, 255, 153), 
-			Color3.fromRGB(255, 255, 102), 
+			Color3.fromRGB(255, 255, 153),
+			Color3.fromRGB(255, 255, 102),
 			Color3.fromRGB(255, 255, 51),
 		},
 		HeadMaterial = Enum.Material.Neon,
@@ -339,7 +336,7 @@ local function deepCopy(orig)
 	local copy
 	if orig_type == 'table' then
 		copy = {}
-		for orig_key, orig_value in orig do
+		for orig_key, orig_value in pairs(orig) do
 			copy[orig_key] = deepCopy(orig_value)
 		end
 	else
@@ -352,18 +349,18 @@ end
 local function createVisualHead(config, parentModel)
 	-- HEAD IS NOW SEGMENT 0 - Part of the unified body
 	local headPart = Instance.new("Part")
-	headPart.Name = "Segment0_Head"  -- Match OptimizedSnakeSystem naming
+	headPart.Name = "Segment0_Head" -- Match OptimizedSnakeSystem naming
 	headPart.Size = Vector3.new(BASE_SIZE * HEAD_SIZE_MULTIPLIER, BASE_SIZE * HEAD_SIZE_MULTIPLIER, BASE_SIZE * HEAD_SIZE_MULTIPLIER)
-	headPart.Material = Enum.Material.Neon  -- Consistent with OptimizedSnakeSystem
+	headPart.Material = Enum.Material.Neon -- Consistent with OptimizedSnakeSystem
 	headPart.Color = config.HeadColor
 	headPart.Shape = Enum.PartType.Ball
 	headPart.CanCollide = false
-	headPart.CanTouch = true  -- CRITICAL: Enable touch detection for orb collection
-	headPart.CanQuery = true   -- Enable for raycasts
+	headPart.CanTouch = true -- CRITICAL: Enable touch detection for orb collection
+	headPart.CanQuery = true -- Enable for raycasts
 	headPart.Anchored = true
 	headPart.TopSurface = Enum.SurfaceType.Smooth
 	headPart.BottomSurface = Enum.SurfaceType.Smooth
-	headPart.Transparency = 0  -- Head is visible as first segment
+	headPart.Transparency = 0 -- Head is visible as first segment
 	headPart.Parent = parentModel
 
 	-- Professional head glow matching OptimizedSnakeSystem
@@ -371,8 +368,8 @@ local function createVisualHead(config, parentModel)
 	headLight.Name = "Glow"
 	headLight.Color = config.HeadColor
 	headLight.Brightness = GLOW_INTENSITY
-	headLight.Range = GLOW_RANGE_BASE * 1.1  -- Slightly larger than body segments
-	headLight.Shadows = false  -- Performance optimization
+	headLight.Range = GLOW_RANGE_BASE * 1.1 -- Slightly larger than body segments
+	headLight.Shadows = false -- Performance optimization
 	headLight.Parent = headPart
 
 	-- Professional boost particles (match OptimizedSnakeSystem)
@@ -381,7 +378,7 @@ local function createVisualHead(config, parentModel)
 	boostParticles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
 	boostParticles.Color = ColorSequence.new(config.HeadColor)
 	boostParticles.Lifetime = NumberRange.new(0.5, 1)
-	boostParticles.Rate = 0  -- Start disabled
+	boostParticles.Rate = 0 -- Start disabled
 	boostParticles.Speed = NumberRange.new(5, 10)
 	boostParticles.SpreadAngle = Vector2.new(180, 180)
 	boostParticles.VelocityInheritance = PARTICLE_VELOCITY_INHERITANCE
@@ -405,9 +402,9 @@ local function createVisualHead(config, parentModel)
 		eye.Size = Vector3.new(0.5, 0.5, 0.5)
 		eye.Transparency = 0
 		eye.CanCollide = false
-		eye.Anchored = true  -- ANCHORED like OptimizedSnakeSystem
+		eye.Anchored = true -- ANCHORED like OptimizedSnakeSystem
 		eye:SetAttribute("AlwaysRender", true)
-		eye.Parent = parentModel  -- Parent to model, not head
+		eye.Parent = parentModel -- Parent to model, not head
 
 		local pupil = Instance.new("Part")
 		pupil.Name = eye.Name .. "Pupil"
@@ -417,9 +414,9 @@ local function createVisualHead(config, parentModel)
 		pupil.Size = Vector3.new(0.25, 0.25, 0.25)
 		pupil.Transparency = 0
 		pupil.CanCollide = false
-		pupil.Anchored = true  -- ANCHORED like OptimizedSnakeSystem
+		pupil.Anchored = true -- ANCHORED like OptimizedSnakeSystem
 		pupil:SetAttribute("AlwaysRender", true)
-		pupil.Parent = parentModel  -- Parent to model, not eye
+		pupil.Parent = parentModel -- Parent to model, not eye
 
 		return eye, pupil
 	end
@@ -443,8 +440,8 @@ end
 local function createSegment(index, position, color, config, parentModel, currentLength)
 	local segment = getSegment(config)
 	segment.Name = "AISegment" .. index
-	segment.Shape = Enum.PartType.Ball  -- Match OptimizedSnakeSystem
-	segment.Material = Enum.Material.Neon  -- Consistent material like OptimizedSnakeSystem
+	segment.Shape = Enum.PartType.Ball -- Match OptimizedSnakeSystem
+	segment.Material = Enum.Material.Neon -- Consistent material like OptimizedSnakeSystem
 
 	-- This is temporary - will be set properly by the snake instance
 	segment.Size = Vector3.new(BASE_SIZE, BASE_SIZE, BASE_SIZE)
@@ -453,7 +450,7 @@ local function createSegment(index, position, color, config, parentModel, curren
 	segment.Parent = parentModel
 	segment.Transparency = 0
 	segment.CanCollide = false
-	segment.CanTouch = index <= 50  -- Only first 50 segments have collision
+	segment.CanTouch = index <= 50 -- Only first 50 segments have collision
 	segment.CanQuery = false
 	segment.Anchored = true
 
@@ -464,20 +461,20 @@ local function createSegment(index, position, color, config, parentModel, curren
 	-- Strategic glow placement matching OptimizedSnakeSystem
 	local shouldHaveGlow = false
 	if index <= GLOW_FALLOFF_START then
-		shouldHaveGlow = true  -- All segments up to falloff
+		shouldHaveGlow = true -- All segments up to falloff
 	elseif index <= 100 then
-		shouldHaveGlow = index % 2 == 0  -- Every other segment
+		shouldHaveGlow = index % 2 == 0 -- Every other segment
 	elseif index <= 200 then
-		shouldHaveGlow = index % 3 == 0  -- Every third
+		shouldHaveGlow = index % 3 == 0 -- Every third
 	else
-		shouldHaveGlow = index % 5 == 0  -- Every fifth
+		shouldHaveGlow = index % 5 == 0 -- Every fifth
 	end
 
 	if shouldHaveGlow then
 		local light = segment:FindFirstChild("Glow") or Instance.new("PointLight")
 		light.Name = "Glow"
 		light.Color = color
-		light.Brightness = GLOW_INTENSITY * 0.9  -- Slightly dimmer than head
+		light.Brightness = GLOW_INTENSITY * 0.9 -- Slightly dimmer than head
 		light.Range = GLOW_RANGE_BASE * (0.9 - (index / (currentLength or 100)) * 0.1)
 		light.Shadows = false
 		light.Enabled = true
@@ -503,7 +500,7 @@ local function getPlayerLength(player)
 		return #snakeInstance.segments
 	end
 
-	for _, child in player.Character:GetChildren() do
+	for _, child in ipairs(player.Character:GetChildren()) do
 		if child:IsA("BasePart") and child.Name:match("^Segment") then
 			count = count + 1
 		end
@@ -526,7 +523,7 @@ local wallParts = {}
 
 task.spawn(function()
 	task.wait(0.1)
-	for _, wallName in WALL_NAMES do
+	for _, wallName in ipairs(WALL_NAMES) do
 		local wall = Workspace:FindFirstChild(wallName)
 		if wall and wall:IsA("BasePart") then
 			table.insert(wallParts, wall)
@@ -536,7 +533,7 @@ end)
 
 -- Ground-based boundary detection with safe defaults
 local MAP_BOUNDS = {
-	minX = -350,  -- More conservative defaults
+	minX = -350, -- More conservative defaults
 	maxX = 350,
 	minZ = -350,
 	maxZ = 350
@@ -548,7 +545,7 @@ local function updateMapBounds()
 	if ground and ground:IsA("BasePart") then
 		local halfSizeX = ground.Size.X / 2
 		local halfSizeZ = ground.Size.Z / 2
-		MAP_BOUNDS.minX = ground.Position.X - halfSizeX + 30  -- 30 stud buffer
+		MAP_BOUNDS.minX = ground.Position.X - halfSizeX + 30 -- 30 stud buffer
 		MAP_BOUNDS.maxX = ground.Position.X + halfSizeX - 30
 		MAP_BOUNDS.minZ = ground.Position.Z - halfSizeZ + 30
 		MAP_BOUNDS.maxZ = ground.Position.Z + halfSizeZ - 30
@@ -568,7 +565,7 @@ task.spawn(function()
 		local oldBounds = {minX = MAP_BOUNDS.minX, maxX = MAP_BOUNDS.maxX, minZ = MAP_BOUNDS.minZ, maxZ = MAP_BOUNDS.maxZ}
 		if updateMapBounds() then
 			-- Check if bounds changed
-			if oldBounds.minX ~= MAP_BOUNDS.minX or oldBounds.maxX ~= MAP_BOUNDS.maxX or 
+			if oldBounds.minX ~= MAP_BOUNDS.minX or oldBounds.maxX ~= MAP_BOUNDS.maxX or
 				oldBounds.minZ ~= MAP_BOUNDS.minZ or oldBounds.maxZ ~= MAP_BOUNDS.maxZ then
 				warn("MAP BOUNDS CHANGED! Old:", oldBounds, "New:", MAP_BOUNDS)
 			end
@@ -638,14 +635,6 @@ local function getWallAvoidanceVector(headPos)
 	return nil, 0
 end
 
-local function isPartsColliding(partA, partB)
-	if not (partA and partA.Parent and partB and partB.Parent) then return false end
-	local radiusA = (partA.Size.X + partA.Size.Y + partA.Size.Z) / 6
-	local radiusB = (partB.Size.X + partB.Size.Y + partB.Size.Z) / 6
-	local dist = (partA.Position - partB.Position).Magnitude
-	return dist < (radiusA + radiusB) * 0.85
-end
-
 -- === ENHANCED AI PERSONALITIES - STABLE & DISTINCT ===
 AISnake.PersonalityTypes = {
 	"Collector", "Explorer", "Predator", "Opportunist", "Farmer", "Raider", "Guardian", "Nomad"
@@ -659,18 +648,18 @@ AISnake.PersonalityDefinitions = {
 		TargetOrbs = true,
 		AvoidOthers = true,
 		SpeedMultiplier = 1.05,
-		TurnBias = 0.015,  -- Very smooth turns
+		TurnBias = 0.015, -- Very smooth turns
 		BoostChance = 0.04,
 		CombatRadius = 20,
-		RandomTurnInterval = 8.0,  -- Long straight paths
-		OrbSeekRadius = 300,  -- Excellent orb vision
+		RandomTurnInterval = 8.0, -- Long straight paths
+		OrbSeekRadius = 300, -- Excellent orb vision
 		Description = "Efficient orb collector - avoids all fights",
 		FleeThreshold = 10,
 		AggressionLevel = 0.0,
-		PatrolRadius = 500,  -- Uses entire map
-		MovementPattern = "spiral",  -- New: Spiral outward pattern
-		PreferEdgeOrbs = true,  -- Collects orbs near edges
-		MinStraightDistance = 100,  -- Move at least 100 studs before turning
+		PatrolRadius = 500, -- Uses entire map
+		MovementPattern = "spiral", -- New: Spiral outward pattern
+		PreferEdgeOrbs = true, -- Collects orbs near edges
+		MinStraightDistance = 100, -- Move at least 100 studs before turning
 	},
 	Explorer = {
 		Type = "Explorer",
@@ -681,14 +670,14 @@ AISnake.PersonalityDefinitions = {
 		TurnBias = 0.02,
 		BoostChance = 0.05,
 		CombatRadius = 30,
-		RandomTurnInterval = 12.0,  -- Very long paths
+		RandomTurnInterval = 12.0, -- Very long paths
 		OrbSeekRadius = 200,
 		Description = "Map explorer - covers maximum ground",
 		FleeThreshold = 15,
 		AggressionLevel = 0.1,
-		PatrolRadius = 600,  -- Full map coverage
-		MovementPattern = "zigzag",  -- Zigzag across map
-		ExplorationSectors = 8,  -- Divides map into sectors
+		PatrolRadius = 600, -- Full map coverage
+		MovementPattern = "zigzag", -- Zigzag across map
+		ExplorationSectors = 8, -- Divides map into sectors
 		CurrentSector = 1,
 		MinStraightDistance = 150,
 	},
@@ -707,8 +696,8 @@ AISnake.PersonalityDefinitions = {
 		FleeThreshold = 20,
 		AggressionLevel = 0.8,
 		PatrolRadius = 300,
-		MovementPattern = "patrol",  -- Patrols hunting grounds
-		AmbushPoints = {},  -- Will be populated with good ambush spots
+		MovementPattern = "patrol", -- Patrols hunting grounds
+		AmbushPoints = {}, -- Will be populated with good ambush spots
 		PreferCenterHunting = true,
 		MinStraightDistance = 80,
 	},
@@ -727,8 +716,8 @@ AISnake.PersonalityDefinitions = {
 		FleeThreshold = 15,
 		AggressionLevel = 0.6,
 		PatrolRadius = 350,
-		MovementPattern = "adaptive",  -- Changes based on situation
-		OpportunityRadius = 100,  -- Looks for opportunities
+		MovementPattern = "adaptive", -- Changes based on situation
+		OpportunityRadius = 100, -- Looks for opportunities
 		MinStraightDistance = 90,
 	},
 	Farmer = {
@@ -736,18 +725,18 @@ AISnake.PersonalityDefinitions = {
 		TargetPlayers = false,
 		TargetOrbs = true,
 		AvoidOthers = true,
-		SpeedMultiplier = 1.0,  -- Slow and steady
-		TurnBias = 0.01,  -- Very smooth
-		BoostChance = 0.02,  -- Rarely boosts
+		SpeedMultiplier = 1.0, -- Slow and steady
+		TurnBias = 0.01, -- Very smooth
+		BoostChance = 0.02, -- Rarely boosts
 		CombatRadius = 15,
 		RandomTurnInterval = 10.0,
-		OrbSeekRadius = 400,  -- Sees orbs from far
+		OrbSeekRadius = 400, -- Sees orbs from far
 		Description = "Peaceful farmer - systematic orb collection",
 		FleeThreshold = 5,
 		AggressionLevel = 0.0,
 		PatrolRadius = 250,
-		MovementPattern = "grid",  -- Moves in grid pattern
-		GridSize = 100,  -- Grid square size
+		MovementPattern = "grid", -- Moves in grid pattern
+		GridSize = 100, -- Grid square size
 		CurrentGridX = 0,
 		CurrentGridZ = 0,
 		MinStraightDistance = 120,
@@ -767,8 +756,8 @@ AISnake.PersonalityDefinitions = {
 		FleeThreshold = 25,
 		AggressionLevel = 0.9,
 		PatrolRadius = 400,
-		MovementPattern = "hitandrun",  -- Attack then retreat
-		RaidCooldown = 10,  -- Seconds between raids
+		MovementPattern = "hitandrun", -- Attack then retreat
+		RaidCooldown = 10, -- Seconds between raids
 		LastRaidTime = 0,
 		MinStraightDistance = 70,
 	},
@@ -787,7 +776,7 @@ AISnake.PersonalityDefinitions = {
 		FleeThreshold = 30,
 		AggressionLevel = 0.5,
 		PatrolRadius = 200,
-		MovementPattern = "circular",  -- Circles territory
+		MovementPattern = "circular", -- Circles territory
 		TerritoryCenter = Vector3.new(0, 0, 0),
 		TerritoryRadius = 150,
 		PatrolAngle = 0,
@@ -802,16 +791,16 @@ AISnake.PersonalityDefinitions = {
 		TurnBias = 0.025,
 		BoostChance = 0.06,
 		CombatRadius = 35,
-		RandomTurnInterval = 15.0,  -- Very long journeys
+		RandomTurnInterval = 15.0, -- Very long journeys
 		OrbSeekRadius = 220,
 		Description = "Wandering nomad - never stays in one place",
 		FleeThreshold = 20,
 		AggressionLevel = 0.3,
-		PatrolRadius = 700,  -- Entire map
-		MovementPattern = "wander",  -- True random wandering
-		WanderTargets = {},  -- Random points to visit
+		PatrolRadius = 700, -- Entire map
+		MovementPattern = "wander", -- True random wandering
+		WanderTargets = {}, -- Random points to visit
 		CurrentWanderTarget = 1,
-		MinStraightDistance = 200,  -- Long straight paths
+		MinStraightDistance = 200, -- Long straight paths
 	},
 }
 
@@ -819,7 +808,7 @@ AISnake.PersonalityDefinitions = {
 function AISnake:findBestOrb()
 	-- ENHANCED: Increase orb seek radius based on personality
 	local baseRadius = self.Personality.OrbSeekRadius or 50
-	local minDist = baseRadius * 1.5  -- 50% more range for better orb finding
+	local minDist = baseRadius * 1.5 -- 50% more range for better orb finding
 	local nearest = nil
 	local headPos = self.HeadParts and self.HeadParts.head and self.HeadParts.head.Position or self.Position
 
@@ -828,7 +817,7 @@ function AISnake:findBestOrb()
 
 	-- Prioritize untargeted orbs
 	local targetedOrbs = {}
-	for ai, orb in AISnake._orbTargets do
+	for ai, orb in pairs(AISnake._orbTargets) do
 		if ai ~= self and orb and orb.Parent then
 			targetedOrbs[orb] = true
 		end
@@ -850,7 +839,7 @@ function AISnake:findBestOrb()
 
 	-- If no upgrade orbs, check regular orbs from spatial grid
 	if not nearest and #nearbyEntities > 0 then
-		for _, entity in nearbyEntities do
+		for _, entity in ipairs(nearbyEntities) do
 			if entity.type == "ORB" and not targetedOrbs[entity.part] then
 				local dist = (entity.part.Position - headPos).Magnitude
 				if dist < minDist then
@@ -862,7 +851,7 @@ function AISnake:findBestOrb()
 
 		-- If no untargeted orbs, allow targeting of any orb
 		if not nearest then
-			for _, entity in nearbyEntities do
+			for _, entity in ipairs(nearbyEntities) do
 				if entity.type == "ORB" then
 					local dist = (entity.part.Position - headPos).Magnitude
 					if dist < minDist then
@@ -886,7 +875,7 @@ function AISnake:findNearestSnakeHead()
 
 	local nearbyEntities = SpatialGrid.QueryRadius(myPos, self.Personality.CombatRadius or 60)
 
-	for _, entity in nearbyEntities do
+	for _, entity in ipairs(nearbyEntities) do
 		if entity.owner ~= self and (entity.type == "AI_HEAD" or entity.type == "PLAYER_HEAD") then
 			local dist = (entity.part.Position - myPos).Magnitude
 			if dist < minDist then
@@ -911,7 +900,7 @@ function AISnake:findNearbyThreats()
 	local threatRadius = 80 -- INCREASED from 60
 	local nearbyEntities = SpatialGrid.QueryRadius(myPos, threatRadius)
 
-	for _, entity in nearbyEntities do
+	for _, entity in ipairs(nearbyEntities) do
 		if entity.owner ~= self and (entity.type == "AI_HEAD" or entity.type == "PLAYER_HEAD") then
 			local dist = (entity.part.Position - myPos).Magnitude
 			local enemyLength = 0
@@ -946,7 +935,7 @@ function AISnake:findNearbyThreats()
 				local threatLevel = mathMax(lengthDiff + 10, 5) / mathMax(dist, 1)
 				table.insert(threats, {
 					part = entity.part,
-					position = entity.part.Position,  -- Add position field for convenience
+					position = entity.part.Position, -- Add position field for convenience
 					isPlayer = entity.type == "PLAYER_HEAD",
 					owner = entity.owner,
 					distance = dist,
@@ -980,7 +969,7 @@ function AISnake:startBoost(duration)
 		-- Adjust particle rate based on mobile/desktop
 		local isMobile = game:GetService("UserInputService").TouchEnabled
 		self.HeadParts.boostParticles.Rate = isMobile and 100 or 200
-		
+
 		-- Disable particles when boost ends
 		task.delay(duration, function()
 			if self.HeadParts and self.HeadParts.boostParticles then
@@ -1018,7 +1007,7 @@ function AISnake:getFleeVector()
 		local totalThreatVector = Vector3new(0, 0, 0)
 		local totalWeight = 0
 
-		for _, threat in threats do
+		for _, threat in ipairs(threats) do
 			local threatPos = threat.part.Position
 			local awayFromThreat = (headPos - threatPos).Unit
 			local weight = 1 / mathMax(threat.distance, 1)
@@ -1066,9 +1055,9 @@ function AISnake:getFleeVector()
 	-- Only add MINIMAL center bias when VERY far from center
 	local mapCenter = Vector3new(0, headPos.Y, 0)
 	local distFromCenter = (mapCenter - headPos).Magnitude
-	if distFromCenter > 400 and fleeDir then  -- Increased from 180
+	if distFromCenter > 400 and fleeDir then -- Increased from 180
 		local toCenter = (mapCenter - headPos).Unit
-		fleeDir = (fleeDir + toCenter * 0.1).Unit  -- Reduced from 0.4
+		fleeDir = (fleeDir + toCenter * 0.1).Unit -- Reduced from 0.4
 	end
 
 	return fleeDir
@@ -1095,7 +1084,7 @@ function AISnake:isPathSafe(targetPos, checkDistance)
 
 		-- Check for other snakes at this position
 		local nearbyEntities = SpatialGrid.QueryRadius(checkPos, 8)
-		for _, entity in nearbyEntities do
+		for _, entity in ipairs(nearbyEntities) do
 			if entity.type == "AI_SEGMENT" or entity.type == "PLAYER_SEGMENT" then
 				-- Check if it's not our own segment
 				if entity.owner ~= self then
@@ -1201,8 +1190,8 @@ function AISnake:_determineAction()
 	local steer = self.Direction
 
 	-- Clean up expired states
-	if self.Avoiding and now > self.AvoidExpire then 
-		self.Avoiding = false 
+	if self.Avoiding and now > self.AvoidExpire then
+		self.Avoiding = false
 		self.FleeReason = ""
 	end
 	if self.isConfident and now > self.confidenceEndTime then
@@ -1250,9 +1239,9 @@ function AISnake:_determineAction()
 
 	-- Strong boundary avoidance overrides everything
 	if edgeSteer and (
-		headPos.X > MAP_BOUNDS.maxX - strongBuffer or 
+		headPos.X > MAP_BOUNDS.maxX - strongBuffer or
 			headPos.X < MAP_BOUNDS.minX + strongBuffer or
-			headPos.Z > MAP_BOUNDS.maxZ - strongBuffer or 
+			headPos.Z > MAP_BOUNDS.maxZ - strongBuffer or
 			headPos.Z < MAP_BOUNDS.minZ + strongBuffer
 		) then
 		-- Add some randomness to prevent getting stuck in corners
@@ -1286,7 +1275,7 @@ function AISnake:_determineAction()
 	local collisionThreat = nil
 	local minCollisionTime = math.huge
 
-	for _, entity in nearbyDanger do
+	for _, entity in ipairs(nearbyDanger) do
 		if entity.owner ~= self and (entity.type:match("HEAD") or entity.type:match("SEGMENT")) then
 			-- Calculate time to collision
 			local theirPos = entity.part.Position
@@ -1338,7 +1327,7 @@ function AISnake:_determineAction()
 			steer = avoidDir
 		end
 
-		self.TargetOrb = nil  -- Cancel orb seeking
+		self.TargetOrb = nil -- Cancel orb seeking
 		return "COLLISION_AVOID", steer
 	end
 
@@ -1378,7 +1367,7 @@ function AISnake:_determineAction()
 
 	if shouldFlee or self.Avoiding then
 		self.TargetSnake = nil
-		self.TargetOrb = nil  -- Cancel orb seeking when fleeing
+		self.TargetOrb = nil -- Cancel orb seeking when fleeing
 
 		local fleeDir = self:getSmartFleeDirection(threats)
 
@@ -1390,16 +1379,16 @@ function AISnake:_determineAction()
 	end
 
 	-- Priority 3.5: Smart orb seeking (HIGHER PRIORITY)
-	if p.TargetOrbs and not shouldFlee then  -- Don't seek orbs when fleeing
+	if p.TargetOrbs and not shouldFlee then -- Don't seek orbs when fleeing
 		-- Always look for better orbs
 		local orb, dist = self:findBestOrb()
 
 		-- More aggressive orb targeting
-		if orb and dist < p.OrbSeekRadius * 2 then  -- Double radius for targeting
+		if orb and dist < p.OrbSeekRadius * 2 then -- Double radius for targeting
 			-- Switch to closer orb if significantly better
 			if self.TargetOrb and self.TargetOrb.Parent then
 				local currentDist = (self.TargetOrb.Position - headPos).Magnitude
-				if dist < currentDist * 0.7 then  -- Switch if 30% closer
+				if dist < currentDist * 0.7 then -- Switch if 30% closer
 					self.TargetOrb = orb
 					self.TargetOrbExpire = now + mathRandom(30, 60) / 10
 					AISnake._orbTargets[self] = orb
@@ -1418,11 +1407,11 @@ function AISnake:_determineAction()
 			local orbDist = toOrb.Magnitude
 
 			-- More direct orb approach
-			if orbDist < 50 then  -- Increased from 30
+			if orbDist < 50 then -- Increased from 30
 				steer = toOrb.Unit
 				-- Boost when close to orb for faster collection
 				if orbDist < 20 and not self.Boosting and mathRandom() < 0.3 then
-					self:startBoost(0.5)  -- Short boost to grab orb
+					self:startBoost(0.5) -- Short boost to grab orb
 				end
 			else
 				steer = toOrb.Unit
@@ -1459,10 +1448,10 @@ function AISnake:_determineAction()
 			if not self._spiralRadius then self._spiralRadius = 50 end
 
 			if distanceSinceTurn > minStraight then
-				self._spiralAngle = self._spiralAngle + mathPi / 4  -- 45 degree turns
+				self._spiralAngle = self._spiralAngle + mathPi / 4 -- 45 degree turns
 				self._spiralRadius = mathMin(self._spiralRadius + 20, 400)
 				if self._spiralRadius >= 400 then
-					self._spiralRadius = 50  -- Reset spiral
+					self._spiralRadius = 50 -- Reset spiral
 				end
 				local targetX = mathCos(self._spiralAngle) * self._spiralRadius
 				local targetZ = mathSin(self._spiralAngle) * self._spiralRadius
@@ -1480,7 +1469,7 @@ function AISnake:_determineAction()
 			if distanceSinceTurn > minStraight then
 				-- Alternate between left and right turns
 				self._zigzagDirection = -self._zigzagDirection
-				local turnAngle = self.TargetYaw + (mathPi / 6) * self._zigzagDirection  -- 30 degree turns
+				local turnAngle = self.TargetYaw + (mathPi / 6) * self._zigzagDirection -- 30 degree turns
 				steer = Vector3new(mathSin(turnAngle), 0, mathCos(turnAngle))
 				self.TargetYaw = turnAngle
 				self._lastTurnPosition = headPos
@@ -1509,7 +1498,7 @@ function AISnake:_determineAction()
 			if not p.PatrolAngle then p.PatrolAngle = 0 end
 
 			-- Circle around territory
-			p.PatrolAngle = p.PatrolAngle + 0.02  -- Slow rotation
+			p.PatrolAngle = p.PatrolAngle + 0.02 -- Slow rotation
 			local radius = p.TerritoryRadius or 150
 			local center = p.TerritoryCenter
 			local targetX = center.X + mathCos(p.PatrolAngle) * radius
@@ -1582,10 +1571,10 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	end
 
 	local self = setmetatable({}, AISnake)
-	
+
 	-- Get random AI color FIRST (50% yellow, 50% others)
 	local colorData = getRandomAIColor()
-	
+
 	-- Deep copy config and immediately apply colors
 	self.Config = deepCopy(SnakeConfig)
 	self.Config.HeadColor = colorData.HeadColor
@@ -1596,7 +1585,7 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	-- Update map bounds if needed (in case map was created after script started)
 	updateMapBounds()
 
-		self.Position = startPosition or Vector3new(0, 5, 0)
+	self.Position = startPosition or Vector3new(0, 5, 0)
 	self.Direction = Vector3new(0, 0, 1)
 
 	-- Use AI-specific settings if available
@@ -1605,12 +1594,12 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self.NormalSpeed = aiConfig.BaseSpeed or self.Config.BaseSpeed or 10
 	self.BoostSpeed = aiConfig.BoostSpeed or self.Config.BoostSpeed or 24
 	self.TurnSpeed = aiConfig.TurnSpeed or self.Config.TurnSpeed or 1.8
-	
+
 	self.RandomTurnInterval = 1.5
 	self.LastTurn = tick()
 	self.TargetYaw = 0
 	self.CurrentYaw = 0
-	self.LastDirection = self.Direction  -- Track momentum
+	self.LastDirection = self.Direction -- Track momentum
 	self.DirectionChangeTime = 0
 
 	self.FollowSpeed = self.Config.FollowSpeed or 0.95
@@ -1662,10 +1651,13 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		)
 	end
 
+
 	self.Model = getOrCreateSnakeModel(tostring(self) .. "_" .. mathRandom(100000,999999))
-	for _, obj in self.Model:GetChildren() do
+	for _, obj in ipairs(self.Model:GetChildren()) do
 		obj:Destroy()
 	end
+
+	game:GetService("CollectionService"):AddTag(self.Model, "AISnake")
 
 	self.RootPart = Instance.new("Part")
 	self.RootPart.Name = "AISnakeRoot"
@@ -1678,7 +1670,7 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 	self.HeadParts = createVisualHead(self.Config, self.Model)
 
-		self.Segments = {}
+	self.Segments = {}
 
 	-- Use initial length from config
 	self.CurrentLength = self.Config.InitialLength or 10
@@ -1745,12 +1737,12 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 	-- OPTIMIZED: Create segments dynamically based on length
 	local initialSegmentCount = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
-	
+
 	-- FIXED: Create segments at proper positions WITHOUT GAPS
 	for i = 1, initialSegmentCount do
 		-- Start ALL segments at the SAME position to prevent gaps
 		local pos = self.Position
-		local color = self:getSegmentColor(i)  -- Use the new function
+		local color = self:getSegmentColor(i) -- Use the new function
 		local segment = createSegment(i, pos, color, self.Config, self.Model, i)
 		self.Segments[i] = segment
 
@@ -1786,17 +1778,17 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		beam.CurveSize1 = 0
 		beam.FaceCamera = true
 		beam.Segments = BEAM_SEGMENTS
-		beam.Texture = BEAM_TEXTURES.gradient  -- Professional gradient
+		beam.Texture = BEAM_TEXTURES.gradient -- Professional gradient
 		beam.TextureMode = Enum.TextureMode.Wrap
 		beam.TextureLength = 2
-		beam.TextureSpeed = BEAM_TEXTURE_SPEED  -- Animated flow effect
+		beam.TextureSpeed = BEAM_TEXTURE_SPEED -- Animated flow effect
 		beam.LightEmission = 1
 		beam.LightInfluence = 0
 		beam.Brightness = 2
 		beam.Transparency = NumberSequence.new{
 			NumberSequenceKeypoint.new(0, 0),
 			NumberSequenceKeypoint.new(0.5, 0),
-			NumberSequenceKeypoint.new(1, 0.1)  -- Slight fade at edges
+			NumberSequenceKeypoint.new(1, 0.1) -- Slight fade at edges
 		}
 
 		-- Color matching with smooth transitions
@@ -1824,22 +1816,9 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	-- Track actual created segments
 	self.actualSegmentCount = initialSegmentCount
 
-	-- LOD and visibility tracking (from OptimizedSnakeSystem)
-	self.segmentVisibility = {} -- Track visibility state of each segment
-	self.lastVisibilityCheck = 0
-	self.lastBeamSync = 0
-	self.lodStates = {} -- Track LOD level for each segment
-	self.forcedRenderSegments = {} -- Segments that should always render
-	self.visibleSegmentCount = self.CurrentLength -- Track actual visible segments
-	
-	-- Initialize all segments as visible
-	for i = 0, self.CurrentLength do
-		self.segmentVisibility[i] = true
-		self.lodStates[i] = "near"
-		if i <= FORCE_RENDER_SEGMENTS then
-			self.forcedRenderSegments[i] = true
-		end
-	end
+	-- Initialize model attributes for client LOD
+	self.Model:SetAttribute("CurrentLength", self.CurrentLength)
+	self.Model:SetAttribute("HeadPosition", self.Position)
 
 	-- Spawn sequence to prevent gaps
 	task.defer(function()
@@ -1847,7 +1826,6 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		task.wait(0.1)
 
 		-- Gradually move forward to create proper segment spacing
-		local startPos = self.Position
 		for step = 1, 20 do
 			-- Move forward slightly
 			local moveDistance = self.SegmentSpacing * 0.1
@@ -1886,7 +1864,7 @@ function AISnake.new(startPosition, preservedPersonalityType)
 
 		-- Reset movement timers
 		self.LastTurn = tick()
-		self.BoostCooldown = tick() + 2  -- Wait before first boost
+		self.BoostCooldown = tick() + 2 -- Wait before first boost
 
 		-- CRITICAL: Initialize brain update time
 		self._lastBrainUpdate = tick()
@@ -1922,8 +1900,8 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self._lastStuckCheck = tick()
 
 	-- Spawn protection
-	self._spawnProtection = tick() + 3  -- 3 second spawn protection
-	self._spawnStabilizing = tick() + 0.5  -- Half second to let segments arrange
+	self._spawnProtection = tick() + 3 -- 3 second spawn protection
+	self._spawnStabilizing = tick() + 0.5 -- Half second to let segments arrange
 
 	return self
 end
@@ -1935,22 +1913,22 @@ function AISnake:grow(amount)
 	for i = 1, amount do
 		if self.CurrentLength < self.Config.MaxSegments then
 			self.CurrentLength = self.CurrentLength + 1
-			
+
 			-- Only create physical segment if within dynamic limit
 			if self.CurrentLength <= DYNAMIC_SEGMENT_LIMIT then
 				-- Update growth factor before creating new segment
 				self.growthFactor = self:calculateGrowthFactor()
 				local currentBaseSize = BASE_SIZE * self.growthFactor
-				
+
 				local color = self:getSegmentColor(self.CurrentLength)
 				local lastSegment = self.Segments[self.CurrentLength - 1]
 				local newPos = lastSegment and lastSegment.Position or self.Position
 				local segment = createSegment(self.CurrentLength, newPos, color, self.Config, self.Model, self.CurrentLength)
 				self.Segments[self.CurrentLength] = segment
-				
+
 				-- Ensure segment uses correct material from our config
 				segment.Material = self.Config.BodyMaterial or Enum.Material.Neon
-				segment.Color = color  -- Re-apply color to be sure
+				segment.Color = color -- Re-apply color to be sure
 
 				-- Match CharacterSetup's segment growth exactly
 				segment.Transparency = 1
@@ -1966,9 +1944,25 @@ function AISnake:grow(amount)
 
 					-- Create beam from previous segment to this new one
 					if self.CurrentLength > 1 and self.Beams then
+						-- Ensure previous attachment exists
+						local prevAttachment = self.Attachments[self.CurrentLength - 1]
+						if not prevAttachment then
+							-- Create missing attachment for previous segment
+							prevAttachment = Instance.new("Attachment")
+							prevAttachment.Name = "Attachment" .. (self.CurrentLength - 1)
+							prevAttachment.Parent = self.AttachmentPart
+							local prevSegment = self.Segments[self.CurrentLength - 1]
+							if prevSegment and prevSegment.Parent then
+								prevAttachment.WorldPosition = prevSegment.Position
+							else
+								prevAttachment.WorldPosition = newPos
+							end
+							self.Attachments[self.CurrentLength - 1] = prevAttachment
+						end
+
 						local beam = Instance.new("Beam")
 						beam.Name = "Beam" .. (self.CurrentLength - 1)
-						beam.Attachment0 = self.Attachments[self.CurrentLength - 1]
+						beam.Attachment0 = prevAttachment
 						beam.Attachment1 = attachment
 
 						-- Professional beam properties
@@ -1995,7 +1989,12 @@ function AISnake:grow(amount)
 						-- Color matching
 						local prevColor = self:getSegmentColor(self.CurrentLength - 1)
 						local currColor = self:getSegmentColor(self.CurrentLength)
-						if prevColor == currColor then
+
+						-- Safety check for colors
+						if not prevColor or not currColor then
+							warn("AISnake:grow - Color is nil for segment", self.CurrentLength)
+							beam.Color = ColorSequence.new(Color3.fromRGB(255, 255, 51)) -- Default yellow
+						elseif prevColor == currColor then
 							beam.Color = ColorSequence.new(currColor)
 						else
 							beam.Color = ColorSequence.new({
@@ -2011,10 +2010,6 @@ function AISnake:grow(amount)
 
 				-- Calculate final size using getSegmentSize
 				local finalSize = self:getSegmentSize(self.CurrentLength, currentBaseSize)
-
-				-- Initialize LOD state for new segment
-				self.segmentVisibility[self.CurrentLength] = true
-				self.lodStates[self.CurrentLength] = "near"
 
 				task.spawn(function()
 					if not segment or not segment.Parent then return end
@@ -2033,24 +2028,18 @@ function AISnake:grow(amount)
 						segment.Transparency = 0
 					end
 				end)
-				
+
 				-- Update actual segment count
 				self.actualSegmentCount = self.CurrentLength
-			else
-				-- Just increase the length counter without creating segments
-				-- These will be "virtual" segments that exist in data but not visually
 			end
 		end
 	end
-	
-	-- Update visible segment count
-	self.visibleSegmentCount = math.min(self.CurrentLength, MAX_VISIBLE_SEGMENTS)
-	
+
 	-- Update all segment sizes with new growth factor to prevent glitching
 	if amount > 0 then
 		self.growthFactor = self:calculateGrowthFactor()
 		local currentBaseSize = BASE_SIZE * self.growthFactor
-		
+
 		-- Smoothly update existing segment sizes and beam widths
 		task.spawn(function()
 			-- Update segments
@@ -2067,7 +2056,7 @@ function AISnake:grow(amount)
 					tween:Play()
 				end
 			end
-			
+
 			-- Update beam widths to match new segment sizes
 			task.wait(0.1) -- Small delay to let segment tweens start
 			for i = 0, math.min(self.CurrentLength - 1, FORCE_RENDER_SEGMENTS) do
@@ -2093,13 +2082,6 @@ function AISnake:setConfidenceBuff()
 	self.confidenceEndTime = tick() + 8 -- REDUCED from 12
 	self.killCount = self.killCount + 1
 	self.lastKillTime = tick()
-
-	-- REMOVED: Debug yellow outline - keep it invisible
-	-- if self.HeadParts and self.HeadParts.headOutline then
-	--	head.HeadParts.headOutline.Color3 = Color3.fromRGB(255, 255, 0)
-	--	self.HeadParts.headOutline.LineThickness = 0.3
-	--	self.HeadParts.headOutline.Transparency = 0.3
-	-- end
 end
 
 function AISnake:Destroy()
@@ -2232,8 +2214,8 @@ function AISnake:updateMovement(dt)
 	if self._destroyed then return end
 
 	if not self._active or not self.HeadParts or not self.HeadParts.head or not self.HeadParts.head.Parent then
-		if self._active and not self._destroyed then 
-			self:Destroy() 
+		if self._active and not self._destroyed then
+			self:Destroy()
 		end
 		return
 	end
@@ -2265,7 +2247,7 @@ function AISnake:updateMovement(dt)
 	-- Failsafe: Check if brain updates have stopped
 	if self._lastBrainUpdate then
 		local timeSinceLastBrain = now - self._lastBrainUpdate
-		if timeSinceLastBrain > 2.0 then  -- Reduced from 5.0 to 2.0 seconds
+		if timeSinceLastBrain > 2.0 then -- Reduced from 5.0 to 2.0 seconds
 			warn("AI Snake brain frozen for", timeSinceLastBrain, "seconds! Forcing update...")
 			self:updateBrain()
 			-- Also ensure it's in the active list
@@ -2335,7 +2317,7 @@ function AISnake:updateMovement(dt)
 		turnSpeed = turnSpeed * 1.3
 	elseif state == "AVOID_BOUNDARY" then
 		-- Need sharp turns to avoid map edge
-		turnSpeed = turnSpeed * 2.5  -- Even sharper for emergencies
+		turnSpeed = turnSpeed * 2.5 -- Even sharper for emergencies
 	elseif state == "COLLISION_AVOID" then
 		-- Emergency collision avoidance needs instant response
 		turnSpeed = turnSpeed * 3.0
@@ -2370,8 +2352,6 @@ function AISnake:updateMovement(dt)
 		)
 		self.Direction = (self.Direction + wobble).Unit
 	end
-
-	-- REMOVED: Emergency giant snake escape (causes teleporting)
 
 	-- Boundary force (gentler, only when not spawn protected)
 	if not isSpawnProtected then
@@ -2450,12 +2430,9 @@ function AISnake:updateMovement(dt)
 		end
 	end
 
-	-- Speed calculation - NO SLOWING DOWN!
+	-- Speed calculation
 	local speedMultiplier = p.SpeedMultiplier or 1
 
-	-- No speed boost for orb seeking - they need control, not extra speed
-
-	-- Always maintain at least normal speed
 	if self.Boosting then
 		self.Speed = self.BoostSpeed * speedMultiplier
 	else
@@ -2490,8 +2467,6 @@ function AISnake:updateMovement(dt)
 		self.Position = newPosition
 	end
 
-	-- REMOVED: Stuck detection that causes teleporting
-
 	self.RootPart.Position = self.Position
 
 	local headOffset = self.Direction * 1.5
@@ -2502,7 +2477,7 @@ function AISnake:updateMovement(dt)
 	if self.HeadParts.leftEye and self.HeadParts.rightEye then
 		local headCF = self.HeadParts.head.CFrame
 		local headSize = self.HeadParts.head.Size.X
-		local eyeScale = headSize / 3.5 * 0.5  -- BASE_SIZE = 3.5
+		local eyeScale = headSize / 3.5 * 0.5 -- BASE_SIZE = 3.5
 		local eyeOffset = headSize * 0.3
 		local eyeForward = -headSize * 0.35
 
@@ -2519,17 +2494,13 @@ function AISnake:updateMovement(dt)
 		self.HeadParts.rightPupil.CFrame = self.HeadParts.rightEye.CFrame * CFramenew(0, 0, -eyeScale * 0.3)
 	end
 
-	-- Head is now visible like OptimizedSnakeSystem (removed forced invisibility)
-
 	-- Set velocity for collision detection
 	self.HeadParts.head.AssemblyLinearVelocity = self.Direction * self.Speed
 
 	-- CHECK FOR ORB PICKUPS (including upgrade orbs)
-	-- Look for orbs in workspace directly (OrbSpawner puts them there)
 	local headPos = self.HeadParts.head.Position
-	local pickupRadius = 8  -- Increased for better upgrade orb pickup (they're bigger)
+	local pickupRadius = 8 -- Increased for better upgrade orb pickup (they're bigger)
 
-	-- Check both workspace and any orb folders
 	local orbsToCheck = {}
 
 	-- Add orbs from workspace
@@ -2542,7 +2513,7 @@ function AISnake:updateMovement(dt)
 	-- Also check OrbFolder if it exists
 	local orbFolder = Workspace:FindFirstChild("OrbFolder") or Workspace:FindFirstChild("Orbs")
 	if orbFolder then
-		for _, orb in pairs(orbFolder:GetChildren()) do
+		for _, orb in ipairs(orbFolder:GetChildren()) do
 			if orb:IsA("BasePart") then
 				table.insert(orbsToCheck, orb)
 			end
@@ -2550,7 +2521,7 @@ function AISnake:updateMovement(dt)
 	end
 
 	-- Now check all orbs
-	for _, orb in pairs(orbsToCheck) do
+	for _, orb in ipairs(orbsToCheck) do
 		if orb:IsA("BasePart") and orb.Parent then
 			local dist = (orb.Position - headPos).Magnitude
 
@@ -2581,7 +2552,7 @@ function AISnake:updateMovement(dt)
 
 				-- Destroy the orb
 				orb:Destroy()
-				break  -- Only pick up one orb per frame
+				break -- Only pick up one orb per frame
 			end
 		end
 	end
@@ -2592,9 +2563,8 @@ function AISnake:updateMovement(dt)
 
 	-- EXACT same interpolation as CharacterSetup
 	if dist > 0.02 then
-		-- Balanced interpolations (from CharacterSetup)
 		if dist > self.Config.SegmentSpacing * 0.7 then
-			local isBoosting = self.Speed > 16  -- AI boost check
+			local isBoosting = self.Speed > 16 -- AI boost check
 			local maxInterp = isBoosting and 6 or 3
 			local numInterpolations = mathMin(mathFloor(dist / (self.Config.SegmentSpacing * 0.35)), maxInterp)
 			for i = 1, numInterpolations do
@@ -2610,100 +2580,59 @@ function AISnake:updateMovement(dt)
 	-- Segment following (OPTIMIZED)
 	local followSpeed = self.IsBoosting and self.BoostFollowSpeed or self.FollowSpeed
 
-	-- Initialize frame counter if needed
 	self._segmentUpdateFrame = (self._segmentUpdateFrame or 0) + 1
 
-	-- Get camera position for LOD
-	local camera = workspace.CurrentCamera
-	local cameraPos = camera and camera.CFrame.Position or self.Position
-	
-	-- Update visibility checks with LOD
-	if self._segmentUpdateFrame % VISIBILITY_CHECK_INTERVAL == 0 then
-		self:updateSegmentVisibility(cameraPos)
-	end
-	
-	-- Sync beams with segment visibility
-	if self._segmentUpdateFrame % BEAM_SYNC_INTERVAL == 0 then
-		self:syncBeamVisibility()
-	end
+	self.Model:SetAttribute("CurrentLength", self.CurrentLength)
+	self.Model:SetAttribute("HeadPosition", self.Position)
 
-	-- Calculate current base size with growth factor
 	local currentBaseSize = BASE_SIZE * self.growthFactor
 
-	-- Adaptive segment update skip based on snake length
 	local segmentSkip = 1
 	if self.CurrentLength > VERY_LONG_SNAKE_THRESHOLD then
-		segmentSkip = 4  -- Skip more for very long snakes
+		segmentSkip = 4 -- Skip more for very long snakes
 	elseif self.CurrentLength > LONG_SNAKE_THRESHOLD then
-		segmentSkip = 2  -- Skip every other for long snakes
+		segmentSkip = 2 -- Skip every other for long snakes
 	end
 
-	-- Update different segments on different frames to spread the load
 	local updateOffset = self._segmentUpdateFrame % segmentSkip
 
-	-- Update head attachment position
 	if self.Attachments and self.Attachments[0] then
 		self.Attachments[0].WorldPosition = self.HeadParts.head.Position
 	end
 
-	-- Only update visible segments
-	local maxSegmentToUpdate = math.min(self.visibleSegmentCount, DYNAMIC_SEGMENT_LIMIT)
-
-	-- Build list of segments to update based on visibility
-	local segmentsToUpdate = {}
-	for i = 1, math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT) do
-		if self.segmentVisibility[i] ~= false then
-			table.insert(segmentsToUpdate, i)
-		end
+	if not self.CurrentLength then
+		warn("AISnake:updateMovement - CurrentLength is nil for snake", self.Name)
+		return
 	end
+	local maxSegmentToUpdate = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
 
-	-- Update segments with adaptive skipping and LOD
 	for i = 1 + updateOffset, maxSegmentToUpdate, segmentSkip do
-		-- Ensure segment exists (dynamic creation)
 		local segment = self:ensureSegmentExists(i)
 		if segment and segment.Parent then
-			-- Skip if culled
-			if self.lodStates[i] == "culled" then
-				continue
-			end
-			
 			local delay = mathFloor(i * 1.2)
 			local targetData = self:getFromHistory(delay)
 			if targetData then
-				-- Use EXACT same spacing as CharacterSetup
-				local spacingMultiplier = 0.15  -- Base spacing from CharacterSetup
+				local spacingMultiplier = 0.15 -- Base spacing from CharacterSetup
 				if self.CurrentLength > 1500 then
-					spacingMultiplier = 0.2  -- More spacing to show pattern
+					spacingMultiplier = 0.2 -- More spacing to show pattern
 				end
 				local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
 				local currentSegmentPos = segment.Position
 
-				-- Anti-gap check (from CharacterSetup)
 				if i > 1 then
 					local prevSegment = self.Segments[i - 1]
 					if prevSegment and prevSegment.Parent then
 						local gap = (currentSegmentPos - prevSegment.Position).Magnitude
 						if gap > self.Config.SegmentSpacing * 1.5 then
-							-- Too far, pull it closer
 							local dir = (prevSegment.Position - currentSegmentPos).Unit
 							segmentPos = prevSegment.Position - dir * self.Config.SegmentSpacing
 						end
 					end
 				end
 
-				-- Use different follow speeds based on LOD
-				local lodState = self.lodStates[i]
-				local lodFollowSpeed = followSpeed
-				if lodState == "far" then
-					lodFollowSpeed = 1 -- Instant update for far segments
-				elseif lodState == "mid" then
-					lodFollowSpeed = math.min(followSpeed * 1.2, 0.99)
-				end
-
-				local newPos = currentSegmentPos:Lerp(segmentPos, lodFollowSpeed)
+				local newPos = currentSegmentPos:Lerp(segmentPos, followSpeed)
 				segment.CFrame = CFramenew(newPos)
 
-				-- Update attachment position for this segment
 				if self.Attachments and self.Attachments[i] then
 					self.Attachments[i].WorldPosition = newPos
 				end
@@ -2717,120 +2646,18 @@ function AISnake:updateMovement(dt)
 			if i % segmentSkip ~= updateOffset then
 				local segment = self.Segments[i]
 				if segment and segment.Parent and self.Attachments and self.Attachments[i] then
-					-- Only update if not culled
-					if self.lodStates[i] ~= "culled" then
-						self.Attachments[i].WorldPosition = segment.Position
-					end
+					self.Attachments[i].WorldPosition = segment.Position
 				end
 			end
 		end
 	end
 
-	-- Don't update tail segments that are beyond visible range
-	-- This prevents the tail update logic from affecting invisible segments
-
-	-- Collision detection (handled by SnakeCollisionHandler)
-	local myHead = self.HeadParts and self.HeadParts.head
-	if not myHead or not myHead.Parent then return end
-
-	-- Skip collision detection during spawn protection
-	if isSpawnProtected then return end
-
-	self._collisionCheckFrame = (self._collisionCheckFrame or 0) + 1
-	if self._collisionCheckFrame % 6 ~= 0 then return end  -- Check even less often
-
-	local searchRadius = 3.5
-	local nearbyEntities = SpatialGrid.QueryRadius(myHead.Position, searchRadius)
-
-	for _, data in nearbyEntities do
-		local otherPart = data.part
-		if otherPart == myHead then continue end
-
-		if isPartsColliding(myHead, otherPart) then
-			local otherOwner = data.owner
-
-			-- Add double-check to prevent false positives
-			if (myHead.Position - otherPart.Position).Magnitude > 5 then
-				continue  -- Skip if distance is too far (false positive)
-			end
-
-			if data.type == "AI_HEAD" then
-				if tostring(self) < tostring(otherOwner) then
-					if self.CurrentLength > otherOwner.CurrentLength then
-						otherOwner:Destroy()
-						self:setConfidenceBuff()
-					elseif otherOwner.CurrentLength > self.CurrentLength then
-						self:Destroy()
-						otherOwner:setConfidenceBuff()
-					else
-						otherOwner:Destroy()
-						self:Destroy()
-					end
-				end
-				return
-			elseif data.type == "AI_SEGMENT" then
-				if otherOwner ~= self then
-					self:Destroy()
-					otherOwner:setConfidenceBuff()
-					return
-				end
-			elseif data.type == "PLAYER_HEAD" then
-				if otherOwner.Character and otherOwner.Character:FindFirstChildOfClass("Humanoid") then
-					otherOwner.Character:FindFirstChildOfClass("Humanoid").Health = 0
-				end
-				self:Destroy()
-				return
-			elseif data.type == "PLAYER_SEGMENT" then
-				self:Destroy()
-				return
-			end
-		end
-	end
-
-	-- Debug display (DISABLED FOR PERFORMANCE)
-	if false and self.HeadParts and self.HeadParts.debugLabel then
-		local label = self.HeadParts.debugLabel
-
-		if not self._lastDebugUpdate or now - self._lastDebugUpdate > DEBUG_UPDATE_RATE then
-			self._lastDebugUpdate = now
-			local threats = self:findNearbyThreats()
-			self._cachedThreatCount = #threats
-			self._cachedThreatDist = self._cachedThreatCount > 0 and mathFloor(threats[1].distance) or 0
-		end
-
-		local threatCount = self._cachedThreatCount or 0
-		local closestThreatDist = self._cachedThreatDist or 0
-
-		local statusText = state
-		if self.Boosting then statusText = statusText .. " [BOOST]" end
-		if self.isConfident then statusText = "CONFIDENT" end
-
-		label.Text = string.format("%s\n%s\nL:%d", 
-			p.Type, 
-			statusText,
-			self.CurrentLength
-		)
-
-		-- Color coding
-		if state == "FLEE" then
-			label.TextColor3 = Color3.fromRGB(255, 100, 100)
-		elseif state == "CIRCLE" or state == "HUNT" then
-			label.TextColor3 = Color3.fromRGB(255, 150, 100)
-		elseif state == "SEEK_ORB" then
-			label.TextColor3 = Color3.fromRGB(100, 255, 100)
-		elseif self.isConfident then
-			label.TextColor3 = Color3.fromRGB(255, 200, 0)
-		else
-			label.TextColor3 = Color3.fromRGB(255, 255, 255)
-		end
-	end
 end
 
 -- === UPDATE LOOPS ===
 if AISnake._movementConnection then AISnake._movementConnection:Disconnect() end
 if AISnake._brainConnection then AISnake._brainConnection:Disconnect() end
 
--- Add a simple brain update counter
 local brainUpdateCounter = 0
 
 AISnake._movementConnection = RunService.Heartbeat:Connect(function(dt)
@@ -2842,11 +2669,9 @@ AISnake._movementConnection = RunService.Heartbeat:Connect(function(dt)
 		end
 	end
 
-	-- Update brain every 30 frames (0.5 seconds at 60fps)
 	brainUpdateCounter = brainUpdateCounter + 1
 	if brainUpdateCounter >= 30 then
 		brainUpdateCounter = 0
-		-- Update ALL snakes' brains at once
 		for i = 1, #snakesToUpdate do
 			local snake = snakesToUpdate[i]
 			if snake and snake._active then
@@ -2866,14 +2691,12 @@ end)
 AISnake._brainUpdateIndex = 1
 AISnake._spatialGridTimer = 0
 
--- Periodic cleanup of invalid snakes
 local lastCleanup = 0
-local CLEANUP_INTERVAL = 10  -- Clean every 10 seconds
+local CLEANUP_INTERVAL = 10 -- Clean every 10 seconds
 
 AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 	AISnake._spatialGridTimer = AISnake._spatialGridTimer + deltaTime
 
-	-- Periodic cleanup of dead/invalid snakes
 	if time - lastCleanup > CLEANUP_INTERVAL then
 		lastCleanup = time
 		local removed = 0
@@ -2894,7 +2717,7 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 
 		SpatialGrid.Clear()
 
-		for _, snake in AISnake._activeSnakes do
+		for _, snake in ipairs(AISnake._activeSnakes) do
 			if snake._active and snake.HeadParts and snake.HeadParts.head then
 				SpatialGrid.Insert(snake.HeadParts.head, snake, "AI_HEAD")
 
@@ -2907,7 +2730,7 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 			end
 		end
 
-		for _, player in Players:GetPlayers() do
+		for _, player in ipairs(Players:GetPlayers()) do
 			if player.Character then
 				local head = player.Character:FindFirstChild("HumanoidRootPart")
 				if head then
@@ -2915,7 +2738,7 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 				end
 
 				local segmentCount = 0
-				for _, part in player.Character:GetChildren() do
+				for _, part in ipairs(player.Character:GetChildren()) do
 					if part:IsA("BasePart") and part.Name:match("Segment") then
 						segmentCount = segmentCount + 1
 						if segmentCount % 4 == 1 then
@@ -2926,47 +2749,41 @@ AISnake._brainConnection = RunService.Stepped:Connect(function(time, deltaTime)
 			end
 		end
 
-		for _, orb in OrbUtils.orbs do
-			SpatialGrid.Insert(orb, orb, "ORB")
+		for _, orb in ipairs(OrbUtils.orbs) do
+			SpatialGrid.Insert( orb, orb, "ORB")
 		end
-	end 
+	end
 
 	local snakes = AISnake._activeSnakes
-	if #snakes == 0 then 
-		AISnake._brainUpdateIndex = 1  -- Reset index when no snakes
-		return 
+	if #snakes == 0 then
+		AISnake._brainUpdateIndex = 1 -- Reset index when no snakes
+		return
 	end
 
 	-- Get nearest player position for LOD
 	local nearestPlayerPos = nil
-	local nearestDist = math.huge
-	for _, player in Players:GetPlayers() do
+	for _, player in ipairs(Players:GetPlayers()) do
 		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-			local pos = player.Character.HumanoidRootPart.Position
-			if nearestPlayerPos == nil then
-				nearestPlayerPos = pos
-			end
+			nearestPlayerPos = player.Character.HumanoidRootPart.Position
+			break -- Found one, that's enough
 		end
 	end
 
 	for i = 1, BRAIN_UPDATES_PER_FRAME do
-		-- Safety check for index bounds
-		if AISnake._brainUpdateIndex > #snakes or AISnake._brainUpdateIndex < 1 then
+		if AISnake._brainUpdateIndex > #snakes then
+			AISnake._brainUpdateIndex = 1
+		end
+		if AISnake._brainUpdateIndex < 1 then
 			AISnake._brainUpdateIndex = 1
 		end
 
 		local snake = snakes[AISnake._brainUpdateIndex]
 		if snake and snake._active then
-			-- Only update AI snakes near players
 			local shouldUpdate = true
 			if nearestPlayerPos and snake.Position then
 				local dist = (snake.Position - nearestPlayerPos).Magnitude
 				if dist > AI_UPDATE_DISTANCE then
 					shouldUpdate = false
-					-- Still do minimal position update for far snakes
-					if snake.HeadParts and snake.HeadParts.head then
-						snake.HeadParts.head.CFrame = CFrame.new(snake.Position)
-					end
 				end
 			end
 
@@ -2981,10 +2798,13 @@ end)
 
 -- Get segment color matching OptimizedSnakeSystem
 function AISnake:getSegmentColor(index)
-	-- For AI snakes, we don't have rainbow mode, but we need the color logic
+	if not self.Config or not self.Config.BodyColors or #self.Config.BodyColors == 0 then
+		return Color3.fromRGB(255, 255, 51) -- Default yellow color
+	end
+
 	if index == 0 then
 		return self.Config.HeadColor or self.Config.BodyColors[1]
-	elseif index <= 8 then  -- HEAD_BLEND_SEGMENTS = 8
+	elseif index <= 8 then -- HEAD_BLEND_SEGMENTS = 8
 		local blendFactor = (index / 8) ^ 0.7
 		local headColor = self.Config.HeadColor or self.Config.BodyColors[1]
 		local bodyColor = self.Config.BodyColors[1]
@@ -3015,10 +2835,6 @@ end
 -- Smooth size transition function from OptimizedSnakeSystem
 function AISnake:getSegmentSize(index, baseSize)
 	local sizeMult = 1
-
-	-- Add growth pulse effect when growing (if we implement growth animation)
-	-- For now, we'll skip this since AI doesn't have isGrowing state
-
 	local visibleSegmentCount = self.CurrentLength
 
 	if index == 0 then
@@ -3032,7 +2848,7 @@ function AISnake:getSegmentSize(index, baseSize)
 		return (headSize + (bodySize - headSize) * (blendFactor ^ 0.5)) * sizeMult
 	else
 		-- Body with gradual taper
-		local taperFactor = 1 - (index / visibleSegmentCount) * 0.2
+		local taperFactor = 1 - (index / self.CurrentLength) * 0.2
 		-- Apply exponential smoothing to taper
 		taperFactor = 1 - (1 - taperFactor) ^ 1.5
 		return baseSize * taperFactor * sizeMult
@@ -3043,271 +2859,14 @@ end
 function AISnake:getBeamWidth(index, baseSize)
 	local segmentSize1 = self:getSegmentSize(index, baseSize)
 	local segmentSize2 = self:getSegmentSize(index + 1, baseSize)
-	
-	-- Average the two segment sizes for smooth transition
+
 	local avgSize = (segmentSize1 + segmentSize2) / 2
-	
-		-- Apply beam-specific taper (less than segment taper for fuller appearance)
 	local visibleSegmentCount = self.CurrentLength
 	local beamTaper = 1 - (index / visibleSegmentCount) * BEAM_TAPER_STRENGTH
-
-	-- For AI snakes, use slightly smaller beam width to prevent showing outside
 	local aiConfig = self.Config.AI or {}
 	local beamWidthBase = aiConfig.BeamWidthMultiplier or BEAM_WIDTH_BASE * 0.9
 
 	return avgSize * beamWidthBase * beamTaper
-end
-
--- Calculate LOD level based on distance (from OptimizedSnakeSystem)
-function AISnake:calculateLODLevel(segmentIndex, cameraPosition)
-	if not cameraPosition then return "near" end
-	
-	local segment = self.Segments[segmentIndex]
-	if not segment or not segment.Parent then return "culled" end
-	
-	-- Always full quality for first segments
-	if segmentIndex <= FORCE_RENDER_SEGMENTS then
-		return "near"
-	end
-	
-	local distance = (segment.Position - cameraPosition).Magnitude
-	
-	if distance <= LOD_DISTANCE_NEAR then
-		return "near"
-	elseif distance <= LOD_DISTANCE_MID then
-		return "mid"
-	elseif distance <= LOD_DISTANCE_FAR then
-		return "far"
-	else
-		return "culled"
-	end
-end
-
--- Apply LOD settings to segment (Simplified for sampling system)
-function AISnake:applyLODToSegment(segment, lodLevel, index)
-	if not segment or not segment.Parent then return end
-	
-	-- Store LOD state
-	self.lodStates[index] = lodLevel
-	
-	if lodLevel == "culled" then
-		-- Completely hide culled segments
-		segment.Transparency = 1
-		segment.CanTouch = false
-		segment.CanQuery = false
-		
-		-- Disable glow
-		local glow = segment:FindFirstChild("Glow")
-		if glow then
-			glow.Enabled = false
-		end
-		
-		self.segmentVisibility[index] = false
-	else
-		-- Segment is visible at some level
-		-- Collision only for near segments in the first 50
-		if lodLevel == "near" and index <= 50 then
-			segment.CanTouch = true
-			segment.CanQuery = index <= 10
-		else
-			segment.CanTouch = false
-			segment.CanQuery = false
-		end
-		
-		self.segmentVisibility[index] = true
-		
-		-- Note: Transparency and glow are handled by updateSegmentVisibility
-	end
-end
-
--- Check if segment should have glow
-function AISnake:shouldHaveGlow(index)
-	if index <= GLOW_FALLOFF_START then
-		return true
-	elseif index <= 100 then
-		return index % 2 == 0
-	elseif index <= 200 then
-		return index % 3 == 0
-	else
-		return index % 5 == 0
-	end
-end
-
--- Update visibility for all segments
-function AISnake:updateSegmentVisibility(cameraPosition)
-	if not cameraPosition then return end
-	
-	-- Calculate distance from camera to snake head
-	local headDistance = (self.HeadParts.head.Position - cameraPosition).Magnitude
-	
-	-- Determine how many segments to show based on distance
-	local segmentsToShow
-	if headDistance < 200 then
-		segmentsToShow = self.CurrentLength  -- Show all
-	elseif headDistance < 400 then
-		segmentsToShow = math.floor(self.CurrentLength * 0.8)  -- 80%
-	elseif headDistance < 600 then
-		segmentsToShow = math.floor(self.CurrentLength * 0.5)  -- 50%
-	elseif headDistance < 800 then
-		segmentsToShow = math.max(30, math.floor(self.CurrentLength * 0.3))  -- 30% but at least 30
-	else
-		segmentsToShow = math.max(15, math.floor(self.CurrentLength * 0.15))  -- 15% but at least 15
-	end
-	
-	-- Clamp to limits
-	segmentsToShow = math.min(segmentsToShow, self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
-	
-	-- Always show head at full quality
-	if self.Segments[0] then
-		self:applyLODToSegment(self.Segments[0], "near", 0)
-		self.Segments[0].Transparency = 0  -- Head always fully opaque
-	end
-	
-	-- Update eye visibility based on head distance
-	if self.HeadParts then
-		local eyeVisible = headDistance < 600  -- Hide eyes when far away
-		if self.HeadParts.leftEye then
-			self.HeadParts.leftEye.Transparency = eyeVisible and 0 or 1
-		end
-		if self.HeadParts.rightEye then
-			self.HeadParts.rightEye.Transparency = eyeVisible and 0 or 1
-		end
-		if self.HeadParts.leftPupil then
-			self.HeadParts.leftPupil.Transparency = eyeVisible and 0 or 1
-		end
-		if self.HeadParts.rightPupil then
-			self.HeadParts.rightPupil.Transparency = eyeVisible and 0 or 1
-		end
-	end
-	
-	-- Update segments continuously from head
-	for i = 1, self.CurrentLength do
-		local segment = self.Segments[i]
-		
-		if i <= segmentsToShow then
-			-- This segment should be visible
-			if segment and segment.Parent then
-				-- Calculate segment-specific distance
-				local segmentDistance = (segment.Position - cameraPosition).Magnitude
-				
-				-- Determine LOD level
-				local lodLevel
-				if segmentDistance < LOD_DISTANCE_NEAR then
-					lodLevel = "near"
-				elseif segmentDistance < LOD_DISTANCE_MID then
-					lodLevel = "mid"
-				else
-					lodLevel = "far"
-				end
-				
-				self:applyLODToSegment(segment, lodLevel, i)
-				
-				-- Calculate transparency - NEVER make segments fully invisible when they should be shown
-				local baseTransparency = 0
-				if headDistance < 200 then
-					baseTransparency = 0
-				elseif headDistance < 400 then
-					baseTransparency = 0.1
-				elseif headDistance < 600 then
-					baseTransparency = 0.2
-				else
-					baseTransparency = 0.3  -- Max 30% transparent, not 50%
-				end
-				
-				-- Fade out segments near the cutoff point
-				local fadeStart = segmentsToShow * 0.7  -- Start fading at 70%
-				if i > fadeStart and i < segmentsToShow then
-					-- Gradual fade for last 30% of visible segments
-					local fadeProgress = (i - fadeStart) / (segmentsToShow - fadeStart)
-					segment.Transparency = math.min(0.7, baseTransparency + fadeProgress * 0.5)
-				else
-					segment.Transparency = baseTransparency
-				end
-				
-				-- Update glow based on distance and visibility
-				local glow = segment:FindFirstChild("Glow")
-				if glow then
-					if headDistance < 600 and self:shouldHaveGlow(i) then
-						-- Scale down glow with distance
-						local glowScale = math.max(0, 1 - (headDistance / 600))
-						glow.Enabled = true
-						glow.Brightness = GLOW_INTENSITY * glowScale * (1 - segment.Transparency)
-						glow.Range = GLOW_RANGE_BASE * glowScale
-					else
-						glow.Enabled = false
-					end
-				end
-			end
-		else
-			-- This segment should be completely hidden
-			if segment and segment.Parent then
-				self:applyLODToSegment(segment, "culled", i)
-			end
-			self.segmentVisibility[i] = false
-		end
-	end
-	
-	-- Store visible count
-	self.visibleSegmentCount = segmentsToShow
-end
-
--- Sync beam visibility with segments (Continuous visibility)
-function AISnake:syncBeamVisibility()
-	-- Update main beams based on segment visibility
-	for i = 0, math.min(self.CurrentLength - 1, DYNAMIC_SEGMENT_LIMIT - 1) do
-		local beam = self.Beams[i]
-		if beam and beam.Parent then
-			local seg1 = self.Segments[i]
-			local seg2 = self.Segments[i + 1]
-			
-			-- Check if both segments exist and are visible
-			if seg1 and seg2 and seg1.Parent and seg2.Parent and 
-			   i < self.visibleSegmentCount and 
-			   self.segmentVisibility[i] ~= false and 
-			   self.segmentVisibility[i + 1] ~= false then
-				
-				-- Get segment transparencies
-				local trans1 = seg1.Transparency or 0
-				local trans2 = seg2.Transparency or 0
-				
-				-- Only show beam if both segments are reasonably visible
-				if trans1 < 0.9 and trans2 < 0.9 then
-					beam.Enabled = true
-					
-					-- Use average transparency but add a bit more for beams
-					local avgTransparency = (trans1 + trans2) / 2
-					beam.Transparency = NumberSequence.new(math.min(avgTransparency + 0.1, 0.8))
-					beam.Brightness = math.max(0.5, 2 * (1 - avgTransparency))
-				else
-					-- Hide beam if segments are too transparent
-					beam.Enabled = false
-				end
-			else
-				-- Hide beam if segments don't exist or are culled
-				beam.Enabled = false
-			end
-		end
-	end
-	
-	-- Handle overlap beams - only show for visible segments
-	for key, beam in pairs(self.Beams) do
-		if type(key) == "string" and beam and beam.Parent then
-			if string.find(key, "overlap") then
-				local index = tonumber(string.match(key, "%d+"))
-				if index and index < self.visibleSegmentCount - 2 then
-					local seg = self.Segments[index]
-					if seg and seg.Parent and seg.Transparency < 0.7 then
-						beam.Enabled = true
-						beam.Transparency = NumberSequence.new(math.min(seg.Transparency + 0.3, 0.9))
-					else
-						beam.Enabled = false
-					end
-				else
-					beam.Enabled = false
-				end
-			end
-		end
-	end
 end
 
 -- Dynamically create segments if they don't exist yet
@@ -3315,42 +2874,33 @@ function AISnake:ensureSegmentExists(index)
 	if index > DYNAMIC_SEGMENT_LIMIT or index > self.CurrentLength then
 		return nil
 	end
-	
+
 	local segment = self.Segments[index]
 	if segment and segment.Parent then
 		return segment
 	end
-	
+
 	-- Create segment on demand
 	local delay = mathFloor(index * 1.2)
 	local targetData = self:getFromHistory(delay)
 	if not targetData then
 		return nil
 	end
-	
+
 	local color = self:getSegmentColor(index)
 	segment = createSegment(index, targetData.position, color, self.Config, self.Model, self.CurrentLength)
-	
+
 	-- Apply proper size
 	local currentBaseSize = BASE_SIZE * self.growthFactor
 	local segmentSize = self:getSegmentSize(index, currentBaseSize)
 	segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
-	
-	-- CRITICAL: Apply LOD immediately based on camera distance
-	local camera = workspace.CurrentCamera
-	local cameraPos = camera and camera.CFrame.Position
-	if cameraPos then
-		local lodLevel = self:calculateLODLevel(index, cameraPos)
-		self:applyLODToSegment(segment, lodLevel, index)
-	else
-		-- If no camera, apply conservative LOD
-		if index > FORCE_RENDER_SEGMENTS then
-			self:applyLODToSegment(segment, "far", index)
-		end
-	end
-	
+
+	segment.Transparency = 0
+	segment.CanTouch = index <= 50 -- Only first 50 segments have collision
+	segment.CanQuery = index <= 10
+
 	self.Segments[index] = segment
-	
+
 	-- Create attachment if needed
 	if not self.Attachments[index] then
 		local attachment = Instance.new("Attachment")
@@ -3359,7 +2909,7 @@ function AISnake:ensureSegmentExists(index)
 		attachment.WorldPosition = segment.Position
 		self.Attachments[index] = attachment
 	end
-	
+
 	-- Create beam to previous segment if needed
 	if index > 0 and not self.Beams[index - 1] then
 		local prevAttachment = self.Attachments[index - 1]
@@ -3368,7 +2918,7 @@ function AISnake:ensureSegmentExists(index)
 			beam.Name = "Beam" .. (index - 1)
 			beam.Attachment0 = prevAttachment
 			beam.Attachment1 = self.Attachments[index]
-			
+
 			-- Beam properties
 			local beamWidth = self:getBeamWidth(index - 1, currentBaseSize)
 			beam.Width0 = beamWidth
@@ -3390,20 +2940,14 @@ function AISnake:ensureSegmentExists(index)
 				NumberSequenceKeypoint.new(1, 0.1)
 			}
 			beam.Color = ColorSequence.new(color)
-			
+
 			beam.Parent = self.AttachmentPart
 			self.Beams[index - 1] = beam
-			
-			-- Apply visibility based on LOD
-			if self.segmentVisibility[index] == false or self.segmentVisibility[index - 1] == false then
-				beam.Enabled = false
-			end
+			beam.Enabled = true
 		end
 	end
-	
+
 	return segment
 end
-
-
 
 return AISnake
