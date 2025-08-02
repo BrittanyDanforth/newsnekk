@@ -1605,33 +1605,15 @@ RunService.Stepped:Connect(function()
 				local dotA = velA:Dot(dirAB)
 				local dotB = velB:Dot(dirBA)
 
-				-- The player moving more toward the other dies
-				if dotA > 2 and dotB <= 2 then
-					-- Player A ran into Player B
-					if DEBUG_COLLISIONS then
-						print(string.format("[HEAD-TO-HEAD] Player A dies (ran into B): %s (dotA: %.2f, dotB: %.2f)", playerA.Name, dotA, dotB))
-					end
-					queuePlayerDeath(playerA)
-				elseif dotB > 2 and dotA <= 2 then
-					-- Player B ran into Player A
-					if DEBUG_COLLISIONS then
-						print(string.format("[HEAD-TO-HEAD] Player B dies (ran into A): %s (dotA: %.2f, dotB: %.2f)", playerB.Name, dotA, dotB))
-					end
-					queuePlayerDeath(playerB)
-				elseif dotA > 2 and dotB > 2 then
-					-- Both moving toward each other - higher dot product loses
-					if dotA > dotB then
-						if DEBUG_COLLISIONS then
-							print(string.format("[HEAD-TO-HEAD] Player A dies (higher approach): %s (dotA: %.2f > dotB: %.2f)", playerA.Name, dotA, dotB))
-						end
-						queuePlayerDeath(playerA)
-					else
-						if DEBUG_COLLISIONS then
-							print(string.format("[HEAD-TO-HEAD] Player B dies (higher approach): %s (dotB: %.2f > dotA: %.2f)", playerB.Name, dotB, dotA))
-						end
-						queuePlayerDeath(playerB)
-					end
+				-- In slither.io, if your head touches ANY part of another snake, you die
+				-- So in head-to-head collision, BOTH die because each head touches the other
+				if DEBUG_COLLISIONS then
+					print(string.format("[HEAD-TO-HEAD] Both players die - %s and %s (dist: %.2f)", playerA.Name, playerB.Name, dist))
 				end
+				
+				-- Queue both deaths
+				queuePlayerDeath(playerA)
+				queuePlayerDeath(playerB)
 			end
 		end
 	end
