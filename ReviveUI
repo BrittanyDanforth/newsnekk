@@ -217,7 +217,28 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 	print("REVIVE PROMPT RECEIVED! Death length:", deathLength or 0)
 
 	-- Calculate revive length
-	local actualDeathLength = deathLength or player:GetAttribute("LastLength") or 0
+	-- Try multiple sources for death length
+	local actualDeathLength = deathLength or 0
+	
+	-- If no death length provided, check various attributes
+	if actualDeathLength == 0 then
+		-- Check player attributes
+		actualDeathLength = player:GetAttribute("LastLength") or 
+						   player:GetAttribute("DeathLength") or 
+						   player:GetAttribute("Length") or 0
+		
+		-- Check leaderstats as fallback
+		if actualDeathLength == 0 then
+			local leaderstats = player:FindFirstChild("leaderstats")
+			if leaderstats then
+				local lengthValue = leaderstats:FindFirstChild("Length")
+				if lengthValue then
+					actualDeathLength = lengthValue.Value or 0
+				end
+			end
+		end
+	end
+	
 	local reviveLength = math.floor(actualDeathLength * UI_CONFIG.REVIVE_PERCENTAGE)
 	
 	-- Update length displays

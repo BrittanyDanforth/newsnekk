@@ -1,0 +1,167 @@
+-- SnakeDeathHandler - Server-side death and revive handling
+-- Goes in ServerScriptService
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
+
+-- Create remotes
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotes then
+	remotes = Instance.new("Folder")
+	remotes.Name = "Remotes"
+	remotes.Parent = ReplicatedStorage
+end
+
+local promptReviveRemote = remotes:FindFirstChild("PromptRevive")
+if not promptReviveRemote then
+	promptReviveRemote = Instance.new("RemoteEvent")
+	promptReviveRemote.Name = "PromptRevive"
+	promptReviveRemote.Parent = remotes
+end
+
+-- Product configuration
+local REVIVE_PRODUCT_ID = 123456789 -- Replace with your actual product ID
+
+-- Track player deaths and lengths
+local playerDeathData = {}
+
+-- Handle player death
+local function onCharacterDeath(character)
+	local humanoid = character:FindFirstChild("Humanoid")
+	local player = Players:GetPlayerFromCharacter(character)
+	
+	if not humanoid or not player then return end
+	
+	humanoid.Died:Connect(function()
+		-- Get the player's current length from leaderstats or snake system
+		local currentLength = 0
+		
+		-- Check leaderstats first
+		local leaderstats = player:FindFirstChild("leaderstats")
+		if leaderstats then
+			local lengthValue = leaderstats:FindFirstChild("Length")
+			if lengthValue then
+				currentLength = lengthValue.Value or 0
+			end
+		end
+		
+		-- Store death data
+		playerDeathData[player] = {
+			deathLength = currentLength,
+			deathTime = tick()
+		}
+		
+		-- Set attributes for client to read
+		player:SetAttribute("LastLength", currentLength)
+		player:SetAttribute("DeathLength", currentLength)
+		
+		print("Player died with length:", currentLength)
+		
+		-- Wait a moment for death animation, then prompt revive
+		task.wait(0.5)
+		
+		-- Check if player has revives available
+		local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
+		
+		-- Always show revive prompt (they can buy if no revives)
+		promptReviveRemote:FireClient(player, currentLength)
+		
+		-- Set timer for auto-decline
+		task.wait(5)
+		
+		-- If no response after 5 seconds, set timer expired
+		if playerDeathData[player] and playerDeathData[player].deathTime then
+			player:SetAttribute("ReviveTimerExpired", true)
+		end
+	end)
+end
+
+-- Handle revive response
+promptReviveRemote.OnServerEvent:Connect(function(player, response)
+	print("Revive response from", player.Name, ":", response)
+	
+	local deathData = playerDeathData[player]
+	if not deathData then
+		warn("No death data for player")
+		return
+	end
+	
+	if response == "revive" then
+		-- Check if player has revives
+		local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
+		
+		if revivesAvailable > 0 then
+			-- Use a revive
+			player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+			player:SetAttribute("JustRevived", true)
+			player:SetAttribute("RevivingNow", true)
+			
+			-- Respawn at 80% length
+			local reviveLength = math.floor(deathData.deathLength * 0.8)
+			
+			-- Set the revive length for the snake system to read
+			player:SetAttribute("ReviveLength", reviveLength)
+			
+			-- Respawn the player
+			player:LoadCharacter()
+			
+			-- Clean up
+			task.wait(0.1)
+			player:SetAttribute("JustRevived", false)
+			player:SetAttribute("RevivingNow", false)
+			
+			print("Player revived at length:", reviveLength)
+		else
+			warn("Player has no revives available")
+			player:SetAttribute("ReviveDeclined", true)
+		end
+	else
+		-- Player declined revive
+		player:SetAttribute("ReviveDeclined", true)
+	end
+	
+	-- Clean up death data
+	playerDeathData[player] = nil
+end)
+
+-- Handle Robux purchase
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not player then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	
+	if receiptInfo.ProductId == REVIVE_PRODUCT_ID then
+		-- Grant a revive
+		local currentRevives = player:GetAttribute("RevivesAvailable") or 0
+		player:SetAttribute("RevivesAvailable", currentRevives + 1)
+		
+		print("Granted revive to", player.Name, "- Total revives:", currentRevives + 1)
+		
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+	
+	return Enum.ProductPurchaseDecision.NotProcessedYet
+end
+
+-- Handle player joining
+Players.PlayerAdded:Connect(function(player)
+	-- Initialize revive attributes
+	player:SetAttribute("RevivesAvailable", 0)
+	player:SetAttribute("HasRevive", false)
+	player:SetAttribute("JustRevived", false)
+	player:SetAttribute("RevivingNow", false)
+	player:SetAttribute("ReviveDeclined", false)
+	player:SetAttribute("ReviveTimerExpired", false)
+	
+	-- Set up character death handler
+	player.CharacterAdded:Connect(onCharacterDeath)
+end)
+
+-- Clean up on player leaving
+Players.PlayerRemoving:Connect(function(player)
+	playerDeathData[player] = nil
+end)
+
+print("Snake Death Handler loaded!")
