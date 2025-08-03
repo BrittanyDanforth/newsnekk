@@ -1730,12 +1730,41 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 						activeDeathHandler = nil
 					end
 
-					-- Simple death handler - just wait and show menu
+					-- Simple death handler - wait for revive decision
 					activeDeathHandler = task.spawn(function()
-						-- Wait a bit for revive system
-						task.wait(1.5)
+						local hasRevive = LocalPlayer:GetAttribute("HasRevive")
+						local revivesAvailable = LocalPlayer:GetAttribute("RevivesAvailable") or 0
 						
-						-- Check if still dead AND not reviving
+						-- If player has revive, wait longer for their decision
+						if hasRevive and revivesAvailable > 0 then
+							-- Wait up to 5 seconds for revive decision
+							local waitTime = 0
+							while waitTime < 5 do
+								task.wait(0.1)
+								waitTime = waitTime + 0.1
+								
+								-- Check if reviving
+								if LocalPlayer:GetAttribute("JustRevived") or LocalPlayer:GetAttribute("RevivingNow") then
+									-- Player is reviving, don't show menu
+									isProcessingDeath = false
+									activeDeathHandler = nil
+									return
+								end
+								
+								-- Check if revive was declined or timer expired
+								if LocalPlayer:GetAttribute("ReviveDeclined") or LocalPlayer:GetAttribute("ReviveTimerExpired") then
+									-- Clear the attributes
+									LocalPlayer:SetAttribute("ReviveDeclined", false)
+									LocalPlayer:SetAttribute("ReviveTimerExpired", false)
+									break -- Show menu now
+								end
+							end
+						else
+							-- No revive available, just wait a bit
+							task.wait(1)
+						end
+						
+						-- Final check - if still dead and not reviving
 						if humanoid.Health <= 0 and not LocalPlayer:GetAttribute("JustRevived") and not LocalPlayer:GetAttribute("RevivingNow") then
 							-- Double check we're still in the same character
 							if LocalPlayer.Character == character then
