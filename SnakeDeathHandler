@@ -1,0 +1,199 @@
+-- SnakeDeathHandler - FIXED VERSION
+-- NO FREE REVIVES - ONLY WHAT YOU BUY!
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
+local DataStoreService = game:GetService("DataStoreService")
+
+-- DataStore for saving revives
+local reviveDataStore = DataStoreService:GetDataStore("PlayerRevivesV2")
+
+-- Product ID
+local REVIVE_PRODUCT_ID = 3356734577
+
+-- Create RemoteEvents
+local remotes = ReplicatedStorage:FindFirstChild("Remotes") or Instance.new("Folder", ReplicatedStorage)
+remotes.Name = "Remotes"
+
+local promptReviveRemote = remotes:FindFirstChild("PromptRevive") or Instance.new("RemoteEvent", remotes)
+promptReviveRemote.Name = "PromptRevive"
+
+-- Track deaths
+local playerDeathData = {}
+
+-- LOAD REVIVES (0 by default)
+local function loadPlayerRevives(player)
+	local success, revives = pcall(function()
+		return reviveDataStore:GetAsync("Player_" .. player.UserId)
+	end)
+	
+	if success and revives then
+		player:SetAttribute("RevivesAvailable", revives)
+		print("Loaded", revives, "revives for", player.Name)
+	else
+		-- NEW PLAYERS START WITH 0
+		player:SetAttribute("RevivesAvailable", 0)
+		print("New player or load failed -", player.Name, "starts with 0 revives")
+	end
+end
+
+-- SAVE REVIVES
+local function savePlayerRevives(player)
+	local revives = player:GetAttribute("RevivesAvailable") or 0
+	
+	pcall(function()
+		reviveDataStore:SetAsync("Player_" .. player.UserId, revives)
+		print("Saved", revives, "revives for", player.Name)
+	end)
+end
+
+-- HANDLE DEATH
+local function onCharacterDied(character)
+	local humanoid = character:FindFirstChild("Humanoid")
+	local player = Players:GetPlayerFromCharacter(character)
+	
+	if not humanoid or not player then return end
+	
+	humanoid.Died:Connect(function()
+		-- Get length from leaderstats
+		local length = 0
+		local leaderstats = player:FindFirstChild("leaderstats")
+		if leaderstats then
+			local lengthValue = leaderstats:FindFirstChild("Length")
+			if lengthValue then
+				length = lengthValue.Value
+			end
+		end
+		
+		-- Store death info
+		playerDeathData[player] = {
+			deathLength = length,
+			deathTime = tick()
+		}
+		
+		-- Set for client
+		player:SetAttribute("DeathLength", length)
+		
+		print(player.Name, "died with length:", length)
+		print(player.Name, "has", player:GetAttribute("RevivesAvailable"), "revives")
+		
+		-- Wait then show UI
+		task.wait(0.5)
+		promptReviveRemote:FireClient(player, length)
+	end)
+end
+
+-- HANDLE REVIVE BUTTON
+promptReviveRemote.OnServerEvent:Connect(function(player, response)
+	local deathData = playerDeathData[player]
+	if not deathData then return end
+	
+	if response == "revive" then
+		local revives = player:GetAttribute("RevivesAvailable") or 0
+		
+		if revives > 0 then
+			-- USE A REVIVE
+			player:SetAttribute("RevivesAvailable", revives - 1)
+			savePlayerRevives(player)
+			
+			-- Respawn at 80%
+			local reviveLength = math.floor(deathData.deathLength * 0.8)
+			player:SetAttribute("ReviveLength", reviveLength)
+			
+			-- Tell other systems we're reviving
+			player:SetAttribute("JustRevived", true)
+			player:SetAttribute("RevivingNow", true)
+			
+			print(player.Name, "used revive - Length:", reviveLength, "- Revives left:", revives - 1)
+			
+			-- Clean up after a bit
+			task.wait(0.5)
+			player:SetAttribute("JustRevived", false)
+			player:SetAttribute("RevivingNow", false)
+		else
+			print(player.Name, "tried to revive with 0 revives!")
+		end
+	end
+	
+	playerDeathData[player] = nil
+end)
+
+-- HANDLE PURCHASES
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+	if not player then
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
+	
+	if receiptInfo.ProductId == REVIVE_PRODUCT_ID then
+		-- ADD 1 REVIVE
+		local current = player:GetAttribute("RevivesAvailable") or 0
+		player:SetAttribute("RevivesAvailable", current + 1)
+		savePlayerRevives(player)
+		
+		print("PURCHASED! Gave 1 revive to", player.Name, "- Total:", current + 1)
+		
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+	
+	return Enum.ProductPurchaseDecision.NotProcessedYet
+end
+
+-- PLAYER JOIN
+Players.PlayerAdded:Connect(function(player)
+	-- OVERRIDE ANY GAMEPASS BULLSHIT
+	player:SetAttribute("HasRevive", false)
+	player:SetAttribute("RevivesAvailable", 0) -- Set to 0 first
+	
+	-- Then load saved revives
+	loadPlayerRevives(player)
+	
+	-- Watch for gamepass interference
+	player:GetAttributeChangedSignal("RevivesAvailable"):Connect(function()
+		local revives = player:GetAttribute("RevivesAvailable")
+		local expectedRevives = playerDeathData[player.UserId] or revives
+		
+		-- If something else gave free revives, fix it
+		if revives > expectedRevives and revives == 2 then
+			print("BLOCKED! GamepassHandler tried to give free revives to", player.Name)
+			-- Don't override if they actually have saved revives
+			if not playerDeathData[player.UserId] then
+				playerDeathData[player.UserId] = revives -- Store expected value
+			end
+		end
+	end)
+	
+	player.CharacterAdded:Connect(function(character)
+		-- BLOCK GAMEPASS REVIVES
+		task.wait(0.1) -- Wait for gamepass to apply
+		local currentRevives = player:GetAttribute("RevivesAvailable") or 0
+		
+		-- If gamepass gave 2 free revives and we haven't loaded yet
+		if currentRevives == 2 and not playerDeathData[player.UserId .. "_loaded"] then
+			print("FIXING: GamepassHandler gave 2 free revives, loading real data...")
+			loadPlayerRevives(player)
+			playerDeathData[player.UserId .. "_loaded"] = true
+		end
+		
+		onCharacterDied(character)
+	end)
+end)
+
+-- SAVE ON LEAVE
+Players.PlayerRemoving:Connect(function(player)
+	savePlayerRevives(player)
+	playerDeathData[player] = nil
+end)
+
+-- AUTO-SAVE
+task.spawn(function()
+	while true do
+		task.wait(60)
+		for _, player in ipairs(Players:GetPlayers()) do
+			savePlayerRevives(player)
+		end
+	end
+end)
+
+print("Snake Death Handler V2 loaded - NO FREE REVIVES!")

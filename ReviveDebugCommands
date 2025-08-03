@@ -1,0 +1,78 @@
+-- ReviveDebugCommands - Debug commands for testing revive system
+-- Put in ServerScriptService
+
+local Players = game:GetService("Players")
+
+-- Chat commands for testing
+Players.PlayerAdded:Connect(function(player)
+	player.Chatted:Connect(function(message)
+		local msg = message:lower()
+		
+		-- Reset revives command
+		if msg == "/resetrevives" then
+			player:SetAttribute("RevivesAvailable", 0)
+			player:SetAttribute("HasRevive", false)
+			print("Reset revives to 0 for", player.Name)
+			
+			-- Send feedback to player
+			local character = player.Character
+			if character then
+				local head = character:FindFirstChild("Head")
+				if head then
+					local billboard = Instance.new("BillboardGui")
+					billboard.Size = UDim2.new(0, 200, 0, 50)
+					billboard.StudsOffset = Vector3.new(0, 3, 0)
+					billboard.Parent = head
+					
+					local label = Instance.new("TextLabel")
+					label.Size = UDim2.new(1, 0, 1, 0)
+					label.BackgroundTransparency = 1
+					label.Text = "Revives reset to 0"
+					label.TextScaled = true
+					label.TextColor3 = Color3.new(1, 1, 1)
+					label.TextStrokeTransparency = 0
+					label.Parent = billboard
+					
+					game:GetService("Debris"):AddItem(billboard, 2)
+				end
+			end
+		end
+		
+		-- Give revive command
+		if msg == "/giverevive" then
+			local current = player:GetAttribute("RevivesAvailable") or 0
+			player:SetAttribute("RevivesAvailable", current + 1)
+			print("Gave 1 revive to", player.Name, "- Total:", current + 1)
+		end
+		
+		-- Check revives command
+		if msg == "/checkrevives" then
+			local revives = player:GetAttribute("RevivesAvailable") or 0
+			print(player.Name, "has", revives, "revives")
+			
+			-- Show all attributes
+			print("All attributes for", player.Name .. ":")
+			for name, value in pairs(player:GetAttributes()) do
+				print("  -", name, "=", value)
+			end
+		end
+		
+		-- Kill command for testing
+		if msg == "/kill" then
+			local character = player.Character
+			if character then
+				local humanoid = character:FindFirstChild("Humanoid")
+				if humanoid then
+					humanoid.Health = 0
+				end
+			end
+		end
+	end)
+end)
+
+print("Revive Debug Commands loaded!")
+print("Commands:")
+print("  /resetrevives - Reset revives to 0")
+print("  /giverevive - Give yourself 1 revive")
+print("  /checkrevives - Check your revive count")
+print("  /kill - Kill yourself for testing")

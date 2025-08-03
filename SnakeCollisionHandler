@@ -1014,21 +1014,22 @@ task.spawn(function()
 
 						print("🔍 Death check - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
 
-						if hasRevive and revivesAvailable > 0 then
-							print("✅ Player has revive! Sending prompt to", player.Name)
+						-- ALWAYS show revive UI (so players can buy revives with Robux)
+						print("📱 Showing revive UI for", player.Name)
 
-							-- Get revive prompt from remotes folder
-							local reviveRemote = remotes:FindFirstChild("PromptRevive")
-							if not reviveRemote then
-								print("❌ PromptRevive remote not found in Remotes folder!")
-								-- Continue with normal death
-							else
-								-- Fire revive prompt to client
-								reviveRemote:FireClient(player)
-								print("🚀 Revive prompt sent to client!")
+						-- Get revive prompt from remotes folder
+						local reviveRemote = remotes:FindFirstChild("PromptRevive")
+						if not reviveRemote then
+							print("❌ PromptRevive remote not found in Remotes folder!")
+							-- Continue with normal death
+						else
+							-- Fire revive prompt to client (ALWAYS, not just when they have revives)
+							reviveRemote:FireClient(player)
+							print("🚀 Revive prompt sent to client!")
 
-								-- Wait for response (5 seconds max)
+								-- Wait for response (30 seconds max to allow for Robux purchase)
 								local revived = false
+								local declined = false
 								local reviveConnection
 								reviveConnection = reviveRemote.OnServerEvent:Connect(function(plr, response)
 									if plr == player and response == "revive" then
@@ -1036,14 +1037,41 @@ task.spawn(function()
 										reviveConnection:Disconnect()
 										print("✅ Player chose to revive!")
 									elseif plr == player and response == "decline" then
+										declined = true
 										reviveConnection:Disconnect()
 										print("❌ Player declined revive")
+									elseif plr == player and response == "purchasing" then
+										print("💰 Player is purchasing revive...")
 									end
 								end)
 
-								task.wait(5) -- Give player 5 seconds to decide
+								-- Wait up to 30 seconds for response (allows time for Robux purchase)
+								local waitTime = 0
+								local lastLog = 0
+								while waitTime < 30 and not revived and not declined do
+									task.wait(0.1)
+									waitTime = waitTime + 0.1
+									
+									-- Log every 5 seconds
+									if math.floor(waitTime) > lastLog and math.floor(waitTime) % 5 == 0 then
+										lastLog = math.floor(waitTime)
+										print("⏰ Waiting for revive response from", player.Name, "- Time:", lastLog, "/ 30 seconds")
+									end
+									
+									-- Check if player disconnected
+									if not player.Parent then
+										print("⚠️ Player disconnected while waiting for revive response")
+										break
+									end
+								end
+								
 								if reviveConnection then
 									reviveConnection:Disconnect()
+								end
+								
+								-- Log timeout
+								if not revived and not declined then
+									print("⏱️ Revive timer expired for", player.Name, "after 30 seconds")
 								end
 
 								if revived then
@@ -1052,8 +1080,10 @@ task.spawn(function()
 									-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
 									isProcessingDeaths = false
 
-									-- Revive the player
-									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+									-- Only deduct if they had revives (not if they bought with Robux)
+									if revivesAvailable > 0 then
+										player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+									end
 
 									-- Store current position and snake length
 									local deathPosition = rootPart and rootPart.Position or Vector3.new(0, 10, 0)
@@ -1088,9 +1118,14 @@ task.spawn(function()
 									player:SetAttribute("RevivePosition", tostring(deathPosition))
 									player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
 									player:SetAttribute("JustRevived", true)
+									player:SetAttribute("RevivingNow", true) -- IMPORTANT: This prevents menu from showing
 
 									-- Simple invincibility
 									invinciblePlayers[player] = os.clock() + 5
+
+									-- Clear dead state immediately
+									deadPlayers[player] = nil
+									processingRevive[player] = nil
 
 									-- Just respawn like clicking Play button
 									player:LoadCharacter()
@@ -1102,6 +1137,10 @@ task.spawn(function()
 
 										-- Force cache refresh after snake is created
 										resetPlayerCollisionState(player)
+										
+										-- Clear revive flags after snake is created
+										player:SetAttribute("RevivingNow", false)
+										player:SetAttribute("JustRevived", false)
 
 										-- Continue invincibility for remaining time
 										task.wait(3)
@@ -1115,7 +1154,6 @@ task.spawn(function()
 									return -- Don't proceed with normal death
 								end
 							end
-						end
 
 						-- ONLY mark as dead if NOT reviving
 						deadPlayers[player] = true

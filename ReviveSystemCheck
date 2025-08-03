@@ -1,0 +1,175 @@
+-- ReviveSystemCheck - Verification script for revive system installation
+-- Run this in the command bar or as a script to verify installation
+
+local function checkReviveSystem()
+	print("\n========================================")
+	print("SLITHER.IO REVIVE SYSTEM INSTALLATION CHECK")
+	print("========================================\n")
+	
+	local issues = 0
+	local warnings = 0
+	
+	-- Check for required services
+	print("Checking Services...")
+	local services = {
+		ReplicatedStorage = game:GetService("ReplicatedStorage"),
+		ServerScriptService = game:GetService("ServerScriptService"),
+		StarterPlayer = game:GetService("StarterPlayer"),
+		DataStoreService = game:GetService("DataStoreService"),
+		MarketplaceService = game:GetService("MarketplaceService")
+	}
+	
+	for name, service in pairs(services) do
+		if service then
+			print("  ✓", name, "accessible")
+		else
+			print("  ✗", name, "NOT accessible")
+			issues = issues + 1
+		end
+	end
+	
+	print("\nChecking RemoteEvents...")
+	
+	-- Check Remotes folder
+	local remotes = services.ReplicatedStorage:FindFirstChild("Remotes")
+	if remotes then
+		print("  ✓ Remotes folder exists")
+		
+		-- Check PromptRevive
+		if remotes:FindFirstChild("PromptRevive") then
+			print("  ✓ PromptRevive RemoteEvent exists")
+		else
+			print("  ✗ PromptRevive RemoteEvent MISSING")
+			print("    → Will be created automatically when SnakeDeathHandler runs")
+			warnings = warnings + 1
+		end
+	else
+		print("  ✗ Remotes folder MISSING")
+		print("    → Will be created automatically when SnakeDeathHandler runs")
+		warnings = warnings + 1
+	end
+	
+	print("\nChecking Server Scripts...")
+	
+	-- Check SnakeDeathHandler
+	if services.ServerScriptService:FindFirstChild("SnakeDeathHandler") then
+		print("  ✓ SnakeDeathHandler installed in ServerScriptService")
+	else
+		print("  ✗ SnakeDeathHandler MISSING from ServerScriptService")
+		print("    → Install SnakeDeathHandler in ServerScriptService")
+		issues = issues + 1
+	end
+	
+	print("\nChecking Client Scripts...")
+	
+	-- Check StarterPlayerScripts
+	local starterScripts = services.StarterPlayer:FindFirstChild("StarterPlayerScripts")
+	if starterScripts then
+		-- Check ReviveUI
+		if starterScripts:FindFirstChild("ReviveUI") then
+			print("  ✓ ReviveUI installed in StarterPlayerScripts")
+		else
+			print("  ✗ ReviveUI MISSING from StarterPlayerScripts")
+			print("    → Install ReviveUI in StarterPlayer > StarterPlayerScripts")
+			issues = issues + 1
+		end
+		
+		-- Check SlitherIOMenu
+		if starterScripts:FindFirstChild("SlitherIOMenu") then
+			print("  ✓ SlitherIOMenu found in StarterPlayerScripts")
+		else
+			print("  ⚠ SlitherIOMenu not found")
+			print("    → This handles the main menu after death")
+			warnings = warnings + 1
+		end
+	else
+		print("  ✗ StarterPlayerScripts folder MISSING")
+		issues = issues + 1
+	end
+	
+	print("\nChecking DataStore Access...")
+	
+	-- Test DataStore access
+	local datastoreSuccess = false
+	local datastoreError = nil
+	
+	pcall(function()
+		local testStore = services.DataStoreService:GetDataStore("ReviveSystemTest")
+		testStore:GetAsync("test")
+		datastoreSuccess = true
+	end)
+	
+	if datastoreSuccess then
+		print("  ✓ DataStore access ENABLED")
+		print("    → Revives will save properly")
+	else
+		print("  ⚠ DataStore access DISABLED")
+		print("    → Game Settings > Security > Enable Studio Access to API Services")
+		print("    → Publish game to test DataStore in live environment")
+		warnings = warnings + 1
+	end
+	
+	print("\nChecking Product Configuration...")
+	
+	-- Check if scripts have valid product IDs
+	local hasValidProductId = false
+	local productId = nil
+	
+	-- Try to read product ID from scripts
+	local deathHandler = services.ServerScriptService:FindFirstChild("SnakeDeathHandler")
+	if deathHandler and deathHandler:IsA("Script") then
+		local source = deathHandler.Source
+		local idMatch = source:match("REVIVE_PRODUCT_ID%s*=%s*(%d+)")
+		if idMatch then
+			productId = tonumber(idMatch)
+			if productId and productId > 1000000 then
+				hasValidProductId = true
+			end
+		end
+	end
+	
+	if hasValidProductId then
+		print("  ✓ Product ID configured:", productId)
+		print("    → Make sure this matches your Roblox Developer Product")
+	else
+		print("  ⚠ Product ID needs configuration")
+		print("    → Update REVIVE_PRODUCT_ID in both scripts")
+		print("    → Current ID might be the placeholder")
+		warnings = warnings + 1
+	end
+	
+	print("\nChecking Game Structure...")
+	
+	-- Check for leaderstats setup
+	print("  ℹ Your game needs to create:")
+	print("    → player.leaderstats.Length (IntValue)")
+	print("    → This tracks the snake's current length")
+	
+	print("\n========================================")
+	print("SUMMARY:")
+	print("========================================")
+	
+	if issues == 0 and warnings == 0 then
+		print("✓ ALL CHECKS PASSED! Revive system is properly installed.")
+		print("\nNext steps:")
+		print("1. Configure your Product ID in both scripts")
+		print("2. Ensure your snake system updates leaderstats.Length")
+		print("3. Test in a published place for DataStore functionality")
+	elseif issues == 0 then
+		print("✓ Core installation complete with", warnings, "warnings")
+		print("\n⚠ Address the warnings above for full functionality")
+	else
+		print("✗", issues, "CRITICAL ISSUES found")
+		print("⚠", warnings, "warnings found")
+		print("\n❌ Fix the critical issues before the system will work")
+	end
+	
+	print("\n========================================\n")
+end
+
+-- Run the check
+checkReviveSystem()
+
+return {
+	check = checkReviveSystem
+}
