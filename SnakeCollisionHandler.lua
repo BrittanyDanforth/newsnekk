@@ -810,6 +810,110 @@ task.spawn(function()
 							end
 						end
 						
+						-- SPAWN DEATH ORBS IMMEDIATELY (before revive check)
+						if segmentPositions and #segmentPositions > 0 then
+							print("💎 Spawning death orbs for", player.Name, "with", #segmentPositions, "segment positions")
+							
+							local totalSegments = #segmentPositions
+							local orbsPerSegment = 1 / 2.5
+							local totalOrbs = math.clamp(math.floor(snakeLength * orbsPerSegment), 3, 40)
+							
+							-- Calculate orb value
+							local baseValue = 1
+							if snakeLength <= 50 then
+								local totalValue = math.floor(snakeLength * 0.6)
+								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+							elseif snakeLength <= 200 then
+								local totalValue = math.floor(snakeLength * 0.45)
+								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+							elseif snakeLength <= 500 then
+								local totalValue = math.floor(snakeLength * 0.35)
+								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+							else
+								local totalValue = math.min(math.floor(snakeLength * 0.25), 200)
+								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+							end
+							
+							local spawnedOrbs = 0
+							local skipInterval = math.max(1, math.floor(totalSegments / totalOrbs))
+							
+							print(string.format("[ORB SPAWN] Player %s - Length: %d, TotalOrbs: %d, Value: %d, Skip: %d",
+								player.Name, snakeLength, totalOrbs, baseValue, skipInterval))
+							
+							-- Spawn orbs with delay
+							task.spawn(function()
+								task.wait(0.5) -- Wait for death animation
+								
+								local startSegment = math.min(5, totalSegments)
+								for i = startSegment, totalSegments, skipInterval do
+									if spawnedOrbs >= totalOrbs then break end
+									
+									local pos = segmentPositions[i]
+									if pos then
+										local offset = Vector3.new(
+											(math.random() - 0.5) * 6,
+											0,
+											(math.random() - 0.5) * 6
+										)
+										
+										-- Extra spread for head segments
+										if i <= 10 then
+											local angle = math.random() * math.pi * 2
+											local distance = 15
+											offset = offset + Vector3.new(
+												math.cos(angle) * distance,
+												0,
+												math.sin(angle) * distance
+											)
+										end
+										
+										spawnDeathOrb(pos + offset, baseValue)
+										spawnedOrbs = spawnedOrbs + 1
+										
+										if spawnedOrbs % 5 == 0 then
+											task.wait(0.03) -- Small delay between batches
+										end
+									end
+								end
+								
+								-- Ensure minimum orbs spawn
+								if spawnedOrbs < 3 and #segmentPositions >= 5 then
+									local basePos = segmentPositions[5] or segmentPositions[1]
+									if basePos then
+										for j = 1, 3 - spawnedOrbs do
+											local angle = (j - 1) * 120 * math.pi / 180
+											local distance = 20
+											local offset = Vector3.new(
+												math.cos(angle) * distance,
+												0,
+												math.sin(angle) * distance
+											)
+											spawnDeathOrb(basePos + offset, baseValue)
+										end
+									end
+								end
+								
+								print(string.format("✅ [ORB SPAWN] Spawned %d death orbs for %s", spawnedOrbs, player.Name))
+							end)
+						else
+							-- Fallback: spawn orbs at death position
+							warn(string.format("⚠️ No segment positions for %s, spawning orbs at death position", player.Name))
+							local rootPart = character:FindFirstChild("HumanoidRootPart")
+							if rootPart then
+								local orbCount = math.min(math.floor(snakeLength / 10), 20)
+								for i = 1, orbCount do
+									local angle = (i - 1) * (360 / orbCount) * math.pi / 180
+									local distance = 10
+									local offset = Vector3.new(
+										math.cos(angle) * distance,
+										0,
+										math.sin(angle) * distance
+									)
+									spawnDeathOrb(rootPart.Position + offset, 1)
+								end
+							end
+						end
+						
 						-- Check for revive
 						local hasRevive = player:GetAttribute("HasRevive")
 						local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
@@ -936,109 +1040,7 @@ task.spawn(function()
 									visualSnakeModel:Destroy()
 								end
 
-								-- Orb spawning is now ONLY in the normal death path
-								if segmentPositions and #segmentPositions > 0 then
-									print("💎 Spawning death orbs for", player.Name, "with", #segmentPositions, "segment positions")
-									
-									local totalSegments = #segmentPositions
-									local orbsPerSegment = 1 / 2.5
-									local totalOrbs = math.clamp(math.floor(snakeLength * orbsPerSegment), 3, 40)
-									
-									-- Calculate orb value
-									local baseValue = 1
-									if snakeLength <= 50 then
-								local totalValue = math.floor(snakeLength * 0.6)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							elseif snakeLength <= 200 then
-								local totalValue = math.floor(snakeLength * 0.45)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							elseif snakeLength <= 500 then
-								local totalValue = math.floor(snakeLength * 0.35)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							else
-								local totalValue = math.min(math.floor(snakeLength * 0.25), 200)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							end
-							
-							local spawnedOrbs = 0
-							local skipInterval = math.max(1, math.floor(totalSegments / totalOrbs))
-							
-							print(string.format("[ORB SPAWN] Player %s - Length: %d, TotalOrbs: %d, Value: %d, Skip: %d",
-								player.Name, snakeLength, totalOrbs, baseValue, skipInterval))
-							
-							-- Spawn orbs with delay
-							task.spawn(function()
-								task.wait(0.5) -- Wait for death animation
-								
-								local startSegment = math.min(5, totalSegments)
-								for i = startSegment, totalSegments, skipInterval do
-									if spawnedOrbs >= totalOrbs then break end
-									
-									local pos = segmentPositions[i]
-									if pos then
-										local offset = Vector3.new(
-											(math.random() - 0.5) * 6,
-											0,
-											(math.random() - 0.5) * 6
-										)
-										
-										-- Extra spread for head segments
-										if i <= 10 then
-											local angle = math.random() * math.pi * 2
-											local distance = 15
-											offset = offset + Vector3.new(
-												math.cos(angle) * distance,
-												0,
-												math.sin(angle) * distance
-											)
-										end
-										
-										spawnDeathOrb(pos + offset, baseValue)
-										spawnedOrbs = spawnedOrbs + 1
-										
-										if spawnedOrbs % 5 == 0 then
-											task.wait(0.03) -- Small delay between batches
-										end
-									end
-								end
-								
-								-- Ensure minimum orbs spawn
-								if spawnedOrbs < 3 and #segmentPositions >= 5 then
-									local basePos = segmentPositions[5] or segmentPositions[1]
-									if basePos then
-										for j = 1, 3 - spawnedOrbs do
-											local angle = (j - 1) * 120 * math.pi / 180
-											local distance = 20
-											local offset = Vector3.new(
-												math.cos(angle) * distance,
-												0,
-												math.sin(angle) * distance
-											)
-											spawnDeathOrb(basePos + offset, baseValue)
-										end
-									end
-								end
-								
-								print(string.format("✅ [ORB SPAWN] Spawned %d death orbs for %s", spawnedOrbs, player.Name))
-							end)
-						else
-							-- Fallback: spawn orbs at death position
-							warn(string.format("⚠️ No segment positions for %s, spawning orbs at death position", player.Name))
-							local rootPart = character:FindFirstChild("HumanoidRootPart")
-							if rootPart then
-								local orbCount = math.min(math.floor(snakeLength / 10), 20)
-								for i = 1, orbCount do
-									local angle = (i - 1) * (360 / orbCount) * math.pi / 180
-									local distance = 10
-									local offset = Vector3.new(
-										math.cos(angle) * distance,
-										0,
-										math.sin(angle) * distance
-									)
-									spawnDeathOrb(rootPart.Position + offset, 1)
-								end
-							end
-						end
+
 						
 								-- ONLY mark as dead if NOT reviving
 								deadPlayers[player] = true
