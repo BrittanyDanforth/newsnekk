@@ -1,0 +1,27 @@
+-- GamepassHandlerFix - Put this in ServerScriptService
+-- This DISABLES the revive gamepass from giving free revives
+
+local Players = game:GetService("Players")
+
+-- Find and fix the gamepass issue
+Players.PlayerAdded:Connect(function(player)
+	-- Wait for gamepass to load
+	task.wait(1)
+	
+	-- Override the revive gamepass
+	player:SetAttribute("HasRevive", false)
+	
+	-- Monitor for changes
+	player.CharacterAdded:Connect(function()
+		task.wait(0.5) -- Wait for gamepass handler
+		
+		-- If gamepass gave free revives, we don't touch it anymore
+		-- The SnakeDeathHandler will handle loading the real saved value
+		local revives = player:GetAttribute("RevivesAvailable")
+		if revives == 2 then
+			print("GamepassHandler tried to give 2 free revives - SnakeDeathHandler will fix this")
+		end
+	end)
+end)
+
+print("GamepassHandlerFix loaded - Revive gamepass disabled")

@@ -1,169 +1,125 @@
--- SnakeDeathHandler - Server-side death and revive handling
--- PROPERLY HANDLES PERSISTENT REVIVES - NO BULLSHIT RESETS
+-- SnakeDeathHandler - FIXED VERSION
+-- NO FREE REVIVES - ONLY WHAT YOU BUY!
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MarketplaceService = game:GetService("MarketplaceService")
 local DataStoreService = game:GetService("DataStoreService")
 
--- DataStore for persistent revives
-local reviveDataStore = DataStoreService:GetDataStore("PlayerRevives")
+-- DataStore for saving revives
+local reviveDataStore = DataStoreService:GetDataStore("PlayerRevivesV2")
 
--- Create remotes
-local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-if not remotes then
-	remotes = Instance.new("Folder")
-	remotes.Name = "Remotes"
-	remotes.Parent = ReplicatedStorage
-end
+-- Product ID
+local REVIVE_PRODUCT_ID = 3356734577
 
-local promptReviveRemote = remotes:FindFirstChild("PromptRevive")
-if not promptReviveRemote then
-	promptReviveRemote = Instance.new("RemoteEvent")
-	promptReviveRemote.Name = "PromptRevive"
-	promptReviveRemote.Parent = remotes
-end
+-- Create RemoteEvents
+local remotes = ReplicatedStorage:FindFirstChild("Remotes") or Instance.new("Folder", ReplicatedStorage)
+remotes.Name = "Remotes"
 
--- Product configuration
-local REVIVE_PRODUCT_ID = 3356734577 -- Your actual product ID
+local promptReviveRemote = remotes:FindFirstChild("PromptRevive") or Instance.new("RemoteEvent", remotes)
+promptReviveRemote.Name = "PromptRevive"
 
--- Track player deaths and lengths
+-- Track deaths
 local playerDeathData = {}
 
--- Load player revives from DataStore
+-- LOAD REVIVES (0 by default)
 local function loadPlayerRevives(player)
-	local success, result = pcall(function()
-		return reviveDataStore:GetAsync("Player_" .. player.UserId) or 0
+	local success, revives = pcall(function()
+		return reviveDataStore:GetAsync("Player_" .. player.UserId)
 	end)
 	
-	if success then
-		player:SetAttribute("RevivesAvailable", result)
-		print("Loaded", result, "revives for", player.Name)
+	if success and revives then
+		player:SetAttribute("RevivesAvailable", revives)
+		print("Loaded", revives, "revives for", player.Name)
 	else
-		-- Default to 0 if load fails
+		-- NEW PLAYERS START WITH 0
 		player:SetAttribute("RevivesAvailable", 0)
-		warn("Failed to load revives for", player.Name)
+		print("New player or load failed -", player.Name, "starts with 0 revives")
 	end
 end
 
--- Save player revives to DataStore
+-- SAVE REVIVES
 local function savePlayerRevives(player)
 	local revives = player:GetAttribute("RevivesAvailable") or 0
 	
-	local success, result = pcall(function()
+	pcall(function()
 		reviveDataStore:SetAsync("Player_" .. player.UserId, revives)
-	end)
-	
-	if success then
 		print("Saved", revives, "revives for", player.Name)
-	else
-		warn("Failed to save revives for", player.Name)
-	end
+	end)
 end
 
--- Handle player death
-local function onCharacterDeath(character)
+-- HANDLE DEATH
+local function onCharacterDied(character)
 	local humanoid = character:FindFirstChild("Humanoid")
 	local player = Players:GetPlayerFromCharacter(character)
 	
 	if not humanoid or not player then return end
 	
 	humanoid.Died:Connect(function()
-		-- Get the player's current length from leaderstats
-		local currentLength = 0
-		
+		-- Get length from leaderstats
+		local length = 0
 		local leaderstats = player:FindFirstChild("leaderstats")
 		if leaderstats then
 			local lengthValue = leaderstats:FindFirstChild("Length")
 			if lengthValue then
-				currentLength = lengthValue.Value or 0
+				length = lengthValue.Value
 			end
 		end
 		
-		-- Store death data
+		-- Store death info
 		playerDeathData[player] = {
-			deathLength = currentLength,
+			deathLength = length,
 			deathTime = tick()
 		}
 		
-		-- Set attributes for client to read
-		player:SetAttribute("LastLength", currentLength)
-		player:SetAttribute("DeathLength", currentLength)
+		-- Set for client
+		player:SetAttribute("DeathLength", length)
 		
-		print("Player", player.Name, "died with length:", currentLength)
-		print("Player has", player:GetAttribute("RevivesAvailable"), "revives available")
+		print(player.Name, "died with length:", length)
+		print(player.Name, "has", player:GetAttribute("RevivesAvailable"), "revives")
 		
-		-- Wait a moment for death animation, then prompt revive
+		-- Wait then show UI
 		task.wait(0.5)
-		
-		-- Always show revive prompt (they can buy if no revives)
-		promptReviveRemote:FireClient(player, currentLength)
-		
-		-- Set timer for auto-decline
-		task.spawn(function()
-			task.wait(5)
-			-- If no response after 5 seconds, set timer expired
-			if playerDeathData[player] and playerDeathData[player].deathTime then
-				player:SetAttribute("ReviveTimerExpired", true)
-			end
-		end)
+		promptReviveRemote:FireClient(player, length)
 	end)
 end
 
--- Handle revive response
+-- HANDLE REVIVE BUTTON
 promptReviveRemote.OnServerEvent:Connect(function(player, response)
-	print("Revive response from", player.Name, ":", response)
-	
 	local deathData = playerDeathData[player]
-	if not deathData then
-		warn("No death data for player")
-		return
-	end
+	if not deathData then return end
 	
 	if response == "revive" then
-		-- Check if player has revives
-		local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
+		local revives = player:GetAttribute("RevivesAvailable") or 0
 		
-		print("REVIVE ATTEMPT - Player", player.Name, "has", revivesAvailable, "revives")
-		
-		if revivesAvailable > 0 then
-			-- Use a revive
-			player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+		if revives > 0 then
+			-- USE A REVIVE
+			player:SetAttribute("RevivesAvailable", revives - 1)
+			savePlayerRevives(player)
+			
+			-- Respawn at 80%
+			local reviveLength = math.floor(deathData.deathLength * 0.8)
+			player:SetAttribute("ReviveLength", reviveLength)
+			
+			-- Tell other systems we're reviving
 			player:SetAttribute("JustRevived", true)
 			player:SetAttribute("RevivingNow", true)
 			
-			-- Save the updated revive count
-			savePlayerRevives(player)
+			print(player.Name, "used revive - Length:", reviveLength, "- Revives left:", revives - 1)
 			
-			-- Respawn at 80% length
-			local reviveLength = math.floor(deathData.deathLength * 0.8)
-			
-			-- Set the revive length for the snake system to read
-			player:SetAttribute("ReviveLength", reviveLength)
-			
-			-- Respawn the player
-			player:LoadCharacter()
-			
-			-- Clean up
-			task.wait(0.1)
+			-- Clean up after a bit
+			task.wait(0.5)
 			player:SetAttribute("JustRevived", false)
 			player:SetAttribute("RevivingNow", false)
-			
-			print("Player revived at length:", reviveLength, "- Revives left:", revivesAvailable - 1)
 		else
-			-- NO REVIVES - Client should have triggered purchase
-			warn("Player tried to revive with 0 revives - client should handle purchase")
+			print(player.Name, "tried to revive with 0 revives!")
 		end
-	else
-		-- Player declined revive
-		player:SetAttribute("ReviveDeclined", true)
 	end
 	
-	-- Clean up death data
 	playerDeathData[player] = nil
 end)
 
--- Handle Robux purchase
+-- HANDLE PURCHASES
 MarketplaceService.ProcessReceipt = function(receiptInfo)
 	local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
 	if not player then
@@ -171,14 +127,12 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 	end
 	
 	if receiptInfo.ProductId == REVIVE_PRODUCT_ID then
-		-- Grant a revive
-		local currentRevives = player:GetAttribute("RevivesAvailable") or 0
-		player:SetAttribute("RevivesAvailable", currentRevives + 1)
-		
-		-- Save to DataStore
+		-- ADD 1 REVIVE
+		local current = player:GetAttribute("RevivesAvailable") or 0
+		player:SetAttribute("RevivesAvailable", current + 1)
 		savePlayerRevives(player)
 		
-		print("Granted revive to", player.Name, "- Total revives:", currentRevives + 1)
+		print("PURCHASED! Gave 1 revive to", player.Name, "- Total:", current + 1)
 		
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
@@ -186,53 +140,60 @@ MarketplaceService.ProcessReceipt = function(receiptInfo)
 	return Enum.ProductPurchaseDecision.NotProcessedYet
 end
 
--- Handle player joining
+-- PLAYER JOIN
 Players.PlayerAdded:Connect(function(player)
-	-- Load saved revives from DataStore
+	-- OVERRIDE ANY GAMEPASS BULLSHIT
+	player:SetAttribute("HasRevive", false)
+	player:SetAttribute("RevivesAvailable", 0) -- Set to 0 first
+	
+	-- Then load saved revives
 	loadPlayerRevives(player)
 	
-	-- Initialize other attributes (but NOT RevivesAvailable - that comes from DataStore)
-	player:SetAttribute("HasRevive", false)
-	player:SetAttribute("JustRevived", false)
-	player:SetAttribute("RevivingNow", false)
-	player:SetAttribute("ReviveDeclined", false)
-	player:SetAttribute("ReviveTimerExpired", false)
-	player:SetAttribute("LastLength", 0)
-	player:SetAttribute("DeathLength", 0)
+	-- Watch for gamepass interference
+	player:GetAttributeChangedSignal("RevivesAvailable"):Connect(function()
+		local revives = player:GetAttribute("RevivesAvailable")
+		local expectedRevives = playerDeathData[player.UserId] or revives
+		
+		-- If something else gave free revives, fix it
+		if revives > expectedRevives and revives == 2 then
+			print("BLOCKED! GamepassHandler tried to give free revives to", player.Name)
+			-- Don't override if they actually have saved revives
+			if not playerDeathData[player.UserId] then
+				playerDeathData[player.UserId] = revives -- Store expected value
+			end
+		end
+	end)
 	
-	-- Set up character death handler
-	player.CharacterAdded:Connect(onCharacterDeath)
+	player.CharacterAdded:Connect(function(character)
+		-- BLOCK GAMEPASS REVIVES
+		task.wait(0.1) -- Wait for gamepass to apply
+		local currentRevives = player:GetAttribute("RevivesAvailable") or 0
+		
+		-- If gamepass gave 2 free revives and we haven't loaded yet
+		if currentRevives == 2 and not playerDeathData[player.UserId .. "_loaded"] then
+			print("FIXING: GamepassHandler gave 2 free revives, loading real data...")
+			loadPlayerRevives(player)
+			playerDeathData[player.UserId .. "_loaded"] = true
+		end
+		
+		onCharacterDied(character)
+	end)
 end)
 
--- Handle players already in game (for studio testing)
-for _, player in ipairs(Players:GetPlayers()) do
-	-- Check if revives already loaded
-	if player:GetAttribute("RevivesAvailable") == nil then
-		loadPlayerRevives(player)
-	end
-	
-	if player.Character then
-		onCharacterDeath(player.Character)
-	end
-	
-	player.CharacterAdded:Connect(onCharacterDeath)
-end
-
--- Save on player leaving
+-- SAVE ON LEAVE
 Players.PlayerRemoving:Connect(function(player)
 	savePlayerRevives(player)
 	playerDeathData[player] = nil
 end)
 
--- Auto-save every 30 seconds
+-- AUTO-SAVE
 task.spawn(function()
 	while true do
-		task.wait(30)
+		task.wait(60)
 		for _, player in ipairs(Players:GetPlayers()) do
 			savePlayerRevives(player)
 		end
-		print("Auto-saved all player revives")
 	end
 end)
 
-print("Snake Death Handler loaded with persistent revive storage!")
+print("Snake Death Handler V2 loaded - NO FREE REVIVES!")
