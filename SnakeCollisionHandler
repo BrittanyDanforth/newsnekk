@@ -1093,16 +1093,13 @@ task.spawn(function()
 									-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
 									isProcessingDeaths = false
 
-									-- Revive the player
-									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
-
-									-- Store current position and snake length
-									local deathPosition = rootPart and rootPart.Position or Vector3.new(0, 10, 0)
-									if deathPosition.Y < 5 then
-										deathPosition = Vector3.new(deathPosition.X, 5, deathPosition.Z)
+									-- Only deduct if they had revives (not if they bought with Robux)
+									if revivesAvailable > 0 then
+										player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
 									end
 
-									local currentSnakeLength = 500
+									-- Store snake length for respawn
+									local currentSnakeLength = 55 -- Default starting length
 									local leaderstats = player:FindFirstChild("leaderstats")
 									if leaderstats then
 										local lengthValue = leaderstats:FindFirstChild("Length")
@@ -1111,60 +1108,58 @@ task.spawn(function()
 										end
 									end
 
-									print("📍 Revive at position:", deathPosition, "with length:", currentSnakeLength)
-
-									-- Clear dead state and reset collision state
-									resetPlayerCollisionState(player)
-
-									-- Clear from death queue if any pending
+									-- COMPLETE RESET - Make it EXACTLY like a fresh spawn
+									-- Clear ALL death-related states
+									deadPlayers[player] = nil
+									
+									-- Clear ALL attributes that might affect spawn
+									player:SetAttribute("Dead", false)
+									player:SetAttribute("JustRevived", false) -- NO special revive handling
+									player:SetAttribute("RevivePosition", nil) -- Don't use special position
+									player:SetAttribute("SpawnProtection", false)
+									player:SetAttribute("ReviveInvincible", false)
+									
+									-- Clear from death queue
 									for i = #deathQueue, 1, -1 do
 										if deathQueue[i].type == "player" and deathQueue[i].target == player then
 											table.remove(deathQueue, i)
 										end
 									end
 
-									print("🧹 Cleared collision caches for", player.Name)
-
-									-- Store revive data
-									player:SetAttribute("RevivePosition", tostring(deathPosition))
-									player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
-									player:SetAttribute("JustRevived", true)
-
-									-- Simple invincibility
-									invinciblePlayers[player] = os.clock() + 5
-
-									-- Just respawn like clicking Play button
-									player:LoadCharacter()
-
-																	-- CRITICAL: Wait for new snake to be created before clearing invincibility AND CLEAN UP THE ORB
-								task.spawn(function()
-									-- Give a very brief moment for the effect to be parented by other scripts
-									task.wait(0.2)
-
-									-- *** STRAY ORB FIX: Actively clean up the unwanted effect ***
-									if player and player.Character then
-										print("🔎 Cleaning up any unwanted revive effects...")
-										local charRoot = player.Character:FindFirstChild("HumanoidRootPart")
-										if charRoot then
-											for _, child in ipairs(charRoot:GetChildren()) do
-												if child:IsA("BasePart") or child:IsA("Model") then
-													print("- Found and removed unexpected visual effect:", child:GetFullName())
-													child:Destroy()
-												end
-											end
-										end
+									-- Clear all collision caches completely
+									if CollisionCache then
+										CollisionCache.playerSegments[player] = nil
+										CollisionCache.spatialGrid:clear()
+										CollisionCache.frameCache = {}
+									end
+									
+									if headCache then
+										headCache.lastUpdate = 0
+										headCache.players = {}
+										headCache.ai = {}
 									end
 
-									-- Wait for the remainder of the original 2-second period for snake creation
-									task.wait(1.8)
+									-- Clear any global references
+									if _G and _G.PlayerSnakes then
+										_G.PlayerSnakes[player] = nil
+									end
 
-									resetPlayerCollisionState(player)
-									task.wait(3)
-									invinciblePlayers[player] = nil
-									print("✅ Invincibility ended for", player.Name)
+									-- Store snake length for the snake system to read after spawn
+									player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
+									
+									print("🔄 Reviving with snake length:", currentSnakeLength)
 
-									headCache.lastUpdate = 0
-								end)
+									-- CRITICAL: Just use LoadCharacter() - EXACTLY like clicking Play button
+									-- No special handling, no cleanup tasks, nothing special
+									player:LoadCharacter()
+									
+									-- The normal CharacterAdded event will handle everything:
+									-- - Setting invincibility (from line 159)
+									-- - Resetting collision state (from line 161)  
+									-- - All other normal spawn behavior
+									
+									-- That's it! No special cleanup, no waiting, no nothing.
+									-- Let the normal spawn system do EVERYTHING.
 
 									return -- Don't proceed with normal death
 								end
