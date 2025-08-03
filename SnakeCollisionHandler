@@ -1103,8 +1103,8 @@ task.spawn(function()
 							if revived then
 								print("🎉 REVIVING", player.Name)
 
-									-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
-									isProcessingDeaths = false
+								-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
+								isProcessingDeaths = false
 
 									-- Only deduct if they had revives (not if they bought with Robux)
 									if revivesAvailable > 0 then
@@ -1185,11 +1185,12 @@ task.spawn(function()
 									-- That's it! No special cleanup, no waiting, no nothing.
 									-- Let the normal spawn system do EVERYTHING.
 
-									return -- Don't proceed with normal death
-								end
+								return -- Don't proceed with normal death
 							end
 						end
 
+						end -- End of revive prompt else block
+						
 						-- =============================================
 						--  NORMAL DEATH LOGIC (IF NOT REVIVED)
 						-- =============================================
