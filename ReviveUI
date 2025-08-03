@@ -256,16 +256,10 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 		print("  -", name, "=", value)
 	end
 	
-	-- Show appropriate button - FORCE BUY BUTTON IF NO REVIVES
-	if revivesAvailable and revivesAvailable > 0 then
-		yesButton.Visible = true
-		buyButton.Visible = false
-		print("DEBUG: Showing REVIVE button")
-	else
-		yesButton.Visible = false
-		buyButton.Visible = true
-		print("DEBUG: Showing BUY button")
-	end
+	-- ALWAYS show REVIVE button, hide BUY button
+	yesButton.Visible = true
+	buyButton.Visible = false
+	print("DEBUG: Showing REVIVE button (will auto-purchase if needed)")
 
 	-- Enable UI
 	reviveUI.Enabled = true
@@ -324,20 +318,53 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 		reviveUI.Enabled = false
 	end
 
-	-- Yes button (use existing revive)
+	-- Yes button (use existing revive OR purchase if none)
 	yesButton.MouseButton1Click:Connect(function()
 		if not isPurchasing then
-			-- Double-check revives before allowing use
+			-- Check if player has revives
 			local currentRevives = player:GetAttribute("RevivesAvailable") or 0
+			
 			if currentRevives > 0 then
+				-- Has revives, use one
 				handleResponse("revive")
 			else
-				-- No revives! This shouldn't happen but just in case
-				print("ERROR: Tried to use revive but has 0 revives!")
-				-- Hide revive button and show buy button
-				yesButton.Visible = false
-				buyButton.Visible = true
-				reviveCount.Text = "Revives remaining: 0"
+				-- No revives - trigger purchase!
+				print("No revives available - triggering purchase...")
+				isPurchasing = true
+				processingText.Visible = true
+				processingText.Text = "Opening store..."
+				
+				-- Pause timer during purchase
+				if timerConnection then
+					timerConnection:Disconnect()
+				end
+				
+				-- Prompt purchase
+				local success, result = pcall(function()
+					return MarketplaceService:PromptProductPurchase(player, UI_CONFIG.REVIVE_PRODUCT_ID)
+				end)
+				
+				if not success then
+					print("Failed to prompt purchase:", result)
+					isPurchasing = false
+					processingText.Visible = false
+					
+					-- Resume timer
+					timerConnection = RunService.Heartbeat:Connect(function()
+						local elapsed = tick() - startTime
+						local remaining = math.max(0, duration - elapsed)
+						local progress = remaining / duration
+
+						timerBar.Size = UDim2.new(progress, 0, 0.02, 0)
+
+						if remaining <= 0 then
+							timerConnection:Disconnect()
+							timerConnection = nil
+							player:SetAttribute("ReviveTimerExpired", true)
+							reviveUI.Enabled = false
+						end
+					end)
+				end
 			end
 		end
 	end)
