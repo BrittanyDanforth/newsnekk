@@ -1055,6 +1055,19 @@ task.spawn(function()
 							if revived then
 								print("🎉 REVIVING", player.Name)
 
+								-- CRITICAL: Set reviving flags IMMEDIATELY to prevent menu
+								player:SetAttribute("RevivingNow", true)
+								player:SetAttribute("JustRevived", true)
+
+								-- Notify client IMMEDIATELY that we're reviving to prevent menu
+								local hideMenuRemote = remotes:FindFirstChild("HideMenu")
+								if not hideMenuRemote then
+									hideMenuRemote = Instance.new("RemoteEvent")
+									hideMenuRemote.Name = "HideMenu"
+									hideMenuRemote.Parent = remotes
+								end
+								hideMenuRemote:FireClient(player)
+
 								-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
 								isProcessingDeaths = false
 
@@ -1095,13 +1108,18 @@ task.spawn(function()
 								-- Store revive data
 								player:SetAttribute("RevivePosition", tostring(deathPosition))
 								player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
-								player:SetAttribute("JustRevived", true)
 
 								-- Simple invincibility
 								setPlayerInvincible(player)
 
-								-- Just respawn like clicking Play button
+								-- Respawn the player
 								player:LoadCharacter()
+
+								-- Clear the reviving flag after character loads
+								task.spawn(function()
+									task.wait(2) -- Wait for character to fully load
+									player:SetAttribute("RevivingNow", false)
+								end)
 								
 								-- IMPORTANT: Continue to next iteration instead of exiting coroutine
 							else
@@ -1920,16 +1938,18 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.1 - DEATH PROCESSING FIX")
-print("🚀 All V7 functionality preserved with critical death processing fix")
+print("⚡ SnakeCollisionHandler V7.2 - MENU FIX")
+print("🚀 All V7 functionality preserved with critical fixes")
 print("💎 FIXED: Death orbs properly spawn along snake segments")
 print("🧲 FIXED: MAGNET EFFECT CLEARED ON DEATH!")
 print("⚰️ FIXED: Dead players can't kill others!")
 print("📏 FIXED: Death orbs spawn at correct height (Y=5)")
 print("✨ FIXED: Smooth death transition (no camera issues)")
 print("🔄 FIXED: Collision detection after revive (resetPlayerCollisionState)")
-print("🔧 NEW FIX: Death processing continues after revive!")
-print("💰 NEW FIX: Revive prompt sent to ALL players for Robux purchases!")
+print("🔧 FIXED: Death processing continues after revive!")
+print("💰 FIXED: Revive prompt sent to ALL players for Robux purchases!")
+print("📱 NEW FIX: Menu no longer flashes during revive!")
+print("🎮 NEW: HideMenu remote event for instant menu suppression")
 print("🛡️ DEATH HANDLING:")
 print("   - Dead players marked with Dead=true attribute")
 print("   - Character moved down 10 studs + anchored")
