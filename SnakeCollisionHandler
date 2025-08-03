@@ -965,12 +965,8 @@ task.spawn(function()
 							end
 						end
 
-						-- Also set humanoid health to 0 to stop movement
-						local humanoid = character:FindFirstChild("Humanoid")
-						if humanoid then
-							print("💀 Setting health to 0 for", player.Name, "- Current health:", humanoid.Health)
-							humanoid.Health = 0
-						end
+						-- DON'T set health to 0 yet - wait to see if they revive!
+						-- This prevents the menu from showing prematurely
 
 						-- Smooth death handling - disable character without teleporting
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -1058,15 +1054,6 @@ task.spawn(function()
 								-- CRITICAL: Set reviving flags IMMEDIATELY to prevent menu
 								player:SetAttribute("RevivingNow", true)
 								player:SetAttribute("JustRevived", true)
-
-								-- Notify client IMMEDIATELY that we're reviving to prevent menu
-								local hideMenuRemote = remotes:FindFirstChild("HideMenu")
-								if not hideMenuRemote then
-									hideMenuRemote = Instance.new("RemoteEvent")
-									hideMenuRemote.Name = "HideMenu"
-									hideMenuRemote.Parent = remotes
-								end
-								hideMenuRemote:FireClient(player)
 
 								-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
 								isProcessingDeaths = false
@@ -1245,6 +1232,12 @@ task.spawn(function()
 								-- Clear collision caches when dying
 								if CollisionCache and CollisionCache.playerSegments then
 									CollisionCache.playerSegments[player] = nil
+								end
+
+								-- NOW kill the player (since they didn't revive)
+								if humanoid and humanoid.Health > 0 then
+									print("💀 Setting health to 0 for", player.Name, "- No revive chosen")
+									humanoid.Health = 0
 								end
 
 								-- Fire death event for menu system
@@ -1938,8 +1931,8 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.2 - MENU FIX")
-print("🚀 All V7 functionality preserved with critical fixes")
+print("⚡ SnakeCollisionHandler V7.2 - PROPER MENU FIX")
+print("🚀 All V7 functionality preserved with smart death handling")
 print("💎 FIXED: Death orbs properly spawn along snake segments")
 print("🧲 FIXED: MAGNET EFFECT CLEARED ON DEATH!")
 print("⚰️ FIXED: Dead players can't kill others!")
@@ -1948,8 +1941,8 @@ print("✨ FIXED: Smooth death transition (no camera issues)")
 print("🔄 FIXED: Collision detection after revive (resetPlayerCollisionState)")
 print("🔧 FIXED: Death processing continues after revive!")
 print("💰 FIXED: Revive prompt sent to ALL players for Robux purchases!")
-print("📱 NEW FIX: Menu no longer flashes during revive!")
-print("🎮 NEW: HideMenu remote event for instant menu suppression")
+print("📱 NEW FIX: Menu prevented by delaying health=0 until after revive check!")
+print("🎮 SMART: No extra scripts needed - all handled in SnakeCollisionHandler!")
 print("🛡️ DEATH HANDLING:")
 print("   - Dead players marked with Dead=true attribute")
 print("   - Character moved down 10 studs + anchored")
