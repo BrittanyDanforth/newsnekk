@@ -168,6 +168,9 @@ Players.PlayerAdded:Connect(function(player)
 		-- CRITICAL: Clear dead state when spawning (for revive or normal spawn)
 		resetPlayerCollisionState(player)
 		
+		-- Clear camera lock
+		player:SetAttribute("CameraLocked", false)
+		
 		setPlayerInvincible(player)
 		task.spawn(function()
 			local expire = invinciblePlayers[player]
@@ -844,27 +847,16 @@ task.spawn(function()
 							snakeInstance = character.__SnakeInstance.Value
 						end
 
-						if snakeInstance then
-							-- Disable snake movement immediately
-							if snakeInstance.destroy then
-								print("🐍 Destroying snake controls for", player.Name)
-								snakeInstance:destroy()
-							end
-							-- Remove from global table
-							if _G.PlayerSnakes then
-								_G.PlayerSnakes[player] = nil
-							end
-						end
-						
-						-- Also destroy the visual snake model
-						local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
-						if snakeModel then
-							print("🐍 Destroying visual snake model for", player.Name)
-							snakeModel:Destroy()
-						end
+						-- Store references but don't destroy yet
+						local snakeToDestroy = snakeInstance
+						local visualSnakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
 
 						-- DON'T set health to 0 yet - wait to see if they revive!
 						-- This prevents the menu from showing prematurely
+
+						-- CRITICAL: Stop camera movement by setting attribute
+						player:SetAttribute("CameraLocked", true)
+						print("📷 Set CameraLocked for", player.Name)
 
 						-- Smooth death handling - disable character without teleporting
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -1000,9 +992,11 @@ task.spawn(function()
 								-- Respawn the player
 								player:LoadCharacter()
 
-								-- Clear the reviving flag after character loads
+								-- Clear the reviving flag and camera lock after character loads
 								task.spawn(function()
-									task.wait(2) -- Wait for character to fully load
+									task.wait(0.1)
+									player:SetAttribute("CameraLocked", false)
+									task.wait(1.9) -- Wait for character to fully load
 									player:SetAttribute("RevivingNow", false)
 								end)
 								
@@ -1013,6 +1007,23 @@ task.spawn(function()
 								-- =============================================
 								--  NORMAL DEATH LOGIC (IF NOT REVIVED)
 								-- =============================================
+								
+								-- Destroy snake now that we know they're not reviving
+								if snakeToDestroy then
+									if snakeToDestroy.destroy then
+										print("🐍 Destroying snake controls for", player.Name)
+										snakeToDestroy:destroy()
+									end
+									if _G.PlayerSnakes then
+										_G.PlayerSnakes[player] = nil
+									end
+								end
+								
+								-- Destroy visual snake model
+								if visualSnakeModel then
+									print("🐍 Destroying visual snake model for", player.Name)
+									visualSnakeModel:Destroy()
+								end
 								
 								-- Orb spawning is now ONLY in the normal death path
 								if segments and #segments > 0 then
@@ -1831,8 +1842,8 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V7.3 - COMPLETE DEATH FIX")
-print("🚀 Fixed: Snake destruction, orb spawning, and menu handling")
+print("⚡ SnakeCollisionHandler V7.4 - CAMERA & ORB FIX")
+print("🚀 Fixed: Camera stops on death, orbs spawn properly")
 print("💎 FIXED: Death orbs properly spawn along snake segments")
 print("🧲 FIXED: MAGNET EFFECT CLEARED ON DEATH!")
 print("⚰️ FIXED: Dead players can't kill others!")
@@ -1842,9 +1853,10 @@ print("🔄 FIXED: Collision detection after revive (resetPlayerCollisionState)"
 print("🔧 FIXED: Death processing continues after revive!")
 print("💰 FIXED: Revive prompt sent to ALL players for Robux purchases!")
 print("📱 FIXED: Menu prevented by delaying health=0 until after revive check!")
-print("🎮 FIXED: Visual snake model destroyed to stop movement!")
-print("🔧 FIXED: Orb spawning indentation and totalSegments nil error!")
-print("✨ NEW: Destroys both snake instance AND visual model on death!")
+print("🎮 FIXED: Snake destruction moved to AFTER revive decision!")
+print("📷 NEW: Camera stops via CameraLocked attribute!")
+print("🔧 FIXED: Death orbs only spawn if player doesn't revive!")
+print("✨ Camera resumes automatically on respawn!")
 print("🛡️ DEATH HANDLING:")
 print("   - Dead players marked with Dead=true attribute")
 print("   - Character moved down 10 studs + anchored")
