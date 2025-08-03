@@ -424,4 +424,32 @@ end
 
 -- Removed auto-spawn - players spawn when clicking Play button
 
+-- Handle seamless revive without menu
+local reviveEvent = ReplicatedStorage:FindFirstChild("RevivePlayer")
+if not reviveEvent then
+	reviveEvent = Instance.new("BindableEvent")
+	reviveEvent.Name = "RevivePlayer"
+	reviveEvent.Parent = ReplicatedStorage
+end
+
+reviveEvent.Event:Connect(function(player, character)
+	print("🎯 Seamless revive triggered for", player.Name)
+	
+	-- Clean up old snake first
+	if activeSnakes[player] then
+		activeSnakes[player]:destroy()
+		activeSnakes[player] = nil
+	end
+	
+	-- Process as if character just spawned
+	onCharacterAdded(character)
+	
+	-- Clear reviving flag after snake is created
+	task.wait(0.5)
+	player:SetAttribute("RevivingNow", false)
+	player:SetAttribute("JustRevived", false)
+	
+	print("✅ Seamless revive complete for", player.Name)
+end)
+
 print("✅ Snake System Integration loaded!")
