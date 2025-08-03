@@ -25,6 +25,8 @@ local UI_CONFIG = {
 	ROBUX_COLOR = Color3.fromRGB(110, 255, 110),
 	REVIVE_PRODUCT_ID = 3356734577, -- Your actual product ID
 	REVIVE_PERCENTAGE = 0.8, -- Revive at 80% of death length
+	REVIVE_TIMER_DURATION = 15, -- Match server wait time (15 seconds)
+	REVIVE_TIMER_AFTER_CANCEL = 5, -- Timer after cancelled purchase
 }
 
 -- Create revive prompt UI
@@ -275,7 +277,7 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 
 	-- Start timer
 	local startTime = tick()
-	local duration = 5
+	local duration = UI_CONFIG.REVIVE_TIMER_DURATION
 
 	if timerConnection then
 		timerConnection:Disconnect()
@@ -288,6 +290,14 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 			local progress = remaining / duration
 
 			timerBar.Size = UDim2.new(progress, 0, 0.02, 0)
+			
+			-- Update timer display
+			local secondsLeft = math.ceil(remaining)
+			if revivesAvailable > 0 then
+				reviveInfo.Text = "Use a revive to continue? (" .. secondsLeft .. "s)"
+			else
+				reviveInfo.Text = "Purchase a revive to continue? (" .. secondsLeft .. "s)"
+			end
 
 			if remaining <= 0 then
 				timerConnection:Disconnect()
@@ -454,7 +464,7 @@ MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, produc
 			
 			-- Resume timer after cancelled purchase
 			local startTime = tick()
-			local duration = 3 -- Shorter timer after cancel
+			local duration = UI_CONFIG.REVIVE_TIMER_AFTER_CANCEL
 			
 			timerConnection = RunService.Heartbeat:Connect(function()
 				local elapsed = tick() - startTime
