@@ -292,7 +292,19 @@ CollisionCache = {
 }
 
 -- === FIXED ORB SPAWNING ===
-local function spawnDeathOrb(position, value)
+local function spawnDeathOrb(position, value, skipReviveCheck)
+	-- Don't spawn orbs if any player is currently reviving (unless explicitly allowed)
+	if not skipReviveCheck then
+		for _, player in pairs(Players:GetPlayers()) do
+			if player:GetAttribute("IsReviving") then
+				if DEBUG_COLLISIONS then
+					print("[ORB] Skipping orb spawn - player is reviving")
+				end
+				return nil
+			end
+		end
+	end
+	
 	-- Ensure position is at correct height
 	local spawnPos = Vector3.new(position.X, ORB_SPAWN_HEIGHT, position.Z)
 	
@@ -757,6 +769,10 @@ task.spawn(function()
 						player:SetAttribute("TempMagnetRange", 1)
 						player:SetAttribute("ActiveMagnet", false)
 						
+						-- CRITICAL: Clear any gamepass effects that might spawn orbs
+						player:SetAttribute("ReviveEffect", false)
+						player:SetAttribute("DeathEffect", false)
+						
 						-- CAMERA FIX: Disconnect camera updates
 						disconnectPlayerCamera(player)
 						
@@ -864,6 +880,9 @@ task.spawn(function()
 								
 								isProcessingDeaths = false
 								
+								-- CRITICAL: Mark player as reviving to prevent any orb spawning
+								player:SetAttribute("IsReviving", true)
+								
 								if revivesAvailable > 0 then
 									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
 								end
@@ -901,17 +920,52 @@ task.spawn(function()
 								player:LoadCharacter()
 								
 								task.spawn(function()
-									task.wait(0.2)
+									-- AGGRESSIVE CLEANUP: Remove any stray orbs or effects
+									task.wait(0.1)
 									
+									-- Clean up character effects
 									if player and player.Character then
 										print("🔎 Cleaning up any unwanted revive effects...")
 										local charRoot = player.Character:FindFirstChild("HumanoidRootPart")
 										if charRoot then
+											-- Clean up anything attached to the root part
 											for _, child in ipairs(charRoot:GetChildren()) do
-												if child:IsA("BasePart") or child:IsA("Model") then
+												if child:IsA("BasePart") or child:IsA("Model") or child:IsA("ParticleEmitter") then
 													if child.Name ~= "RootRigAttachment" and child.Name ~= "RootAttachment" then
-														print("- Found and removed unexpected visual effect:", child:GetFullName())
+														print("- Found and removed unexpected effect:", child:GetFullName())
 														child:Destroy()
+													end
+												end
+											end
+											
+											-- Also check character model for stray effects
+											for _, child in ipairs(player.Character:GetChildren()) do
+												if child.Name:lower():find("orb") or child.Name:lower():find("effect") or child.Name:lower():find("revive") then
+													print("- Removed stray effect from character:", child:GetFullName())
+													child:Destroy()
+												end
+											end
+										end
+									end
+									
+									-- Clean up workspace for any stray orbs near the player
+									task.wait(0.1)
+									if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+										local root = player.Character.HumanoidRootPart
+										local region = Region3.new(root.Position - Vector3.new(10, 10, 10), root.Position + Vector3.new(10, 10, 10))
+										region = region:ExpandToGrid(4)
+										
+										local parts = workspace:FindPartsInRegion3(region, player.Character, 100)
+										for _, part in ipairs(parts) do
+											if part.Name == "Orb" or part.Name == "DeathOrb" or part.Name:lower():find("revive") then
+												-- Check if this is a fresh orb (spawned within last 0.5 seconds)
+												local orbParent = part.Parent
+												if orbParent and (orbParent.Name:lower():find("effect") or orbParent.Name:lower():find("revive")) then
+													print("- Removed stray orb/effect from workspace:", part:GetFullName())
+													if orbParent:IsA("Model") then
+														orbParent:Destroy()
+													else
+														part:Destroy()
 													end
 												end
 											end
@@ -920,6 +974,10 @@ task.spawn(function()
 									
 									task.wait(1.8)
 									resetPlayerCollisionState(player)
+									
+									-- Clear reviving flag
+									player:SetAttribute("IsReviving", false)
+									
 									task.wait(3)
 									invinciblePlayers[player] = nil
 									print("✅ Invincibility ended for", player.Name)
