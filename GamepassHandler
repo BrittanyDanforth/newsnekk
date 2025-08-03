@@ -9,7 +9,7 @@ local STUDIO_OVERRIDE_GAMEPASSES = {
 	["Magnet"] = true,  -- Test magnet in studio
 	["2x Coins"] = false,
 	["2x Growth"] = false,
-	["Revive"] = true,  -- Test revive in studio
+	["Revive"] = false,  -- NO FREE REVIVES IN STUDIO
 	-- Add more as needed
 }
 
@@ -227,10 +227,10 @@ local function applyGamepassBenefits(player)
 
 	-- Check for Revive gamepass
 	if hasGamepass(player, "Revive") then
-		-- Set to 2 revives per life (not cumulative)
-		player:SetAttribute("RevivesAvailable", 2)
+		-- DO NOT GIVE FREE REVIVES - Let SnakeDeathHandler manage this
 		player:SetAttribute("HasRevive", true)
-		print("✅ Player has Revive gamepass! Set RevivesAvailable to 2")
+		print("✅ Player has Revive gamepass! (Revives managed by SnakeDeathHandler)")
+		-- Don't set RevivesAvailable here - let the death handler load from DataStore
 	end
 
 	-- Check for Pet Ally gamepass
