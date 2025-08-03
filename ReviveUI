@@ -42,6 +42,7 @@ local function createReviveUI()
 	
 	-- Main frame
 	local frame = Instance.new("Frame")
+	frame.Name = "MainFrame"
 	frame.Size = UDim2.new(0.4, 0, 0.3, 0)
 	frame.Position = UDim2.new(0.3, 0, 0.35, 0)
 	frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
@@ -133,7 +134,28 @@ end
 
 -- Initialize UI
 reviveUI = createReviveUI()
-local _, frame, infoText, timerText, reviveButton, declineButton = table.unpack({reviveUI:GetChildren()[2], reviveUI:GetChildren()[2]:FindFirstChild("Info"), reviveUI:GetChildren()[2]:FindFirstChild("Timer"), reviveUI:GetChildren()[2]:FindFirstChild("ReviveButton", true), reviveUI:GetChildren()[2]:FindFirstChild("DeclineButton", true)})
+local frame = reviveUI:WaitForChild("MainFrame")
+local infoText = frame:WaitForChild("Info")
+local timerText = frame:WaitForChild("Timer")
+local reviveButton = frame:FindFirstChild("ReviveButton", true)
+local declineButton = frame:FindFirstChild("DeclineButton", true)
+
+-- Wait for UI elements to load
+if not reviveButton or not declineButton then
+	warn("Waiting for UI elements to load...")
+	warn("Frame children:", frame:GetChildren())
+	task.wait(0.1)
+	reviveButton = frame:FindFirstChild("ReviveButton", true)
+	declineButton = frame:FindFirstChild("DeclineButton", true)
+end
+
+-- Debug logging
+print("ReviveUI elements loaded:")
+print("- Frame:", frame)
+print("- InfoText:", infoText)
+print("- TimerText:", timerText)
+print("- ReviveButton:", reviveButton)
+print("- DeclineButton:", declineButton)
 
 -- Update timer display
 local function updateTimer()
