@@ -772,9 +772,72 @@ task.spawn(function()
 						local visualSnakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
 						
 						print("🐍 Snake references - Instance:", snakeInstance ~= nil, "Visual:", visualSnakeModel ~= nil)
+						
+						-- IMMEDIATELY STOP SNAKE MOVEMENT
+						if snakeInstance then
+							-- Disable snake controller
+							if snakeInstance.enabled ~= nil then
+								snakeInstance.enabled = false
+							end
+							if snakeInstance.active ~= nil then
+								snakeInstance.active = false
+							end
+							if snakeInstance.stopMovement then
+								snakeInstance:stopMovement()
+							end
+							if snakeInstance.freeze then
+								snakeInstance:freeze()
+							end
+						end
 
 						-- DON'T set health to 0 yet - wait to see if they revive!
 						-- This prevents the menu from showing prematurely
+						
+						-- FREEZE SNAKE SEGMENTS IMMEDIATELY
+						local frozenSegments = {}
+						if segments and #segments > 0 then
+							print("🧊 Freezing", #segments, "snake segments")
+							for i, seg in ipairs(segments) do
+								if seg and seg:IsA("BasePart") and seg.Parent then
+									-- Store current position
+									frozenSegments[i] = {
+										part = seg,
+										position = seg.Position,
+										cframe = seg.CFrame
+									}
+									-- Anchor segment to stop all movement
+									seg.Anchored = true
+									seg.CanCollide = false
+									seg.CanTouch = false
+									seg.CanQuery = false
+									-- Stop any velocity
+									if seg.AssemblyLinearVelocity then
+										seg.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+									end
+									if seg.AssemblyAngularVelocity then
+										seg.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+									end
+								end
+							end
+						end
+						
+						-- Also freeze the visual snake model segments
+						if visualSnakeModel then
+							for _, seg in ipairs(visualSnakeModel:GetChildren()) do
+								if seg:IsA("BasePart") then
+									seg.Anchored = true
+									seg.CanCollide = false
+									seg.CanTouch = false
+									seg.CanQuery = false
+									if seg.AssemblyLinearVelocity then
+										seg.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+									end
+									if seg.AssemblyAngularVelocity then
+										seg.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+									end
+								end
+							end
+						end
 						
 						-- Handle character death animation
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -1000,6 +1063,19 @@ task.spawn(function()
 								player:SetAttribute("RevivePosition", tostring(deathPosition))
 								player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
 
+								-- Unfreeze segments if reviving
+								if frozenSegments and #frozenSegments > 0 then
+									print("🔓 Unfreezing segments for revive")
+									for _, frozen in ipairs(frozenSegments) do
+										if frozen.part and frozen.part.Parent then
+											frozen.part.Anchored = false
+											frozen.part.CanCollide = true
+											frozen.part.CanTouch = true
+											frozen.part.CanQuery = true
+										end
+									end
+								end
+								
 								-- Simple invincibility
 								setPlayerInvincible(player)
 
