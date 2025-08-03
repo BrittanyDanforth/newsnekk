@@ -359,6 +359,9 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 				
 				-- DON'T pause timer - let it keep running
 				
+				-- Tell server we're purchasing
+				promptReviveRemote:FireServer("purchasing")
+				
 				-- Prompt purchase
 				local success, result = pcall(function()
 					return MarketplaceService:PromptProductPurchase(player, UI_CONFIG.REVIVE_PRODUCT_ID)
@@ -382,6 +385,9 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 			processingText.Visible = true
 			
 			-- DON'T pause timer - let it keep running
+			
+			-- Tell server we're purchasing
+			promptReviveRemote:FireServer("purchasing")
 			
 			-- Prompt purchase
 			local success, result = pcall(function()

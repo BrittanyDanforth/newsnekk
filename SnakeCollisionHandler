@@ -1027,7 +1027,7 @@ task.spawn(function()
 							reviveRemote:FireClient(player)
 							print("🚀 Revive prompt sent to client!")
 
-								-- Wait for response (15 seconds max to allow for purchase)
+								-- Wait for response (30 seconds max to allow for Robux purchase)
 								local revived = false
 								local declined = false
 								local reviveConnection
@@ -1040,23 +1040,38 @@ task.spawn(function()
 										declined = true
 										reviveConnection:Disconnect()
 										print("❌ Player declined revive")
+									elseif plr == player and response == "purchasing" then
+										print("💰 Player is purchasing revive...")
 									end
 								end)
 
 								-- Wait up to 30 seconds for response (allows time for Robux purchase)
 								local waitTime = 0
+								local lastLog = 0
 								while waitTime < 30 and not revived and not declined do
 									task.wait(0.1)
 									waitTime = waitTime + 0.1
 									
+									-- Log every 5 seconds
+									if math.floor(waitTime) > lastLog and math.floor(waitTime) % 5 == 0 then
+										lastLog = math.floor(waitTime)
+										print("⏰ Waiting for revive response from", player.Name, "- Time:", lastLog, "/ 30 seconds")
+									end
+									
 									-- Check if player disconnected
 									if not player.Parent then
+										print("⚠️ Player disconnected while waiting for revive response")
 										break
 									end
 								end
 								
 								if reviveConnection then
 									reviveConnection:Disconnect()
+								end
+								
+								-- Log timeout
+								if not revived and not declined then
+									print("⏱️ Revive timer expired for", player.Name, "after 30 seconds")
 								end
 
 								if revived then
