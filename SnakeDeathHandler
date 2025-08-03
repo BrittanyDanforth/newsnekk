@@ -21,7 +21,7 @@ if not promptReviveRemote then
 end
 
 -- Product configuration
-local REVIVE_PRODUCT_ID = 123456789 -- Replace with your actual product ID
+local REVIVE_PRODUCT_ID = 3356734577 -- Your actual product ID
 
 -- Track player deaths and lengths
 local playerDeathData = {}
@@ -147,17 +147,36 @@ end
 
 -- Handle player joining
 Players.PlayerAdded:Connect(function(player)
-	-- Initialize revive attributes
-	player:SetAttribute("RevivesAvailable", 0)
+	-- Initialize revive attributes - START WITH 0 REVIVES
+	player:SetAttribute("RevivesAvailable", 0) -- No free revives
 	player:SetAttribute("HasRevive", false)
 	player:SetAttribute("JustRevived", false)
 	player:SetAttribute("RevivingNow", false)
 	player:SetAttribute("ReviveDeclined", false)
 	player:SetAttribute("ReviveTimerExpired", false)
+	player:SetAttribute("LastLength", 0)
+	player:SetAttribute("DeathLength", 0)
+	
+	print("Player joined - Revives set to 0 for", player.Name)
 	
 	-- Set up character death handler
 	player.CharacterAdded:Connect(onCharacterDeath)
 end)
+
+-- Also handle players already in game (for studio testing)
+for _, player in ipairs(Players:GetPlayers()) do
+	if not player:GetAttribute("RevivesAvailable") then
+		player:SetAttribute("RevivesAvailable", 0)
+		player:SetAttribute("HasRevive", false)
+		print("Reset revives to 0 for existing player:", player.Name)
+	end
+	
+	if player.Character then
+		onCharacterDeath(player.Character)
+	end
+	
+	player.CharacterAdded:Connect(onCharacterDeath)
+end
 
 -- Clean up on player leaving
 Players.PlayerRemoving:Connect(function(player)

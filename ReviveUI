@@ -23,7 +23,7 @@ local UI_CONFIG = {
 	ERROR_COLOR = Color3.fromRGB(255, 90, 90),
 	TEXT_COLOR = Color3.fromRGB(255, 255, 255),
 	ROBUX_COLOR = Color3.fromRGB(110, 255, 110),
-	REVIVE_PRODUCT_ID = 123456789, -- Replace with your actual product ID
+	REVIVE_PRODUCT_ID = 3356734577, -- Your actual product ID
 	REVIVE_PERCENTAGE = 0.8, -- Revive at 80% of death length
 }
 
@@ -249,13 +249,22 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 	local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
 	reviveCount.Text = "Revives remaining: " .. tostring(revivesAvailable)
 	
-	-- Show appropriate button
-	if revivesAvailable > 0 then
+	-- Debug print
+	print("DEBUG: Player has", revivesAvailable, "revives")
+	print("DEBUG: All player attributes:")
+	for name, value in pairs(player:GetAttributes()) do
+		print("  -", name, "=", value)
+	end
+	
+	-- Show appropriate button - FORCE BUY BUTTON IF NO REVIVES
+	if revivesAvailable and revivesAvailable > 0 then
 		yesButton.Visible = true
 		buyButton.Visible = false
+		print("DEBUG: Showing REVIVE button")
 	else
 		yesButton.Visible = false
 		buyButton.Visible = true
+		print("DEBUG: Showing BUY button")
 	end
 
 	-- Enable UI
@@ -318,7 +327,18 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 	-- Yes button (use existing revive)
 	yesButton.MouseButton1Click:Connect(function()
 		if not isPurchasing then
-			handleResponse("revive")
+			-- Double-check revives before allowing use
+			local currentRevives = player:GetAttribute("RevivesAvailable") or 0
+			if currentRevives > 0 then
+				handleResponse("revive")
+			else
+				-- No revives! This shouldn't happen but just in case
+				print("ERROR: Tried to use revive but has 0 revives!")
+				-- Hide revive button and show buy button
+				yesButton.Visible = false
+				buyButton.Visible = true
+				reviveCount.Text = "Revives remaining: 0"
+			end
 		end
 	end)
 
