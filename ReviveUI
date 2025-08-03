@@ -433,23 +433,19 @@ MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, produc
 				reviveCount.Text = "Revives remaining: " .. tostring(revivesAvailable)
 				yesButton.Visible = true
 				buyButton.Visible = false
+				
+				-- IMPORTANT: Automatically revive after purchase
+				print("Auto-reviving after purchase...")
 				processingText.Visible = false
 				isPurchasing = false
 				
-				-- Auto-click revive after purchase
-				task.wait(0.2)
-				if reviveUI.Enabled then
-					promptReviveRemote:FireServer("revive")
-					
-					-- Animate exit
-					local container = reviveUI.Container
-					TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
-						Size = UDim2.new(0, 0, 0, 0)
-					}):Play()
-					
-					task.wait(0.2)
-					reviveUI.Enabled = false
-				end
+				-- Fire revive to server immediately
+				promptReviveRemote:FireServer("revive")
+				print("Sent revive signal to server after purchase")
+				
+				-- Wait a bit then hide UI
+				task.wait(0.5)
+				hideReviveUI()
 			end
 		else
 			print("Purchase cancelled")
