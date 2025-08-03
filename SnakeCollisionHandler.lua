@@ -861,18 +861,26 @@ task.spawn(function()
 							
 							if revived then
 								print("🎉 REVIVING", player.Name)
-								
+
+								-- CRITICAL: Set reviving flags IMMEDIATELY to prevent menu
+								player:SetAttribute("RevivingNow", true)
+								player:SetAttribute("JustRevived", true)
+								player:SetAttribute("NoReviveEffects", true) -- Tell GamepassHandler not to spawn effects
+
+								-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
 								isProcessingDeaths = false
-								
+
+								-- Only deduct if they had revives (not if they bought with Robux)
 								if revivesAvailable > 0 then
 									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
 								end
-								
+
+								-- Store current position and snake length
 								local deathPosition = rootPart and rootPart.Position or Vector3.new(0, 10, 0)
 								if deathPosition.Y < 5 then
 									deathPosition = Vector3.new(deathPosition.X, 5, deathPosition.Z)
 								end
-								
+
 								local currentSnakeLength = 500
 								local leaderstats = player:FindFirstChild("leaderstats")
 								if leaderstats then
@@ -881,42 +889,67 @@ task.spawn(function()
 										currentSnakeLength = lengthValue.Value
 									end
 								end
-								
+
 								print("📍 Revive at position:", deathPosition, "with length:", currentSnakeLength)
-								
+
+								-- Clear dead state and reset collision state
 								resetPlayerCollisionState(player)
-								
+
+								-- Clear from death queue if any pending
 								for i = #deathQueue, 1, -1 do
 									if deathQueue[i].type == "player" and deathQueue[i].target == player then
 										table.remove(deathQueue, i)
 									end
 								end
-								
+
+								print("🧹 Cleared collision caches for", player.Name)
+
+								-- Store revive data
 								player:SetAttribute("RevivePosition", tostring(deathPosition))
 								player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
-								player:SetAttribute("JustRevived", true)
-								
-								invinciblePlayers[player] = os.clock() + 5
-								
+
+								-- Simple invincibility
+								setPlayerInvincible(player)
+
+								-- Respawn the player
 								player:LoadCharacter()
-								
-								-- CRITICAL: Wait for new snake to be created before clearing invincibility
+
+								-- Clear the reviving flag and camera lock after character loads
 								task.spawn(function()
-									task.wait(2) -- Wait for character to fully load
-									resetPlayerCollisionState(player)
-									task.wait(3)
-									invinciblePlayers[player] = nil
-									print("✅ Invincibility ended for", player.Name)
-									
-									headCache.lastUpdate = 0
+									task.wait(0.1)
+									player:SetAttribute("CameraLocked", false)
+									task.wait(1.9) -- Wait for character to fully load
+									player:SetAttribute("RevivingNow", false)
+									player:SetAttribute("NoReviveEffects", false) -- Re-enable effects
 								end)
-								
-								return -- Don't spawn death orbs
-							end
-						end
-						
-						-- === SPAWN DEATH ORBS (if not revived) ===
-						if segmentPositions and #segmentPositions > 0 then
+
+								-- IMPORTANT: Continue to next iteration instead of exiting coroutine
+							else
+								-- Player didn't revive, proceed with normal death logic
+
+								-- =============================================
+								--  NORMAL DEATH LOGIC (IF NOT REVIVED)
+								-- =============================================
+
+								-- Destroy snake now that we know they're not reviving
+								if snakeToDestroy then
+									if snakeToDestroy.destroy then
+										print("🐍 Destroying snake controls for", player.Name)
+										snakeToDestroy:destroy()
+									end
+									if _G.PlayerSnakes then
+										_G.PlayerSnakes[player] = nil
+									end
+								end
+
+								-- Destroy visual snake model
+								if visualSnakeModel then
+									print("🐍 Destroying visual snake model for", player.Name)
+									visualSnakeModel:Destroy()
+								end
+
+								-- Orb spawning is now ONLY in the normal death path
+								if segments and #segments > 0 then
 							print("💎 Spawning death orbs for", player.Name, "with", #segmentPositions, "segment positions")
 							
 							local totalSegments = #segmentPositions
@@ -1019,26 +1052,32 @@ task.spawn(function()
 							end
 						end
 						
-						-- Mark as dead
-						deadPlayers[player] = true
-						
-						-- Clear collision caches
-						if CollisionCache and CollisionCache.playerSegments then
-							CollisionCache.playerSegments[player] = nil
-						end
-						
-						-- Fire death event
-						local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
-						if deathEvent then
-							deathEvent:Fire(player)
-						end
-						
-						-- Clean up dead player tracking after delay
-						task.spawn(function()
-							task.wait(5)
-							deadPlayers[player] = nil
-							deathTimestamps[player] = nil
-						end)
+								-- ONLY mark as dead if NOT reviving
+								deadPlayers[player] = true
+
+								-- Clear collision caches when dying
+								if CollisionCache and CollisionCache.playerSegments then
+									CollisionCache.playerSegments[player] = nil
+								end
+
+								-- NOW kill the player (since they didn't revive)
+								if humanoid and humanoid.Health > 0 then
+									print("💀 Setting health to 0 for", player.Name, "- No revive chosen")
+									humanoid.Health = 0
+								end
+
+								-- Fire death event for menu system
+								local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
+								if deathEvent then
+									deathEvent:Fire(player)
+								end
+
+								task.spawn(function()
+									task.wait(5)
+									deadPlayers[player] = nil
+								end)
+							end -- end of "if revived then ... else"
+						end -- end of "if reviveRemote then"
 					else
 						print("⚠️ Skipping death for", player.Name, "- Already dead or no humanoid")
 					end
