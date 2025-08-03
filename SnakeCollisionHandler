@@ -976,12 +976,36 @@ task.spawn(function()
 							-- CRITICAL: Remove from collision detection immediately
 							rootPart:SetAttribute("Dead", true) -- Mark as dead for collision system
 
-							-- CRITICAL: Clean up any visual effects BEFORE making character invisible
-							-- This prevents the "orb on death" issue
+							-- CRITICAL: AGGRESSIVE cleanup of ALL visual effects on the entire character
+							-- This prevents ANY "orb on death" or visual effect issues
+							print("🧹 Aggressively cleaning up ALL visual effects on death...")
+							
+							-- Clean up effects on HumanoidRootPart
 							for _, child in ipairs(rootPart:GetChildren()) do
-								if child:IsA("PointLight") or child:IsA("ParticleEmitter") or child:IsA("Attachment") then
-									print("🧹 Cleaning up effect on death:", child.Name, child.ClassName)
+								if child:IsA("PointLight") or child:IsA("SpotLight") or child:IsA("SurfaceLight") or 
+								   child:IsA("ParticleEmitter") or child:IsA("Fire") or child:IsA("Smoke") or child:IsA("Sparkles") or
+								   child:IsA("Attachment") or child:IsA("Beam") or child:IsA("Trail") or
+								   child:IsA("BillboardGui") or child:IsA("SurfaceGui") or child:IsA("ScreenGui") then
+									print("  - Removed effect from HumanoidRootPart:", child.Name, child.ClassName)
 									child:Destroy()
+								end
+							end
+							
+							-- Clean up effects on ALL character parts
+							for _, part in pairs(character:GetDescendants()) do
+								if part:IsA("PointLight") or part:IsA("SpotLight") or part:IsA("SurfaceLight") or 
+								   part:IsA("ParticleEmitter") or part:IsA("Fire") or part:IsA("Smoke") or part:IsA("Sparkles") or
+								   part:IsA("Beam") or part:IsA("Trail") then
+									print("  - Removed effect from character:", part.Name, part.ClassName, "Parent:", part.Parent.Name)
+									part:Destroy()
+								elseif part:IsA("Attachment") then
+									-- Check if attachment has any effects
+									for _, effect in ipairs(part:GetChildren()) do
+										if effect:IsA("ParticleEmitter") or effect:IsA("PointLight") or effect:IsA("Beam") or effect:IsA("Trail") then
+											print("  - Removed effect from attachment:", effect.Name, effect.ClassName)
+											effect:Destroy()
+										end
+									end
 								end
 							end
 
