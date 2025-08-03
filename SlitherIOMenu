@@ -354,13 +354,13 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 			return particle
 		end
 
-		-- Create a glass effect panel (FIXED TRANSPARENCY)
+		-- Create a SOLID panel (NO TRANSPARENCY)
 		local function createGlassPanel(parent, size, position, cornerRadius, transparency, zIndex)
 			local panel = Instance.new("Frame")
 			panel.Size = size
 			panel.Position = position
-			panel.BackgroundColor3 = Color3.fromRGB(10, 12, 20) -- Dark background
-			panel.BackgroundTransparency = transparency or 0.3 -- Much less transparent
+			panel.BackgroundColor3 = Color3.fromRGB(25, 30, 45) -- Solid dark background
+			panel.BackgroundTransparency = 0 -- COMPLETELY SOLID
 			panel.BorderSizePixel = 0
 
 			if zIndex then
@@ -374,23 +374,10 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 			corner.Parent = panel
 
 			local stroke = Instance.new("UIStroke")
-			stroke.Color = Color3.fromRGB(255, 255, 255)
-			stroke.Transparency = 0.7 -- More visible stroke
-			stroke.Thickness = 2
+			stroke.Color = Color3.fromRGB(100, 100, 100)
+			stroke.Transparency = 0.5
+			stroke.Thickness = 1
 			stroke.Parent = panel
-			
-			-- Add gradient for depth
-			local gradient = Instance.new("UIGradient")
-			gradient.Color = ColorSequence.new{
-				ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-				ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 200, 200))
-			}
-			gradient.Rotation = 90
-			gradient.Transparency = NumberSequence.new{
-				NumberSequenceKeypoint.new(0, 0.95),
-				NumberSequenceKeypoint.new(1, 0.98)
-			}
-			gradient.Parent = panel
 
 			return panel
 		end
@@ -646,25 +633,13 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 				end
 			end
 
-			-- Main container with glass morphism
+			-- Main container (NO BORDER)
 			local frame = Instance.new("Frame")
 			frame.Size = UDim2.new(0.5, 0, 0.6, 0)
 			frame.Position = UDim2.new(0.25, 0, 0.2, 0)
-			frame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-			frame.BackgroundTransparency = 1
+			frame.BackgroundTransparency = 1 -- Completely transparent container
 			frame.BorderSizePixel = 0
 			frame.Parent = bgFrame
-
-			local frameCorner = Instance.new("UICorner")
-			frameCorner.CornerRadius = UDim.new(0, 20)
-			frameCorner.Parent = frame
-
-			-- Glass border
-			local frameBorder = Instance.new("UIStroke")
-			frameBorder.Color = Color3.fromRGB(255, 255, 255)
-			frameBorder.Transparency = 0.9
-			frameBorder.Thickness = 1
-			frameBorder.Parent = frame
 
 			-- Enhanced logo with better glow
 			local title = Instance.new("TextLabel")
@@ -799,45 +774,13 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 				theme.primary
 			)
 
-			-- Enhanced icon buttons
+			-- Enhanced icon buttons (repositioned without daily reward)
 			local settingsButton = createGlassButton(bgFrame, UDim2.new(0.08, 0, 0.08, 0), UDim2.new(0.9, 0, 0.05, 0), "⚙", UDim.new(0, 12))
-			local shareButton = createGlassButton(bgFrame, UDim2.new(0.08, 0, 0.08, 0), UDim2.new(0.72, 0, 0.05, 0), "🔗", UDim.new(0, 12))
-			local shopButton = createGlassButton(bgFrame, UDim2.new(0.08, 0, 0.08, 0), UDim2.new(0.81, 0, 0.05, 0), "🛒", UDim.new(0, 12))
+			local shareButton = createGlassButton(bgFrame, UDim2.new(0.08, 0, 0.08, 0), UDim2.new(0.81, 0, 0.05, 0), "🔗", UDim.new(0, 12))
+			local shopButton = createGlassButton(bgFrame, UDim2.new(0.08, 0, 0.08, 0), UDim2.new(0.72, 0, 0.05, 0), "🛒", UDim.new(0, 12))
 			local statsButton = createGlassButton(bgFrame, UDim2.new(0.08, 0, 0.08, 0), UDim2.new(0.63, 0, 0.05, 0), "📊", UDim.new(0, 12))
 
-			-- Daily reward button with notification
-			local dailyRewardButton = createGlassButton(bgFrame, UDim2.new(0.08, 0, 0.08, 0), UDim2.new(0.54, 0, 0.05, 0), "🎁", UDim.new(0, 12))
-
-			-- Add notification badge if reward is available
-			if dailyReward.available then
-				local notificationBadge = Instance.new("Frame")
-				notificationBadge.Size = UDim2.new(0.4, 0, 0.4, 0)
-				notificationBadge.Position = UDim2.new(0.7, 0, 0, 0)
-				notificationBadge.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-				notificationBadge.BorderSizePixel = 0
-				notificationBadge.ZIndex = 10
-				notificationBadge.Parent = dailyRewardButton
-
-				local badgeCorner = Instance.new("UICorner")
-				badgeCorner.CornerRadius = UDim.new(1, 0)
-				badgeCorner.Parent = notificationBadge
-
-				-- Pulse animation for notification
-				spawn(function()
-					while notificationBadge.Parent do
-						TweenService:Create(notificationBadge, 
-							TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), 
-							{Size = UDim2.new(0.5, 0, 0.5, 0)}
-						):Play()
-						task.wait(0.8)
-						TweenService:Create(notificationBadge, 
-							TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), 
-							{Size = UDim2.new(0.4, 0, 0.4, 0)}
-						):Play()
-						task.wait(0.8)
-					end
-				end)
-			end
+			-- REMOVED DAILY REWARD BUTTON - Will be in separate UI later
 
 			-- Premium graphics button
 			local graphicsButton = createGlassButton(
@@ -1044,28 +987,25 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 				
 				createDarkOverlay() -- Add dark background
 
-				local panel = createGlassPanel(
-					screenGui, 
-					UDim2.new(0.35, 0, 0.45, 0), 
-					UDim2.new(0.325, 0, 0.275, 0), 
-					UDim.new(0, 20), 
-					0.1, -- Much less transparent
-					20
-				)
+				-- Create SOLID panel
+				local panel = Instance.new("Frame")
 				panel.Name = "SettingsPanel"
-
-				-- Enhanced backdrop
-				local backdrop = Instance.new("Frame")
-				backdrop.Size = UDim2.new(1, 0, 1, 0)
-				backdrop.Position = UDim2.new(0, 0, 0, 0)
-				backdrop.BackgroundColor3 = Color3.fromRGB(15, 18, 28)
-				backdrop.BackgroundTransparency = 0.1
-				backdrop.ZIndex = panel.ZIndex - 1
-				backdrop.Parent = panel
+				panel.Size = UDim2.new(0.35, 0, 0.45, 0)
+				panel.Position = UDim2.new(0.325, 0, 0.275, 0)
+				panel.BackgroundColor3 = Color3.fromRGB(20, 25, 35) -- SOLID DARK BACKGROUND
+				panel.BackgroundTransparency = 0 -- COMPLETELY SOLID
+				panel.ZIndex = 20
+				panel.Parent = screenGui
 				
-				local backdropCorner = Instance.new("UICorner")
-				backdropCorner.CornerRadius = UDim.new(0, 20)
-				backdropCorner.Parent = backdrop
+				local panelCorner = Instance.new("UICorner")
+				panelCorner.CornerRadius = UDim.new(0, 20)
+				panelCorner.Parent = panel
+				
+				local panelStroke = Instance.new("UIStroke")
+				panelStroke.Color = theme.primary
+				panelStroke.Transparency = 0.5
+				panelStroke.Thickness = 2
+				panelStroke.Parent = panel
 
 				local blurCorner = Instance.new("UICorner")
 				blurCorner.CornerRadius = UDim.new(0, 20)
@@ -1200,17 +1140,29 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 
 			-- PREMIUM SHARE PANEL
 			local function openSharePanel()
-				if screenGui:FindFirstChild("SharePanel") then return end
+				closeAllPanels() -- CLOSE OTHER PANELS FIRST
+				
+				createDarkOverlay() -- Add dark background
 
-				local panel = createGlassPanel(
-					screenGui, 
-					UDim2.new(0.32, 0, 0.26, 0), 
-					UDim2.new(0.34, 0, 0.36, 0), 
-					UDim.new(0, 16), 
-					0.92, 
-					20
-				)
+				-- Create SOLID panel
+				local panel = Instance.new("Frame")
 				panel.Name = "SharePanel"
+				panel.Size = UDim2.new(0.32, 0, 0.26, 0)
+				panel.Position = UDim2.new(0.34, 0, 0.36, 0)
+				panel.BackgroundColor3 = Color3.fromRGB(20, 25, 35) -- SOLID DARK BACKGROUND
+				panel.BackgroundTransparency = 0 -- COMPLETELY SOLID
+				panel.ZIndex = 20
+				panel.Parent = screenGui
+				
+				local panelCorner = Instance.new("UICorner")
+				panelCorner.CornerRadius = UDim.new(0, 16)
+				panelCorner.Parent = panel
+				
+				local panelStroke = Instance.new("UIStroke")
+				panelStroke.Color = theme.primary
+				panelStroke.Transparency = 0.5
+				panelStroke.Thickness = 2
+				panelStroke.Parent = panel
 
 				-- Backdrop blur
 				local blur = Instance.new("Frame")
@@ -1311,17 +1263,29 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 
 			-- STATS PANEL
 			local function openStatsPanel()
-				if screenGui:FindFirstChild("StatsPanel") then return end
+				closeAllPanels() -- CLOSE OTHER PANELS FIRST
+				
+				createDarkOverlay() -- Add dark background
 
-				local panel = createGlassPanel(
-					screenGui, 
-					UDim2.new(0.32, 0, 0.4, 0), 
-					UDim2.new(0.34, 0, 0.3, 0), 
-					UDim.new(0, 16), 
-					0.92, 
-					20
-				)
+				-- Create SOLID panel
+				local panel = Instance.new("Frame")
 				panel.Name = "StatsPanel"
+				panel.Size = UDim2.new(0.32, 0, 0.4, 0)
+				panel.Position = UDim2.new(0.34, 0, 0.3, 0)
+				panel.BackgroundColor3 = Color3.fromRGB(20, 25, 35) -- SOLID DARK BACKGROUND
+				panel.BackgroundTransparency = 0 -- COMPLETELY SOLID
+				panel.ZIndex = 20
+				panel.Parent = screenGui
+				
+				local panelCorner = Instance.new("UICorner")
+				panelCorner.CornerRadius = UDim.new(0, 16)
+				panelCorner.Parent = panel
+				
+				local panelStroke = Instance.new("UIStroke")
+				panelStroke.Color = theme.primary
+				panelStroke.Transparency = 0.5
+				panelStroke.Thickness = 2
+				panelStroke.Parent = panel
 
 				-- Backdrop blur
 				local blur = Instance.new("Frame")
@@ -1675,10 +1639,7 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 				openStatsPanel()
 			end)
 
-			-- Daily reward button opens daily reward panel
-			dailyRewardButton.MouseButton1Click:Connect(function()
-				openDailyRewardPanel()
-			end)
+			-- Daily reward removed - will be in separate UI
 
 			-- Play button action
 			playButton.MouseButton1Click:Connect(function()
