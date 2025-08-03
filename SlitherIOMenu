@@ -1730,41 +1730,47 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 						activeDeathHandler = nil
 					end
 
-					-- Simple death handler - wait for revive decision
+					-- Death handler - wait for death scene and revive opportunity
 					activeDeathHandler = task.spawn(function()
-						local hasRevive = LocalPlayer:GetAttribute("HasRevive")
-						local revivesAvailable = LocalPlayer:GetAttribute("RevivesAvailable") or 0
+						-- ALWAYS wait 5-6 seconds for:
+						-- 1. Death animation (orbs dropping)
+						-- 2. Player to see their death
+						-- 3. Revive UI to appear and player to decide
+						-- 4. Potential robux purchase
 						
-						-- If player has revive, wait longer for their decision
-						if hasRevive and revivesAvailable > 0 then
-							-- Wait up to 5 seconds for revive decision
-							local waitTime = 0
-							while waitTime < 5 do
-								task.wait(0.1)
-								waitTime = waitTime + 0.1
-								
-								-- Check if reviving
-								if LocalPlayer:GetAttribute("JustRevived") or LocalPlayer:GetAttribute("RevivingNow") then
-									-- Player is reviving, don't show menu
-									isProcessingDeath = false
-									activeDeathHandler = nil
-									return
-								end
-								
-								-- Check if revive was declined or timer expired
-								if LocalPlayer:GetAttribute("ReviveDeclined") or LocalPlayer:GetAttribute("ReviveTimerExpired") then
-									-- Clear the attributes
-									LocalPlayer:SetAttribute("ReviveDeclined", false)
-									LocalPlayer:SetAttribute("ReviveTimerExpired", false)
-									break -- Show menu now
-								end
+						local waitTime = 0
+						local menuShown = false
+						
+						while waitTime < 6 and not menuShown do
+							task.wait(0.1)
+							waitTime = waitTime + 0.1
+							
+							-- Check if player revived
+							if LocalPlayer:GetAttribute("JustRevived") or LocalPlayer:GetAttribute("RevivingNow") then
+								-- Player revived (bought or used revive), don't show menu
+								isProcessingDeath = false
+								activeDeathHandler = nil
+								return
 							end
-						else
-							-- No revive available, just wait a bit
-							task.wait(1)
+							
+							-- Check if player explicitly declined revive
+							if LocalPlayer:GetAttribute("ReviveDeclined") then
+								-- They said no, show menu immediately
+								LocalPlayer:SetAttribute("ReviveDeclined", false)
+								menuShown = true
+								break
+							end
+							
+							-- Check if timer explicitly expired
+							if LocalPlayer:GetAttribute("ReviveTimerExpired") then
+								-- Timer ran out, show menu
+								LocalPlayer:SetAttribute("ReviveTimerExpired", false)
+								menuShown = true
+								break
+							end
 						end
 						
-						-- Final check - if still dead and not reviving
+						-- After waiting, check if still dead and not reviving
 						if humanoid.Health <= 0 and not LocalPlayer:GetAttribute("JustRevived") and not LocalPlayer:GetAttribute("RevivingNow") then
 							-- Double check we're still in the same character
 							if LocalPlayer.Character == character then
