@@ -1118,55 +1118,32 @@ task.spawn(function()
 									player:SetAttribute("RevivePosition", tostring(deathPosition))
 									player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
 									player:SetAttribute("JustRevived", true)
+									player:SetAttribute("RevivingNow", true) -- IMPORTANT: This prevents menu from showing
 
 									-- Simple invincibility
 									invinciblePlayers[player] = os.clock() + 5
 
 									-- Clear dead state immediately
 									deadPlayers[player] = nil
-									
-									-- IMPROVED REVIVE: Recreate snake without menu
-									print("🔄 Starting seamless revive for", player.Name)
-									
-									-- Fire a custom revive event that SnakeSystemIntegration can listen to
-									local reviveEvent = ReplicatedStorage:FindFirstChild("RevivePlayer")
-									if not reviveEvent then
-										reviveEvent = Instance.new("BindableEvent")
-										reviveEvent.Name = "RevivePlayer"
-										reviveEvent.Parent = ReplicatedStorage
-									end
-									
-									-- Set revive in progress flag
-									player:SetAttribute("RevivingNow", true)
-									
-									-- Teleport the existing character to revive position
-									if character and humanoid and rootPart then
-										-- Reset character state
-										humanoid.Health = humanoid.MaxHealth
-										rootPart.Anchored = false
-										rootPart.CFrame = CFrame.new(deathPosition)
-										rootPart:SetAttribute("Dead", false)
-										
-										-- Fire revive event
-										reviveEvent:Fire(player, character)
-										
-										print("✅ Revive event fired for", player.Name)
-									else
-										-- Fallback if character is missing
-										warn("⚠️ Character missing during revive, using LoadCharacter")
-										player:LoadCharacter()
-									end
+									processingRevive[player] = nil
+
+									-- Just respawn like clicking Play button
+									player:LoadCharacter()
 
 									-- CRITICAL: Wait for new snake to be created before clearing invincibility
 									task.spawn(function()
-										-- Wait for snake to be created
-										task.wait(1) -- Less wait time since we're not loading character
+										-- Wait for character to load and snake to be created
+										task.wait(2) -- Give time for snake creation
 
 										-- Force cache refresh after snake is created
 										resetPlayerCollisionState(player)
+										
+										-- Clear revive flags after snake is created
+										player:SetAttribute("RevivingNow", false)
+										player:SetAttribute("JustRevived", false)
 
 										-- Continue invincibility for remaining time
-										task.wait(4)
+										task.wait(3)
 										invinciblePlayers[player] = nil
 										print("✅ Invincibility ended for", player.Name)
 
