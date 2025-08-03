@@ -763,15 +763,15 @@ task.spawn(function()
 						-- CAMERA FIX: Disconnect camera updates
 						disconnectPlayerCamera(player)
 						
-						-- CRITICAL: Get snake references but DON'T destroy yet (wait to see if they revive)
+						-- CRITICAL: Store snake references BEFORE checking revive
 						local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
 						if not snakeInstance and character:FindFirstChild("__SnakeInstance") then
 							snakeInstance = character.__SnakeInstance.Value
 						end
 						
-						-- Store references but don't destroy yet
-						local snakeToDestroy = snakeInstance
 						local visualSnakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
+						
+						print("🐍 Snake references - Instance:", snakeInstance ~= nil, "Visual:", visualSnakeModel ~= nil)
 
 						-- DON'T set health to 0 yet - wait to see if they revive!
 						-- This prevents the menu from showing prematurely
@@ -920,10 +920,10 @@ task.spawn(function()
 								-- =============================================
 
 								-- Destroy snake now that we know they're not reviving
-								if snakeToDestroy then
-									if snakeToDestroy.destroy then
+								if snakeInstance then
+									if snakeInstance.destroy then
 										print("🐍 Destroying snake controls for", player.Name)
-										snakeToDestroy:destroy()
+										snakeInstance:destroy()
 									end
 									if _G.PlayerSnakes then
 										_G.PlayerSnakes[player] = nil
@@ -943,10 +943,10 @@ task.spawn(function()
 									local totalSegments = #segmentPositions
 									local orbsPerSegment = 1 / 2.5
 									local totalOrbs = math.clamp(math.floor(snakeLength * orbsPerSegment), 3, 40)
-							
-							-- Calculate orb value
-							local baseValue = 1
-							if snakeLength <= 50 then
+									
+									-- Calculate orb value
+									local baseValue = 1
+									if snakeLength <= 50 then
 								local totalValue = math.floor(snakeLength * 0.6)
 								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
 							elseif snakeLength <= 200 then
