@@ -1,10 +1,9 @@
--- ReviveUI - Client-side revive prompt with Robux purchase
+-- ReviveUI - Simplified and robust revive system
 -- Goes in StarterPlayerScripts
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
@@ -15,458 +14,281 @@ local playerGui = player:WaitForChild("PlayerGui")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local promptReviveRemote = remotes:WaitForChild("PromptRevive")
 
--- UI Configuration
-local UI_CONFIG = {
-	BACKGROUND_COLOR = Color3.fromRGB(20, 20, 20),
-	ACCENT_COLOR = Color3.fromRGB(255, 215, 0),
-	SUCCESS_COLOR = Color3.fromRGB(80, 255, 150),
-	ERROR_COLOR = Color3.fromRGB(255, 90, 90),
-	TEXT_COLOR = Color3.fromRGB(255, 255, 255),
-	ROBUX_COLOR = Color3.fromRGB(110, 255, 110),
-	REVIVE_PRODUCT_ID = 3356734577, -- Your actual product ID
-	REVIVE_PERCENTAGE = 0.8, -- Revive at 80% of death length
-	REVIVE_TIMER_DURATION = 30, -- Extended to 30 seconds for purchase time
-	REVIVE_TIMER_AFTER_CANCEL = 5, -- Timer after cancelled purchase
-	PURCHASE_TIMEOUT = 30, -- Max time to wait for purchase
-}
+-- Configuration
+local REVIVE_PRODUCT_ID = 3356734577
+local TIMER_DURATION = 30
+local REVIVE_PERCENTAGE = 0.8
 
--- Create revive prompt UI
+-- State
+local reviveUI = nil
+local startTime = 0
+local isPurchasing = false
+local hasResponded = false
+
+-- Create simple UI
 local function createReviveUI()
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "RevivePrompt"
 	screenGui.ResetOnSpawn = false
-	screenGui.DisplayOrder = 9999  -- Very high to show above everything
+	screenGui.DisplayOrder = 10000
 	screenGui.Enabled = false
-	screenGui.Parent = playerGui
-
-	-- Dark overlay
-	local overlay = Instance.new("Frame")
-	overlay.Name = "Overlay"
-	overlay.Size = UDim2.new(1, 0, 1, 0)
-	overlay.BackgroundColor3 = Color3.new(0, 0, 0)
-	overlay.BackgroundTransparency = 0.3
-	overlay.Parent = screenGui
-
-	-- Main container
-	local container = Instance.new("Frame")
-	container.Name = "Container"
-	container.Size = UDim2.new(0.4, 0, 0.35, 0)
-	container.Position = UDim2.new(0.5, 0, 0.5, 0)
-	container.AnchorPoint = Vector2.new(0.5, 0.5)
-	container.BackgroundColor3 = UI_CONFIG.BACKGROUND_COLOR
-	container.BorderSizePixel = 0
-	container.Parent = screenGui
-
+	
+	-- Dark background
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.new(1, 0, 1, 0)
+	bg.BackgroundColor3 = Color3.new(0, 0, 0)
+	bg.BackgroundTransparency = 0.5
+	bg.Parent = screenGui
+	
+	-- Main frame
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(0.4, 0, 0.3, 0)
+	frame.Position = UDim2.new(0.3, 0, 0.35, 0)
+	frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	frame.BorderSizePixel = 0
+	frame.Parent = screenGui
+	
 	-- Add corner rounding
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 20)
-	corner.Parent = container
-
-	-- Add stroke
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = UI_CONFIG.ACCENT_COLOR
-	stroke.Thickness = 3
-	stroke.Parent = container
-
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = frame
+	
 	-- Title
 	local title = Instance.new("TextLabel")
-	title.Name = "Title"
-	title.Size = UDim2.new(0.9, 0, 0.2, 0)
-	title.Position = UDim2.new(0.05, 0, 0.05, 0)
+	title.Size = UDim2.new(1, 0, 0.25, 0)
+	title.Position = UDim2.new(0, 0, 0, 0)
 	title.BackgroundTransparency = 1
-	title.Text = "BRUH YOU DIED!"
-	title.TextColor3 = UI_CONFIG.ERROR_COLOR
+	title.Text = "YOU DIED!"
 	title.TextScaled = true
+	title.TextColor3 = Color3.fromRGB(255, 100, 100)
 	title.Font = Enum.Font.SourceSansBold
-	title.Parent = container
-
-	-- Death length info
-	local lengthInfo = Instance.new("TextLabel")
-	lengthInfo.Name = "LengthInfo"
-	lengthInfo.Size = UDim2.new(0.9, 0, 0.15, 0)
-	lengthInfo.Position = UDim2.new(0.05, 0, 0.25, 0)
-	lengthInfo.BackgroundTransparency = 1
-	lengthInfo.Text = "Your length: 0"
-	lengthInfo.TextColor3 = UI_CONFIG.TEXT_COLOR
-	lengthInfo.TextScaled = true
-	lengthInfo.Font = Enum.Font.SourceSans
-	lengthInfo.Parent = container
-
-	-- Revive length info
-	local reviveInfo = Instance.new("TextLabel")
-	reviveInfo.Name = "ReviveInfo"
-	reviveInfo.Size = UDim2.new(0.9, 0, 0.12, 0)
-	reviveInfo.Position = UDim2.new(0.05, 0, 0.4, 0)
-	reviveInfo.BackgroundTransparency = 1
-	reviveInfo.Text = "Revive at 80% of your length!"
-	reviveInfo.TextColor3 = UI_CONFIG.ACCENT_COLOR
-	reviveInfo.TextScaled = true
-	reviveInfo.Font = Enum.Font.SourceSans
-	reviveInfo.Parent = container
-
-	-- Revive count
-	local reviveCount = Instance.new("TextLabel")
-	reviveCount.Name = "ReviveCount"
-	reviveCount.Size = UDim2.new(0.9, 0, 0.1, 0)
-	reviveCount.Position = UDim2.new(0.05, 0, 0.52, 0)
-	reviveCount.BackgroundTransparency = 1
-	reviveCount.Text = "Revives remaining: 0"
-	reviveCount.TextColor3 = UI_CONFIG.TEXT_COLOR
-	reviveCount.TextScaled = true
-	reviveCount.Font = Enum.Font.SourceSans
-	reviveCount.Parent = container
-
-	-- Buttons container
+	title.Parent = frame
+	
+	-- Info text
+	local info = Instance.new("TextLabel")
+	info.Name = "Info"
+	info.Size = UDim2.new(1, -20, 0.3, 0)
+	info.Position = UDim2.new(0, 10, 0.25, 0)
+	info.BackgroundTransparency = 1
+	info.Text = "Loading..."
+	info.TextScaled = true
+	info.TextColor3 = Color3.fromRGB(255, 255, 255)
+	info.Font = Enum.Font.SourceSans
+	info.Parent = frame
+	
+	-- Timer text
+	local timerText = Instance.new("TextLabel")
+	timerText.Name = "Timer"
+	timerText.Size = UDim2.new(1, 0, 0.15, 0)
+	timerText.Position = UDim2.new(0, 0, 0.55, 0)
+	timerText.BackgroundTransparency = 1
+	timerText.Text = "30 seconds"
+	timerText.TextScaled = true
+	timerText.TextColor3 = Color3.fromRGB(255, 215, 0)
+	timerText.Font = Enum.Font.SourceSans
+	timerText.Parent = frame
+	
+	-- Button container
 	local buttonContainer = Instance.new("Frame")
-	buttonContainer.Name = "Buttons"
-	buttonContainer.Size = UDim2.new(0.9, 0, 0.15, 0)
-	buttonContainer.Position = UDim2.new(0.05, 0, 0.65, 0)
+	buttonContainer.Size = UDim2.new(1, -20, 0.2, 0)
+	buttonContainer.Position = UDim2.new(0, 10, 0.75, 0)
 	buttonContainer.BackgroundTransparency = 1
-	buttonContainer.Parent = container
-
-	-- Yes button (for when revives available)
-	local yesBtn = Instance.new("TextButton")
-	yesBtn.Name = "YesButton"
-	yesBtn.Size = UDim2.new(0.48, 0, 1, 0)
-	yesBtn.Position = UDim2.new(0, 0, 0, 0)
-	yesBtn.BackgroundColor3 = UI_CONFIG.SUCCESS_COLOR
-	yesBtn.Text = "REVIVE"
-	yesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	yesBtn.TextScaled = true
-	yesBtn.Font = Enum.Font.SourceSansBold
-	yesBtn.Parent = buttonContainer
-
-	local yesCorner = Instance.new("UICorner")
-	yesCorner.CornerRadius = UDim.new(0, 10)
-	yesCorner.Parent = yesBtn
-
-	-- Buy button (for when no revives)
-	local buyBtn = Instance.new("TextButton")
-	buyBtn.Name = "BuyButton"
-	buyBtn.Size = UDim2.new(0.48, 0, 1, 0)
-	buyBtn.Position = UDim2.new(0, 0, 0, 0)
-	buyBtn.BackgroundColor3 = UI_CONFIG.ROBUX_COLOR
-	buyBtn.Text = "BUY REVIVE 35"
-	buyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	buyBtn.TextScaled = true
-	buyBtn.Font = Enum.Font.SourceSansBold
-	buyBtn.Visible = false
-	buyBtn.Parent = buttonContainer
-
-	local buyCorner = Instance.new("UICorner")
-	buyCorner.CornerRadius = UDim.new(0, 10)
-	buyCorner.Parent = buyBtn
-
-	-- Robux icon for buy button
-	local robuxIcon = Instance.new("ImageLabel")
-	robuxIcon.Name = "RobuxIcon"
-	robuxIcon.Size = UDim2.new(0.15, 0, 0.6, 0)
-	robuxIcon.Position = UDim2.new(0.62, 0, 0.2, 0)
-	robuxIcon.BackgroundTransparency = 1
-	robuxIcon.Image = "rbxasset://textures/ui/common/robux.png"
-	robuxIcon.ScaleType = Enum.ScaleType.Fit
-	robuxIcon.Parent = buyBtn
-
-	-- No button
-	local noBtn = Instance.new("TextButton")
-	noBtn.Name = "NoButton"
-	noBtn.Size = UDim2.new(0.48, 0, 1, 0)
-	noBtn.Position = UDim2.new(0.52, 0, 0, 0)
-	noBtn.BackgroundColor3 = UI_CONFIG.ERROR_COLOR
-	noBtn.Text = "RESPAWN"
-	noBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	noBtn.TextScaled = true
-	noBtn.Font = Enum.Font.SourceSansBold
-	noBtn.Parent = buttonContainer
-
-	local noCorner = Instance.new("UICorner")
-	noCorner.CornerRadius = UDim.new(0, 10)
-	noCorner.Parent = noBtn
-
-	-- Timer bar
-	local timerBar = Instance.new("Frame")
-	timerBar.Name = "TimerBar"
-	timerBar.Size = UDim2.new(1, 0, 0.02, 0)
-	timerBar.Position = UDim2.new(0, 0, 0.98, 0)
-	timerBar.BackgroundColor3 = UI_CONFIG.ACCENT_COLOR
-	timerBar.BorderSizePixel = 0
-	timerBar.Parent = container
-
-	-- Processing text (shown when purchasing)
-	local processingText = Instance.new("TextLabel")
-	processingText.Name = "ProcessingText"
-	processingText.Size = UDim2.new(0.9, 0, 0.1, 0)
-	processingText.Position = UDim2.new(0.05, 0, 0.85, 0)
-	processingText.BackgroundTransparency = 1
-	processingText.Text = "Processing purchase..."
-	processingText.TextColor3 = UI_CONFIG.ACCENT_COLOR
-	processingText.TextScaled = true
-	processingText.Font = Enum.Font.SourceSans
-	processingText.Visible = false
-	processingText.Parent = container
-
-	return screenGui, yesBtn, noBtn, timerBar, buyBtn, lengthInfo, reviveInfo, reviveCount, processingText
+	buttonContainer.Parent = frame
+	
+	-- Revive button
+	local reviveBtn = Instance.new("TextButton")
+	reviveBtn.Name = "ReviveButton"
+	reviveBtn.Size = UDim2.new(0.45, 0, 1, 0)
+	reviveBtn.Position = UDim2.new(0, 0, 0, 0)
+	reviveBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+	reviveBtn.Text = "REVIVE"
+	reviveBtn.TextScaled = true
+	reviveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	reviveBtn.Font = Enum.Font.SourceSansBold
+	reviveBtn.Parent = buttonContainer
+	
+	local reviveBtnCorner = Instance.new("UICorner")
+	reviveBtnCorner.CornerRadius = UDim.new(0, 8)
+	reviveBtnCorner.Parent = reviveBtn
+	
+	-- Decline button
+	local declineBtn = Instance.new("TextButton")
+	declineBtn.Name = "DeclineButton"
+	declineBtn.Size = UDim2.new(0.45, 0, 1, 0)
+	declineBtn.Position = UDim2.new(0.55, 0, 0, 0)
+	declineBtn.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+	declineBtn.Text = "RESPAWN"
+	declineBtn.TextScaled = true
+	declineBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	declineBtn.Font = Enum.Font.SourceSansBold
+	declineBtn.Parent = buttonContainer
+	
+	local declineBtnCorner = Instance.new("UICorner")
+	declineBtnCorner.CornerRadius = UDim.new(0, 8)
+	declineBtnCorner.Parent = declineBtn
+	
+	screenGui.Parent = playerGui
+	return screenGui, frame, info, timerText, reviveBtn, declineBtn
 end
 
 -- Initialize UI
-local reviveUI, yesButton, noButton, timerBar, buyButton, lengthInfo, reviveInfo, reviveCount, processingText = createReviveUI()
+reviveUI = createReviveUI()
+local _, frame, infoText, timerText, reviveButton, declineButton = table.unpack({reviveUI:GetChildren()[2], reviveUI:GetChildren()[2]:FindFirstChild("Info"), reviveUI:GetChildren()[2]:FindFirstChild("Timer"), reviveUI:GetChildren()[2]:FindFirstChild("ReviveButton", true), reviveUI:GetChildren()[2]:FindFirstChild("DeclineButton", true)})
 
--- Variables
-local isPurchasing = false
-local timerConnection = nil
-
--- Handle revive prompt
-promptReviveRemote.OnClientEvent:Connect(function(deathLength)
-	print("REVIVE PROMPT RECEIVED! Death length:", deathLength or 0)
-
-	-- Calculate revive length
-	-- Try multiple sources for death length
-	local actualDeathLength = deathLength or 0
+-- Update timer display
+local function updateTimer()
+	local elapsed = tick() - startTime
+	local remaining = math.max(0, TIMER_DURATION - elapsed)
+	local seconds = math.ceil(remaining)
 	
-	-- If no death length provided, check various attributes
-	if actualDeathLength == 0 then
-		-- Check player attributes
-		actualDeathLength = player:GetAttribute("LastLength") or 
-						   player:GetAttribute("DeathLength") or 
-						   player:GetAttribute("Length") or 0
-		
-		-- Check leaderstats as fallback
-		if actualDeathLength == 0 then
-			local leaderstats = player:FindFirstChild("leaderstats")
-			if leaderstats then
-				local lengthValue = leaderstats:FindFirstChild("Length")
-				if lengthValue then
-					actualDeathLength = lengthValue.Value or 0
-				end
-			end
-		end
+	timerText.Text = seconds .. " seconds"
+	
+	-- Change color as time runs out
+	if seconds <= 10 then
+		timerText.TextColor3 = Color3.fromRGB(255, 100, 100)
+	elseif seconds <= 20 then
+		timerText.TextColor3 = Color3.fromRGB(255, 200, 100)
+	else
+		timerText.TextColor3 = Color3.fromRGB(255, 215, 0)
 	end
 	
-	local reviveLength = math.floor(actualDeathLength * UI_CONFIG.REVIVE_PERCENTAGE)
-	
-	-- Update length displays
-	lengthInfo.Text = "Your length: " .. tostring(actualDeathLength)
-	reviveInfo.Text = "Revive at " .. tostring(reviveLength) .. " length! (80% of " .. tostring(actualDeathLength) .. ")"
-	
-	-- Check revives available
-	local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
-	reviveCount.Text = "Revives remaining: " .. tostring(revivesAvailable)
-	
-	-- Debug print
-	print("DEBUG: Player has", revivesAvailable, "revives")
-	print("DEBUG: All player attributes:")
-	for name, value in pairs(player:GetAttributes()) do
-		print("  -", name, "=", value)
-	end
-	
-	-- ALWAYS show REVIVE button, hide BUY button
-	yesButton.Visible = true
-	buyButton.Visible = false
-	print("DEBUG: Showing REVIVE button (will auto-purchase if needed)")
-
-	-- Enable UI
-	reviveUI.Enabled = true
-	processingText.Visible = false
-	isPurchasing = false
-
-	-- Reset and animate in
-	local container = reviveUI.Container
-	container.Size = UDim2.new(0, 0, 0, 0)
-	TweenService:Create(container, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
-		Size = UDim2.new(0.4, 0, 0.35, 0)
-	}):Play()
-
-	-- Start timer
-	local startTime = tick()
-	local duration = UI_CONFIG.REVIVE_TIMER_DURATION
-
-	if timerConnection then
-		timerConnection:Disconnect()
-	end
-
-	timerConnection = RunService.Heartbeat:Connect(function()
-		if not isPurchasing then
-			local elapsed = tick() - startTime
-			local remaining = math.max(0, duration - elapsed)
-			local progress = remaining / duration
-
-			timerBar.Size = UDim2.new(progress, 0, 0.02, 0)
-			
-			-- Update timer display
-			local secondsLeft = math.ceil(remaining)
-			if isPurchasing then
-				reviveInfo.Text = "Waiting for purchase... (" .. secondsLeft .. "s remaining)"
-				processingText.Text = "Complete purchase within " .. secondsLeft .. " seconds"
-				-- Make UI slightly transparent so they can see game
-				overlay.BackgroundTransparency = 0.7
-				container.BackgroundTransparency = 0.3
-			elseif revivesAvailable > 0 then
-				reviveInfo.Text = "Use a revive to continue? (" .. secondsLeft .. "s)"
-				-- Restore normal opacity
-				overlay.BackgroundTransparency = 0.3
-				container.BackgroundTransparency = 0.1
-			else
-				reviveInfo.Text = "Purchase a revive to continue? (" .. secondsLeft .. "s)"
-				-- Restore normal opacity
-				overlay.BackgroundTransparency = 0.3
-				container.BackgroundTransparency = 0.1
-			end
-
-			if remaining <= 0 then
-				timerConnection:Disconnect()
-				timerConnection = nil
-				-- Auto-decline if time runs out
-				player:SetAttribute("ReviveTimerExpired", true)
-				reviveUI.Enabled = false
-			end
-		end
-	end)
-
-	-- Button handlers
-	local function handleResponse(response)
-		if timerConnection then
-			timerConnection:Disconnect()
-			timerConnection = nil
-		end
-
-		-- Send response to server
-		promptReviveRemote:FireServer(response)
-
-		-- Animate exit
-		TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
-			Size = UDim2.new(0, 0, 0, 0)
-		}):Play()
-
-		task.wait(0.2)
+	-- Time's up
+	if remaining <= 0 and not hasResponded then
+		hasResponded = true
+		promptReviveRemote:FireServer("decline")
 		reviveUI.Enabled = false
 	end
+end
 
-	-- Yes button (use existing revive OR purchase if none)
-	yesButton.MouseButton1Click:Connect(function()
-		if not isPurchasing then
-			-- Check if player has revives
-			local currentRevives = player:GetAttribute("RevivesAvailable") or 0
-			
-			if currentRevives > 0 then
-				-- Has revives, use one
-				handleResponse("revive")
-			else
-				-- No revives - trigger purchase!
-				print("No revives available - triggering purchase...")
-				isPurchasing = true
-				processingText.Visible = true
-				processingText.Text = "Opening store..."
-				
-				-- DON'T pause timer - let it keep running
-				
-				-- Tell server we're purchasing
-				promptReviveRemote:FireServer("purchasing")
-				
-				-- Prompt purchase
-				local success, result = pcall(function()
-					return MarketplaceService:PromptProductPurchase(player, UI_CONFIG.REVIVE_PRODUCT_ID)
-				end)
-				
-				if not success then
-					print("Failed to prompt purchase:", result)
-					isPurchasing = false
-					processingText.Visible = false
-					
-					-- Timer is already running, no need to restart it
-				end
-			end
-		end
-	end)
-
-	-- Buy button (purchase revive)
-	buyButton.MouseButton1Click:Connect(function()
+-- Handle revive button click
+reviveButton.MouseButton1Click:Connect(function()
+	if hasResponded then return end
+	
+	local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
+	
+	if revivesAvailable > 0 then
+		-- Has revives, use one
+		hasResponded = true
+		promptReviveRemote:FireServer("revive")
+		reviveUI.Enabled = false
+	else
+		-- No revives, need to purchase
 		if not isPurchasing then
 			isPurchasing = true
-			processingText.Visible = true
-			
-			-- DON'T pause timer - let it keep running
+			infoText.Text = "Opening Robux store..."
+			reviveButton.Text = "PURCHASING..."
+			reviveButton.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
 			
 			-- Tell server we're purchasing
 			promptReviveRemote:FireServer("purchasing")
 			
-			-- Prompt purchase
-			local success, result = pcall(function()
-				return MarketplaceService:PromptProductPurchase(player, UI_CONFIG.REVIVE_PRODUCT_ID)
+			-- Open purchase prompt
+			local success = pcall(function()
+				MarketplaceService:PromptProductPurchase(player, REVIVE_PRODUCT_ID)
 			end)
 			
 			if not success then
-				print("Failed to prompt purchase:", result)
 				isPurchasing = false
-				processingText.Visible = false
-				
-				-- Timer is already running, no need to restart it
+				infoText.Text = "Purchase failed! Try again or respawn."
+				reviveButton.Text = "TRY AGAIN"
+				reviveButton.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
 			end
-		end
-	end)
-
-	-- No button (decline revive)
-	noButton.MouseButton1Click:Connect(function()
-		if not isPurchasing then
-			player:SetAttribute("ReviveDeclined", true)
-			handleResponse("decline")
-		end
-	end)
-end)
-
--- Listen for successful purchase
-MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, wasPurchased)
-	if userId == player.UserId and productId == UI_CONFIG.REVIVE_PRODUCT_ID then
-		if wasPurchased then
-			print("Revive purchased successfully!")
-			-- Server will handle adding the revive
-			-- Wait a moment for server to process
-			task.wait(0.5)
-			
-			-- Update UI to show revive button
-			local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
-			if revivesAvailable > 0 then
-				reviveCount.Text = "Revives remaining: " .. tostring(revivesAvailable)
-				yesButton.Visible = true
-				buyButton.Visible = false
-				
-				-- IMPORTANT: Automatically revive after purchase
-				print("Auto-reviving after purchase...")
-				processingText.Visible = false
-				isPurchasing = false
-				
-				-- Fire revive to server immediately
-				promptReviveRemote:FireServer("revive")
-				print("Sent revive signal to server after purchase")
-				
-				-- Wait a bit then hide UI
-				task.wait(0.5)
-				hideReviveUI()
-			end
-		else
-			print("Purchase cancelled")
-			processingText.Visible = false
-			isPurchasing = false
-			
-			-- Resume timer after cancelled purchase
-			local startTime = tick()
-			local duration = UI_CONFIG.REVIVE_TIMER_AFTER_CANCEL
-			
-			timerConnection = RunService.Heartbeat:Connect(function()
-				local elapsed = tick() - startTime
-				local remaining = math.max(0, duration - elapsed)
-				local progress = remaining / duration
-
-				timerBar.Size = UDim2.new(progress, 0, 0.02, 0)
-
-				if remaining <= 0 then
-					timerConnection:Disconnect()
-					timerConnection = nil
-					player:SetAttribute("ReviveTimerExpired", true)
-					reviveUI.Enabled = false
-				end
-			end)
 		end
 	end
 end)
 
-print("ReviveUI with Robux purchase loaded!")
+-- Handle decline button
+declineButton.MouseButton1Click:Connect(function()
+	if hasResponded then return end
+	hasResponded = true
+	promptReviveRemote:FireServer("decline")
+	reviveUI.Enabled = false
+end)
+
+-- Handle purchase completion
+MarketplaceService.PromptProductPurchaseFinished:Connect(function(userId, productId, wasPurchased)
+	if userId == player.UserId and productId == REVIVE_PRODUCT_ID then
+		if wasPurchased then
+			-- Purchase successful, wait for server to process
+			infoText.Text = "Purchase complete! Reviving..."
+			reviveButton.Text = "REVIVING..."
+			reviveButton.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+			
+			-- Give server time to process the purchase
+			task.wait(1)
+			
+			-- Now send revive signal
+			if not hasResponded then
+				hasResponded = true
+				promptReviveRemote:FireServer("revive")
+				reviveUI.Enabled = false
+			end
+		else
+			-- Purchase cancelled or failed
+			isPurchasing = false
+			infoText.Text = "Purchase cancelled. Revive or respawn?"
+			reviveButton.Text = "TRY AGAIN"
+			reviveButton.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+		end
+	end
+end)
+
+-- Timer update loop
+local timerConnection = nil
+local function startTimer()
+	if timerConnection then
+		timerConnection:Disconnect()
+	end
+	
+	timerConnection = RunService.Heartbeat:Connect(updateTimer)
+end
+
+-- Handle revive prompt from server
+promptReviveRemote.OnClientEvent:Connect(function()
+	-- Reset state
+	hasResponded = false
+	isPurchasing = false
+	startTime = tick()
+	
+	-- Get player stats
+	local deathLength = 0
+	local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
+	
+	if player.Character then
+		local leaderstats = player:FindFirstChild("leaderstats")
+		if leaderstats then
+			local lengthValue = leaderstats:FindFirstChild("Length")
+			if lengthValue then
+				deathLength = lengthValue.Value or 0
+			end
+		end
+	end
+	
+	-- Update UI
+	if revivesAvailable > 0 then
+		infoText.Text = "You have " .. revivesAvailable .. " revives. Use one?"
+		reviveButton.Text = "REVIVE (" .. revivesAvailable .. ")"
+		reviveButton.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+	else
+		infoText.Text = "No revives available. Purchase with Robux?"
+		reviveButton.Text = "BUY REVIVE"
+		reviveButton.BackgroundColor3 = Color3.fromRGB(110, 255, 110)
+	end
+	
+	-- Show UI
+	reviveUI.Enabled = true
+	
+	-- Start timer
+	startTimer()
+end)
+
+-- Clean up on death/respawn
+player.CharacterAdded:Connect(function()
+	if timerConnection then
+		timerConnection:Disconnect()
+		timerConnection = nil
+	end
+	reviveUI.Enabled = false
+end)
+
+print("ReviveUI loaded - Simplified version with robust purchase handling")
