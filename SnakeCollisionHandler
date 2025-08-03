@@ -1112,7 +1112,11 @@ task.spawn(function()
 									-- Clear ALL death-related states
 									deadPlayers[player] = nil
 									
-									-- Clear ALL attributes that might affect spawn
+									-- CRITICAL: Set a TEMPORARY reviving flag that SlitherIOMenu can check
+									-- This prevents the menu from showing up during revive
+									player:SetAttribute("RevivingNow", true)
+									
+									-- Clear ALL other attributes that might affect spawn
 									player:SetAttribute("Dead", false)
 									player:SetAttribute("JustRevived", false) -- NO special revive handling
 									player:SetAttribute("RevivePosition", nil) -- Don't use special position
@@ -1152,6 +1156,13 @@ task.spawn(function()
 									-- CRITICAL: Just use LoadCharacter() - EXACTLY like clicking Play button
 									-- No special handling, no cleanup tasks, nothing special
 									player:LoadCharacter()
+									
+									-- Clear the RevivingNow flag after a short delay
+									-- This gives the menu time to check and not show
+									task.spawn(function()
+										task.wait(0.5)
+										player:SetAttribute("RevivingNow", false)
+									end)
 									
 									-- The normal CharacterAdded event will handle everything:
 									-- - Setting invincibility (from line 159)
