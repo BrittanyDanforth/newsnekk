@@ -212,6 +212,10 @@ local reviveUI, yesButton, noButton, timerBar, buyButton, lengthInfo, reviveInfo
 local isPurchasing = false
 local timerConnection = nil
 
+-- Force reset revives on start (studio bug fix)
+player:SetAttribute("RevivesAvailable", 0)
+print("CLIENT: Force reset revives to 0 on start")
+
 -- Handle revive prompt
 promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 	print("REVIVE PROMPT RECEIVED! Death length:", deathLength or 0)

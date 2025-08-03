@@ -151,8 +151,8 @@ end
 
 -- Handle player joining
 Players.PlayerAdded:Connect(function(player)
-	-- Initialize revive attributes - START WITH 0 REVIVES
-	player:SetAttribute("RevivesAvailable", 0) -- No free revives
+	-- FORCE RESET ALL REVIVE ATTRIBUTES TO 0
+	player:SetAttribute("RevivesAvailable", 0) -- ALWAYS 0
 	player:SetAttribute("HasRevive", false)
 	player:SetAttribute("JustRevived", false)
 	player:SetAttribute("RevivingNow", false)
@@ -161,25 +161,44 @@ Players.PlayerAdded:Connect(function(player)
 	player:SetAttribute("LastLength", 0)
 	player:SetAttribute("DeathLength", 0)
 	
-	print("Player joined - Revives set to 0 for", player.Name)
+	print("FORCE RESET: Player joined - Revives FORCED to 0 for", player.Name)
+	
+	-- Double check it's really 0
+	task.wait(0.1)
+	local check = player:GetAttribute("RevivesAvailable")
+	print("Verification: Player", player.Name, "has", check, "revives (should be 0)")
 	
 	-- Set up character death handler
-	player.CharacterAdded:Connect(onCharacterDeath)
+	player.CharacterAdded:Connect(function(character)
+		-- RESET AGAIN on character spawn
+		player:SetAttribute("RevivesAvailable", 0)
+		print("Character spawned - Revives RESET to 0 for", player.Name)
+		
+		onCharacterDeath(character)
+	end)
 end)
 
 -- Also handle players already in game (for studio testing)
 for _, player in ipairs(Players:GetPlayers()) do
-	if not player:GetAttribute("RevivesAvailable") then
-		player:SetAttribute("RevivesAvailable", 0)
-		player:SetAttribute("HasRevive", false)
-		print("Reset revives to 0 for existing player:", player.Name)
-	end
+	-- ALWAYS FORCE RESET, don't check if exists
+	player:SetAttribute("RevivesAvailable", 0)
+	player:SetAttribute("HasRevive", false)
+	player:SetAttribute("JustRevived", false)
+	player:SetAttribute("RevivingNow", false)
+	player:SetAttribute("ReviveDeclined", false)
+	player:SetAttribute("ReviveTimerExpired", false)
+	print("FORCE RESET existing player revives to 0:", player.Name)
 	
 	if player.Character then
 		onCharacterDeath(player.Character)
 	end
 	
-	player.CharacterAdded:Connect(onCharacterDeath)
+	player.CharacterAdded:Connect(function(character)
+		-- RESET AGAIN on character spawn
+		player:SetAttribute("RevivesAvailable", 0)
+		print("Character spawned - Revives RESET to 0 for existing player", player.Name)
+		onCharacterDeath(character)
+	end)
 end
 
 -- Clean up on player leaving
