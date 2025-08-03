@@ -1,15 +1,17 @@
 
 --[[
-BEAUTIFUL SLITHER.IO MENU V4.0 - PREMIUM EDITION
+BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 
-- Ultra-modern glass morphism design
-- Enhanced animations and visual effects
+- Username system like real slither.io
+- Enhanced daily rewards UI (2x better)
+- Fixed transparency issues - panels are now readable
+- Added dark overlay to prevent panel stacking
+- Ultra-modern glass morphism design with better contrast
 - Improved spawn reliability and death handling
 - Advanced particle system with glow effects
 - Customizable color themes
 - Responsive UI with smooth transitions
 - Performance optimizations
-- Daily rewards system
 - Enhanced leaderboard with player stats
 ]]
 
@@ -24,7 +26,7 @@ BEAUTIFUL SLITHER.IO MENU V4.0 - PREMIUM EDITION
 
 		-- Configuration
 		local CONFIG = {
-			MENU_VERSION = "4.0",
+			MENU_VERSION = "5.0",
 			DEFAULT_THEME = "green", -- green, blue, purple, red, orange
 			THEMES = {
 				green = {
@@ -273,7 +275,7 @@ BEAUTIFUL SLITHER.IO MENU V4.0 - PREMIUM EDITION
 			return rewards[day]
 		end
 
-		-- Enhanced respawn system with UI persistence
+		-- Enhanced respawn system with username
 		local function requestRespawn()
 			-- Ensure RemoteEvent exists
 			local respawnEvent = ReplicatedStorage:FindFirstChild("RespawnSnake")
@@ -289,7 +291,11 @@ BEAUTIFUL SLITHER.IO MENU V4.0 - PREMIUM EDITION
 			playerStats.gamesPlayed = playerStats.gamesPlayed + 1
 			savePlayerStats()
 
-			respawnEvent:FireServer()
+			-- Get username or use default
+			local username = LocalPlayer:GetAttribute("SlitherUsername") or LocalPlayer.Name
+			
+			-- Send username with respawn
+			respawnEvent:FireServer(username)
 		end
 
 		-- Create a particle effect
@@ -700,11 +706,95 @@ BEAUTIFUL SLITHER.IO MENU V4.0 - PREMIUM EDITION
 				end
 			end)
 
+			-- USERNAME INPUT SECTION (NEW)
+			local usernameContainer = Instance.new("Frame")
+			usernameContainer.Size = UDim2.new(0.5, 0, 0.08, 0)
+			usernameContainer.Position = UDim2.new(0.25, 0, 0.32, 0)
+			usernameContainer.BackgroundColor3 = Color3.fromRGB(30, 35, 50)
+			usernameContainer.BackgroundTransparency = 0.3
+			usernameContainer.Parent = frame
+			
+			local usernameCorner = Instance.new("UICorner")
+			usernameCorner.CornerRadius = UDim.new(0, 12)
+			usernameCorner.Parent = usernameContainer
+			
+			local usernameStroke = Instance.new("UIStroke")
+			usernameStroke.Color = theme.primary
+			usernameStroke.Transparency = 0.5
+			usernameStroke.Thickness = 2
+			usernameStroke.Parent = usernameContainer
+			
+			-- Snake icon
+			local snakeIcon = Instance.new("TextLabel")
+			snakeIcon.Size = UDim2.new(0.12, 0, 0.8, 0)
+			snakeIcon.Position = UDim2.new(0.02, 0, 0.1, 0)
+			snakeIcon.BackgroundTransparency = 1
+			snakeIcon.Text = "🐍"
+			snakeIcon.Font = Enum.Font.SourceSans
+			snakeIcon.TextScaled = true
+			snakeIcon.Parent = usernameContainer
+			
+			-- Username input
+			local usernameInput = Instance.new("TextBox")
+			usernameInput.Size = UDim2.new(0.7, 0, 0.8, 0)
+			usernameInput.Position = UDim2.new(0.14, 0, 0.1, 0)
+			usernameInput.BackgroundTransparency = 1
+			usernameInput.Text = LocalPlayer.Name
+			usernameInput.PlaceholderText = "Nickname"
+			usernameInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+			usernameInput.Font = Enum.Font.SourceSansSemibold
+			usernameInput.TextScaled = true
+			usernameInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+			usernameInput.ClearTextOnFocus = false
+			usernameInput.Parent = usernameContainer
+			
+			-- Character counter
+			local charCounter = Instance.new("TextLabel")
+			charCounter.Size = UDim2.new(0.12, 0, 0.5, 0)
+			charCounter.Position = UDim2.new(0.85, 0, 0.25, 0)
+			charCounter.BackgroundTransparency = 1
+			charCounter.Text = #usernameInput.Text .. "/16"
+			charCounter.Font = Enum.Font.SourceSans
+			charCounter.TextScaled = true
+			charCounter.TextColor3 = Color3.fromRGB(150, 150, 150)
+			charCounter.Parent = usernameContainer
+			
+			-- Username validation
+			usernameInput:GetPropertyChangedSignal("Text"):Connect(function()
+				local text = usernameInput.Text
+				if #text > 16 then
+					usernameInput.Text = text:sub(1, 16)
+				end
+				charCounter.Text = #usernameInput.Text .. "/16"
+			end)
+			
+			usernameInput.FocusLost:Connect(function()
+				if #usernameInput.Text == 0 then
+					usernameInput.Text = LocalPlayer.Name
+				end
+				
+				-- Save username
+				LocalPlayer:SetAttribute("SlitherUsername", usernameInput.Text)
+				
+				-- Visual feedback
+				TweenService:Create(usernameStroke, TweenInfo.new(0.3), {
+					Color = Color3.fromRGB(0, 255, 127),
+					Transparency = 0.2
+				}):Play()
+				
+				task.wait(0.3)
+				
+				TweenService:Create(usernameStroke, TweenInfo.new(0.3), {
+					Color = theme.primary,
+					Transparency = 0.5
+				}):Play()
+			end)
+
 			-- Premium play button with glass effect
 			local playButton, playShadow = createPremiumButton(
 				frame, 
 				UDim2.new(0.4, 0, 0.12, 0), 
-				UDim2.new(0.3, 0, 0.4, 0), 
+				UDim2.new(0.3, 0, 0.45, 0), 
 				"Play", 
 				theme.primary
 			)
@@ -907,28 +997,75 @@ BEAUTIFUL SLITHER.IO MENU V4.0 - PREMIUM EDITION
 				end)
 			end
 
+			-- Helper to close all panels
+			local function closeAllPanels()
+				local panels = {"SettingsPanel", "SharePanel", "StatsPanel", "DailyRewardPanel"}
+				for _, panelName in ipairs(panels) do
+					local panel = screenGui:FindFirstChild(panelName)
+					if panel then
+						panel:Destroy()
+					end
+				end
+				-- Remove dark overlay if exists
+				local overlay = screenGui:FindFirstChild("DarkOverlay")
+				if overlay then
+					overlay:Destroy()
+				end
+			end
+
+			-- Create dark overlay for panels
+			local function createDarkOverlay()
+				local overlay = Instance.new("Frame")
+				overlay.Name = "DarkOverlay"
+				overlay.Size = UDim2.new(1, 0, 1, 0)
+				overlay.Position = UDim2.new(0, 0, 0, 0)
+				overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+				overlay.BackgroundTransparency = 0.5
+				overlay.ZIndex = 15
+				overlay.Parent = screenGui
+				
+				-- Click to close
+				local closeButton = Instance.new("TextButton")
+				closeButton.Size = UDim2.new(1, 0, 1, 0)
+				closeButton.BackgroundTransparency = 1
+				closeButton.Text = ""
+				closeButton.Parent = overlay
+				
+				closeButton.MouseButton1Click:Connect(function()
+					closeAllPanels()
+				end)
+				
+				return overlay
+			end
+
 			-- PREMIUM SETTINGS PANEL
 			local function openSettingsPanel()
-				if screenGui:FindFirstChild("SettingsPanel") then return end
+				closeAllPanels() -- Close other panels first
+				
+				createDarkOverlay() -- Add dark background
 
 				local panel = createGlassPanel(
 					screenGui, 
-					UDim2.new(0.32, 0, 0.4, 0), 
-					UDim2.new(0.34, 0, 0.3, 0), 
-					UDim.new(0, 16), 
-					0.92, 
+					UDim2.new(0.35, 0, 0.45, 0), 
+					UDim2.new(0.325, 0, 0.275, 0), 
+					UDim.new(0, 20), 
+					0.1, -- Much less transparent
 					20
 				)
 				panel.Name = "SettingsPanel"
 
-				-- Backdrop blur effect
-				local blur = Instance.new("Frame")
-				blur.Size = UDim2.new(1, 20, 1, 20)
-				blur.Position = UDim2.new(0, -10, 0, -10)
-				blur.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-				blur.BackgroundTransparency = 0.7
-				blur.ZIndex = panel.ZIndex - 1
-				blur.Parent = panel
+				-- Enhanced backdrop
+				local backdrop = Instance.new("Frame")
+				backdrop.Size = UDim2.new(1, 0, 1, 0)
+				backdrop.Position = UDim2.new(0, 0, 0, 0)
+				backdrop.BackgroundColor3 = Color3.fromRGB(15, 18, 28)
+				backdrop.BackgroundTransparency = 0.1
+				backdrop.ZIndex = panel.ZIndex - 1
+				backdrop.Parent = panel
+				
+				local backdropCorner = Instance.new("UICorner")
+				backdropCorner.CornerRadius = UDim.new(0, 20)
+				backdropCorner.Parent = backdrop
 
 				local blurCorner = Instance.new("UICorner")
 				blurCorner.CornerRadius = UDim.new(0, 20)
@@ -1286,28 +1423,55 @@ BEAUTIFUL SLITHER.IO MENU V4.0 - PREMIUM EDITION
 				end)
 			end
 
-			-- DAILY REWARD PANEL
+			-- DAILY REWARD PANEL (ENHANCED UI)
 			local function openDailyRewardPanel()
-				if screenGui:FindFirstChild("DailyRewardPanel") then return end
+				closeAllPanels() -- Close other panels first
+				
+				createDarkOverlay() -- Add dark background
 
-				local panel = createGlassPanel(
-					screenGui, 
-					UDim2.new(0.4, 0, 0.5, 0), 
-					UDim2.new(0.3, 0, 0.25, 0), 
-					UDim.new(0, 16), 
-					0.92, 
-					20
-				)
-				panel.Name = "DailyRewardPanel"
-
-				-- Backdrop blur
-				local blur = Instance.new("Frame")
-				blur.Size = UDim2.new(1, 20, 1, 20)
-				blur.Position = UDim2.new(0, -10, 0, -10)
-				blur.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-				blur.BackgroundTransparency = 0.7
-				blur.ZIndex = panel.ZIndex - 1
-				blur.Parent = panel
+				-- Main container with better visibility
+				local mainContainer = Instance.new("Frame")
+				mainContainer.Name = "DailyRewardPanel"
+				mainContainer.Size = UDim2.new(0.5, 0, 0.6, 0)
+				mainContainer.Position = UDim2.new(0.25, 0, 0.2, 0)
+				mainContainer.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
+				mainContainer.BackgroundTransparency = 0
+				mainContainer.ZIndex = 20
+				mainContainer.Parent = screenGui
+				
+				local containerCorner = Instance.new("UICorner")
+				containerCorner.CornerRadius = UDim.new(0, 24)
+				containerCorner.Parent = mainContainer
+				
+				-- Premium stroke
+				local containerStroke = Instance.new("UIStroke")
+				containerStroke.Color = theme.primary
+				containerStroke.Transparency = 0.3
+				containerStroke.Thickness = 3
+				containerStroke.Parent = mainContainer
+				
+				-- Inner panel with gradient
+				local panel = Instance.new("Frame")
+				panel.Size = UDim2.new(1, -4, 1, -4)
+				panel.Position = UDim2.new(0, 2, 0, 2)
+				panel.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+				panel.BackgroundTransparency = 0.2
+				panel.ZIndex = 21
+				panel.Parent = mainContainer
+				
+				local panelCorner = Instance.new("UICorner")
+				panelCorner.CornerRadius = UDim.new(0, 22)
+				panelCorner.Parent = panel
+				
+				-- Background gradient
+				local bgGradient = Instance.new("UIGradient")
+				bgGradient.Color = ColorSequence.new{
+					ColorSequenceKeypoint.new(0, theme.background[1]),
+					ColorSequenceKeypoint.new(0.3, theme.background[2]),
+					ColorSequenceKeypoint.new(1, theme.background[3])
+				}
+				bgGradient.Rotation = 90
+				bgGradient.Parent = panel
 
 				local blurCorner = Instance.new("UICorner")
 				blurCorner.CornerRadius = UDim.new(0, 20)
