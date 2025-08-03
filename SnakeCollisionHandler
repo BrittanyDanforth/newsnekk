@@ -976,6 +976,15 @@ task.spawn(function()
 							-- CRITICAL: Remove from collision detection immediately
 							rootPart:SetAttribute("Dead", true) -- Mark as dead for collision system
 
+							-- CRITICAL: Clean up any visual effects BEFORE making character invisible
+							-- This prevents the "orb on death" issue
+							for _, child in ipairs(rootPart:GetChildren()) do
+								if child:IsA("PointLight") or child:IsA("ParticleEmitter") or child:IsA("Attachment") then
+									print("🧹 Cleaning up effect on death:", child.Name, child.ClassName)
+									child:Destroy()
+								end
+							end
+
 							-- Make character invisible and non-collidable
 							rootPart.Anchored = true -- Prevent any movement
 							rootPart.CanCollide = false
@@ -1095,22 +1104,35 @@ task.spawn(function()
 									-- Just respawn like clicking Play button
 									player:LoadCharacter()
 
-									-- CRITICAL: Wait for new snake to be created before clearing invincibility
-									task.spawn(function()
-										-- Wait for character to load and snake to be created
-										task.wait(2) -- Give time for snake creation
+																	-- CRITICAL: Wait for new snake to be created before clearing invincibility AND CLEAN UP THE ORB
+								task.spawn(function()
+									-- Give a very brief moment for the effect to be parented by other scripts
+									task.wait(0.2)
 
-										-- Force cache refresh after snake is created
-										resetPlayerCollisionState(player)
+									-- *** STRAY ORB FIX: Actively clean up the unwanted effect ***
+									if player and player.Character then
+										print("🔎 Cleaning up any unwanted revive effects...")
+										local charRoot = player.Character:FindFirstChild("HumanoidRootPart")
+										if charRoot then
+											for _, child in ipairs(charRoot:GetChildren()) do
+												if child:IsA("BasePart") or child:IsA("Model") then
+													print("- Found and removed unexpected visual effect:", child:GetFullName())
+													child:Destroy()
+												end
+											end
+										end
+									end
 
-										-- Continue invincibility for remaining time
-										task.wait(3)
-										invinciblePlayers[player] = nil
-										print("✅ Invincibility ended for", player.Name)
+									-- Wait for the remainder of the original 2-second period for snake creation
+									task.wait(1.8)
 
-										-- Final cache clear to ensure fresh detection
-										headCache.lastUpdate = 0
-									end)
+									resetPlayerCollisionState(player)
+									task.wait(3)
+									invinciblePlayers[player] = nil
+									print("✅ Invincibility ended for", player.Name)
+
+									headCache.lastUpdate = 0
+								end)
 
 									return -- Don't proceed with normal death
 								end
