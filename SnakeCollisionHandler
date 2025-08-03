@@ -943,6 +943,13 @@ task.spawn(function()
 						player:SetAttribute("MagnetRange", 1) -- Reset to default (no magnet)
 						player:SetAttribute("TempMagnetRange", 1) -- Clear any temporary boost
 						player:SetAttribute("ActiveMagnet", false) -- Clear active state
+						
+						-- CRITICAL: Clear ALL gamepass effects that might create visual artifacts
+						player:SetAttribute("SpawnGhostMode", false) -- Clear ghost mode
+						player:SetAttribute("ActiveGhostMode", false) -- Clear active ghost
+						player:SetAttribute("ActiveSpeedBoost", false)
+						player:SetAttribute("ActiveMegaSpeed", false)
+						player:SetAttribute("ActiveGrowthBoost", false)
 
 						-- CRITICAL: Destroy snake controls immediately so player can't move
 						-- This prevents the "still moving while dead" bug
@@ -985,7 +992,8 @@ task.spawn(function()
 								if child:IsA("PointLight") or child:IsA("SpotLight") or child:IsA("SurfaceLight") or 
 								   child:IsA("ParticleEmitter") or child:IsA("Fire") or child:IsA("Smoke") or child:IsA("Sparkles") or
 								   child:IsA("Attachment") or child:IsA("Beam") or child:IsA("Trail") or
-								   child:IsA("BillboardGui") or child:IsA("SurfaceGui") or child:IsA("ScreenGui") then
+								   child:IsA("BillboardGui") or child:IsA("SurfaceGui") or child:IsA("ScreenGui") or
+								   child:IsA("SelectionBox") or child.Name == "RootGlow" or child.Name == "RootOutline" then
 									print("  - Removed effect from HumanoidRootPart:", child.Name, child.ClassName)
 									child:Destroy()
 								end
