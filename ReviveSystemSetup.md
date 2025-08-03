@@ -1,101 +1,238 @@
-# Slither.io Revive System Setup Guide
+# Slither.io Revive System - Complete Setup Guide
 
 ## Overview
-This revive system allows players to revive at 80% of their death length by using revives or purchasing them for 35 Robux.
+A complete revive system that:
+- Saves revives permanently using DataStore
+- Shows death length and revive at 80%
+- One-button system (REVIVE button auto-purchases if needed)
+- 35 Robux per revive
 
-## Setup Instructions
+## Required Components
 
-### 1. Create the Product in Roblox
-1. Go to your game's page on Roblox
-2. Click on "Store" → "Passes and Other Products" → "Developer Products"
-3. Create a new Developer Product:
-   - Name: "Revive"
-   - Price: 35 Robux
-   - Description: "Revive at 80% of your length!"
-4. Copy the Product ID
+### 1. Scripts to Install
 
-### 2. Update the Scripts
-1. In both `ReviveUI` and `SnakeDeathHandler`, replace `123456789` with your actual Product ID:
-   ```lua
-   REVIVE_PRODUCT_ID = YOUR_PRODUCT_ID_HERE
-   ```
+#### A. **ReviveUI** (Client-Side)
+- **Location**: StarterPlayer → StarterPlayerScripts
+- **Purpose**: Shows the revive UI when player dies
+- **Features**: 
+  - Shows "BRUH YOU DIED!" message
+  - Displays death length and 80% revive length
+  - Single REVIVE button that auto-purchases if no revives
 
-### 3. Script Placement
-- `ReviveUI` → StarterPlayer > StarterPlayerScripts
-- `SnakeDeathHandler` → ServerScriptService
-- `SlitherIOMenu` → StarterPlayer > StarterPlayerScripts
+#### B. **SnakeDeathHandler** (Server-Side)
+- **Location**: ServerScriptService
+- **Purpose**: Handles death detection, revive logic, and data persistence
+- **Features**:
+  - Detects player death and captures length
+  - Manages revive inventory with DataStore
+  - Processes Robux purchases
+  - Handles respawn at 80% length
 
-### 4. How It Works
+#### C. **SlitherIOMenu** (Client-Side)
+- **Location**: StarterPlayer → StarterPlayerScripts
+- **Purpose**: Main menu that waits 6 seconds after death before showing
 
-#### Death Flow:
-1. Player dies → Snake length is captured
-2. Server waits 0.5 seconds for death animation
-3. ReviveUI appears showing:
-   - "BRUH YOU DIED!"
-   - "Your length: [death length]"
-   - "Revive at [80% length] length!"
-   - If has revives: "REVIVE" button
-   - If no revives: "BUY REVIVE 35 🪙" button
-4. 5 second timer to decide
+### 2. Roblox Product Setup
 
-#### Revive Options:
-- **Has Revives**: Click "REVIVE" to respawn at 80% length
-- **No Revives**: Click "BUY REVIVE 35" to purchase and auto-revive
-- **Decline**: Click "RESPAWN" or let timer expire
+1. Go to your game page on Roblox.com
+2. Click **Configure Experience** → **Monetization** → **Developer Products**
+3. Click **Create Product**
+4. Fill in:
+   - **Name**: Revive
+   - **Price**: 35 Robux
+   - **Description**: Revive at 80% of your length!
+   - **Icon**: (optional)
+5. Click **Create** and copy the Product ID
+6. Replace `3356734577` with your Product ID in both scripts
 
-#### Purchase Flow:
-1. Click "BUY REVIVE 35"
-2. Roblox purchase prompt appears
-3. Timer pauses during purchase
-4. If purchased: Auto-revives at 80% length
-5. If cancelled: Timer resumes (3 seconds)
+### 3. Required Game Structure
 
-### 5. Testing
-1. Set a test Product ID or use a test place
-2. Give yourself a long snake (use admin commands)
-3. Die and test the revive UI
-4. Test both with and without revives
+Your game needs:
+```
+Players
+└── Player
+    └── leaderstats (Folder)
+        └── Length (IntValue) - Current snake length
 
-### 6. Important Notes
-- The death handler needs to run AFTER the snake system initializes
-- Make sure leaderstats with "Length" value exists
-- The revive at 80% length is handled by setting `player:SetAttribute("ReviveLength", reviveLength)`
-- Your snake spawning system should check for this attribute and set initial length accordingly
+ReplicatedStorage
+└── Remotes (Folder) - Created automatically
+    └── PromptRevive (RemoteEvent) - Created automatically
+```
 
-### 7. Integration with Snake System
-When spawning a snake after revive, check for the ReviveLength attribute:
+### 4. DataStore Access
+
+**IMPORTANT**: DataStores don't work in Studio by default!
+
+To test in Studio:
+1. Game Settings → Security → Enable Studio Access to API Services
+2. Publish the game to test DataStore properly
+
+## Installation Steps
+
+### Step 1: Install All Scripts
+1. Copy **ReviveUI** to StarterPlayer → StarterPlayerScripts
+2. Copy **SnakeDeathHandler** to ServerScriptService
+3. Make sure **SlitherIOMenu** is in StarterPlayer → StarterPlayerScripts
+
+### Step 2: Update Product IDs
+In both ReviveUI and SnakeDeathHandler, find and replace:
+```lua
+REVIVE_PRODUCT_ID = 3356734577
+```
+With your actual product ID.
+
+### Step 3: Integration with Snake System
+
+Your snake spawning system needs to check for revive length:
 
 ```lua
-local function spawnSnake(player)
+-- When creating a snake after respawn
+local function createSnake(player, character)
     local reviveLength = player:GetAttribute("ReviveLength")
-    local initialLength = 10 -- default
+    local initialLength = 10 -- default starting length
     
     if reviveLength and reviveLength > 0 then
         initialLength = reviveLength
         player:SetAttribute("ReviveLength", 0) -- Clear after use
+        print("Spawning with revive length:", initialLength)
     end
     
-    -- Create snake with initialLength
+    -- Create your snake with initialLength
     local snake = SnakeSystem.createSnake(character, {
         InitialLength = initialLength,
         -- other config
     })
+    
+    -- Make sure leaderstats updates
+    local leaderstats = player:FindFirstChild("leaderstats")
+    if leaderstats then
+        local lengthValue = leaderstats:FindFirstChild("Length")
+        if lengthValue then
+            lengthValue.Value = initialLength
+        end
+    end
 end
 ```
 
+### Step 4: Verify Installation
+
+Run this check script in the command bar:
+
+```lua
+-- Check if everything is set up correctly
+print("=== REVIVE SYSTEM CHECK ===")
+
+-- Check RemoteEvents
+local remotes = game.ReplicatedStorage:FindFirstChild("Remotes")
+if remotes then
+    print("✓ Remotes folder exists")
+    if remotes:FindFirstChild("PromptRevive") then
+        print("✓ PromptRevive RemoteEvent exists")
+    else
+        print("✗ PromptRevive RemoteEvent missing")
+    end
+else
+    print("✗ Remotes folder missing")
+end
+
+-- Check Scripts
+if game.ServerScriptService:FindFirstChild("SnakeDeathHandler") then
+    print("✓ SnakeDeathHandler installed")
+else
+    print("✗ SnakeDeathHandler missing from ServerScriptService")
+end
+
+-- Check DataStore access
+local success = pcall(function()
+    game:GetService("DataStoreService"):GetDataStore("TestStore"):GetAsync("test")
+end)
+if success then
+    print("✓ DataStore access enabled")
+else
+    print("✗ DataStore access disabled (Enable Studio API Services)")
+end
+
+print("=== END CHECK ===")
+```
+
+## How The System Works
+
+### Death Flow:
+1. **Player Dies** → SnakeDeathHandler captures death length
+2. **Wait 0.5s** → Death animation plays
+3. **Prompt Revive** → ReviveUI appears with:
+   - "BRUH YOU DIED!"
+   - "Your length: X"
+   - "Revive at Y length! (80% of X)"
+   - Shows revive count
+4. **5 Second Timer** → Auto-declines if no action
+
+### Revive Flow:
+1. **Click REVIVE**:
+   - **Has Revives**: Uses one, respawns at 80% length
+   - **No Revives**: Opens Robux purchase prompt
+2. **Purchase Success**: Grants revive and auto-uses it
+3. **Purchase Cancel**: Timer resumes (3 seconds)
+
+### Data Persistence:
+- Revives saved to DataStore
+- Survives server restarts
+- Auto-saves every 30 seconds
+- Saves on purchase/use/leave
+
 ## Troubleshooting
 
-### Length Not Showing:
-- Check if leaderstats > Length exists
-- Ensure SnakeDeathHandler is running
-- Verify death length is being passed to ReviveUI
+### "I have revives but didn't buy any"
+- You might have test data from previous sessions
+- DataStore persists between Studio sessions
+- To reset: Use command bar with your UserId:
+  ```lua
+  game:GetService("DataStoreService"):GetDataStore("PlayerRevives"):RemoveAsync("Player_YOUR_USER_ID")
+  ```
 
-### Purchase Not Working:
-- Verify Product ID is correct
-- Check if product is active on Roblox
-- Ensure MarketplaceService access is enabled
+### "Purchase not working"
+1. Check Product ID is correct
+2. Ensure product is active on Roblox
+3. Test in published game (not just Studio)
+4. Check F9 console for errors
 
-### Revive Not Working:
-- Check RevivesAvailable attribute
-- Verify PromptRevive RemoteEvent exists
-- Check server console for errors
+### "Length shows as 0"
+1. Ensure leaderstats → Length exists
+2. Check snake system updates Length value
+3. Verify SnakeDeathHandler is running
+
+### "Menu appears too fast after death"
+- SlitherIOMenu should wait 6 seconds
+- Check death handler in SlitherIOMenu
+
+### "Revives not saving"
+1. Enable Studio API Services for testing
+2. Check DataStore isn't throwing errors
+3. Publish game to test properly
+
+## Console Messages to Expect
+
+When working correctly, you'll see:
+```
+Snake Death Handler loaded with persistent revive storage!
+Loaded X revives for [PlayerName]
+Player [PlayerName] died with length: X
+Player has X revives available
+REVIVE PROMPT RECEIVED! Death length: X
+```
+
+## API Reference
+
+### Player Attributes Set by System:
+- `RevivesAvailable` - Number of revives owned
+- `LastLength` - Length at death
+- `DeathLength` - Same as LastLength
+- `ReviveLength` - Length to spawn with after revive
+- `JustRevived` - True when reviving
+- `RevivingNow` - True during revive process
+- `ReviveDeclined` - True if declined revive
+- `ReviveTimerExpired` - True if timer ran out
+
+### RemoteEvents:
+- `PromptRevive:FireClient(player, deathLength)` - Show revive UI
+- `PromptRevive:FireServer(response)` - Response: "revive" or "decline"
