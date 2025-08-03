@@ -1187,8 +1187,6 @@ task.spawn(function()
 
 								return -- Don't proceed with normal death
 							end
-						end
-
 						end -- End of revive prompt else block
 						
 						-- =============================================
