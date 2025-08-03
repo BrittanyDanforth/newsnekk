@@ -1014,18 +1014,18 @@ task.spawn(function()
 
 						print("🔍 Death check - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
 
-						if hasRevive and revivesAvailable > 0 then
-							print("✅ Player has revive! Sending prompt to", player.Name)
+						-- ALWAYS show revive UI (so players can buy revives with Robux)
+						print("📱 Showing revive UI for", player.Name)
 
-							-- Get revive prompt from remotes folder
-							local reviveRemote = remotes:FindFirstChild("PromptRevive")
-							if not reviveRemote then
-								print("❌ PromptRevive remote not found in Remotes folder!")
-								-- Continue with normal death
-							else
-								-- Fire revive prompt to client
-								reviveRemote:FireClient(player)
-								print("🚀 Revive prompt sent to client!")
+						-- Get revive prompt from remotes folder
+						local reviveRemote = remotes:FindFirstChild("PromptRevive")
+						if not reviveRemote then
+							print("❌ PromptRevive remote not found in Remotes folder!")
+							-- Continue with normal death
+						else
+							-- Fire revive prompt to client (ALWAYS, not just when they have revives)
+							reviveRemote:FireClient(player)
+							print("🚀 Revive prompt sent to client!")
 
 								-- Wait for response (5 seconds max)
 								local revived = false
@@ -1052,8 +1052,10 @@ task.spawn(function()
 									-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
 									isProcessingDeaths = false
 
-									-- Revive the player
-									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+									-- Only deduct if they had revives (not if they bought with Robux)
+									if revivesAvailable > 0 then
+										player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+									end
 
 									-- Store current position and snake length
 									local deathPosition = rootPart and rootPart.Position or Vector3.new(0, 10, 0)
@@ -1115,7 +1117,6 @@ task.spawn(function()
 									return -- Don't proceed with normal death
 								end
 							end
-						end
 
 						-- ONLY mark as dead if NOT reviving
 						deadPlayers[player] = true
