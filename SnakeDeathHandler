@@ -91,6 +91,8 @@ promptReviveRemote.OnServerEvent:Connect(function(player, response)
 		-- Check if player has revives
 		local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
 		
+		print("REVIVE ATTEMPT - Player has", revivesAvailable, "revives")
+		
 		if revivesAvailable > 0 then
 			-- Use a revive
 			player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
@@ -113,8 +115,10 @@ promptReviveRemote.OnServerEvent:Connect(function(player, response)
 			
 			print("Player revived at length:", reviveLength)
 		else
-			warn("Player has no revives available")
-			player:SetAttribute("ReviveDeclined", true)
+			-- NO REVIVES - This shouldn't happen because UI should show buy button
+			warn("ERROR: Player tried to revive with 0 revives! This shouldn't happen!")
+			-- Don't respawn, just close the UI
+			-- The client should have shown the buy button instead
 		end
 	else
 		-- Player declined revive
