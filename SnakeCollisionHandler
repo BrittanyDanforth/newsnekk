@@ -1043,9 +1043,9 @@ task.spawn(function()
 									end
 								end)
 
-								-- Wait up to 15 seconds for response (allows time for Robux purchase)
+								-- Wait up to 30 seconds for response (allows time for Robux purchase)
 								local waitTime = 0
-								while waitTime < 15 and not revived and not declined do
+								while waitTime < 30 and not revived and not declined do
 									task.wait(0.1)
 									waitTime = waitTime + 0.1
 									

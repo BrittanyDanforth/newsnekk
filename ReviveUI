@@ -25,8 +25,9 @@ local UI_CONFIG = {
 	ROBUX_COLOR = Color3.fromRGB(110, 255, 110),
 	REVIVE_PRODUCT_ID = 3356734577, -- Your actual product ID
 	REVIVE_PERCENTAGE = 0.8, -- Revive at 80% of death length
-	REVIVE_TIMER_DURATION = 15, -- Match server wait time (15 seconds)
+	REVIVE_TIMER_DURATION = 30, -- Extended to 30 seconds for purchase time
 	REVIVE_TIMER_AFTER_CANCEL = 5, -- Timer after cancelled purchase
+	PURCHASE_TIMEOUT = 30, -- Max time to wait for purchase
 }
 
 -- Create revive prompt UI
@@ -293,10 +294,22 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 			
 			-- Update timer display
 			local secondsLeft = math.ceil(remaining)
-			if revivesAvailable > 0 then
+			if isPurchasing then
+				reviveInfo.Text = "Waiting for purchase... (" .. secondsLeft .. "s remaining)"
+				processingText.Text = "Complete purchase within " .. secondsLeft .. " seconds"
+				-- Make UI slightly transparent so they can see game
+				overlay.BackgroundTransparency = 0.7
+				container.BackgroundTransparency = 0.3
+			elseif revivesAvailable > 0 then
 				reviveInfo.Text = "Use a revive to continue? (" .. secondsLeft .. "s)"
+				-- Restore normal opacity
+				overlay.BackgroundTransparency = 0.3
+				container.BackgroundTransparency = 0.1
 			else
 				reviveInfo.Text = "Purchase a revive to continue? (" .. secondsLeft .. "s)"
+				-- Restore normal opacity
+				overlay.BackgroundTransparency = 0.3
+				container.BackgroundTransparency = 0.1
 			end
 
 			if remaining <= 0 then
@@ -344,10 +357,7 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 				processingText.Visible = true
 				processingText.Text = "Opening store..."
 				
-				-- Pause timer during purchase
-				if timerConnection then
-					timerConnection:Disconnect()
-				end
+				-- DON'T pause timer - let it keep running
 				
 				-- Prompt purchase
 				local success, result = pcall(function()
@@ -359,21 +369,7 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 					isPurchasing = false
 					processingText.Visible = false
 					
-					-- Resume timer
-					timerConnection = RunService.Heartbeat:Connect(function()
-						local elapsed = tick() - startTime
-						local remaining = math.max(0, duration - elapsed)
-						local progress = remaining / duration
-
-						timerBar.Size = UDim2.new(progress, 0, 0.02, 0)
-
-						if remaining <= 0 then
-							timerConnection:Disconnect()
-							timerConnection = nil
-							player:SetAttribute("ReviveTimerExpired", true)
-							reviveUI.Enabled = false
-						end
-					end)
+					-- Timer is already running, no need to restart it
 				end
 			end
 		end
@@ -385,10 +381,7 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 			isPurchasing = true
 			processingText.Visible = true
 			
-			-- Pause timer during purchase
-			if timerConnection then
-				timerConnection:Disconnect()
-			end
+			-- DON'T pause timer - let it keep running
 			
 			-- Prompt purchase
 			local success, result = pcall(function()
@@ -400,21 +393,7 @@ promptReviveRemote.OnClientEvent:Connect(function(deathLength)
 				isPurchasing = false
 				processingText.Visible = false
 				
-				-- Resume timer
-				timerConnection = RunService.Heartbeat:Connect(function()
-					local elapsed = tick() - startTime
-					local remaining = math.max(0, duration - elapsed)
-					local progress = remaining / duration
-
-					timerBar.Size = UDim2.new(progress, 0, 0.02, 0)
-
-					if remaining <= 0 then
-						timerConnection:Disconnect()
-						timerConnection = nil
-						player:SetAttribute("ReviveTimerExpired", true)
-						reviveUI.Enabled = false
-					end
-				end)
+				-- Timer is already running, no need to restart it
 			end
 		end
 	end)
