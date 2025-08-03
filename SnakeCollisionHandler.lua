@@ -743,6 +743,7 @@ task.spawn(function()
 						local segments = getActualSnakeSegments(player)
 						local segmentPositions = {}
 						if segments and #segments > 0 then
+							print("🔍 Found", #segments, "segments to store positions from")
 							for i, seg in ipairs(segments) do
 								if seg and seg:IsA("BasePart") and seg.Parent and seg.Position then
 									-- Create a copy of the position
@@ -750,6 +751,8 @@ task.spawn(function()
 								end
 							end
 							print("📍 Stored", #segmentPositions, "segment positions for orb spawning")
+						else
+							print("⚠️ No segments found for", player.Name, "before death processing")
 						end
 						
 						-- Clear magnet effect immediately
@@ -760,33 +763,18 @@ task.spawn(function()
 						-- CAMERA FIX: Disconnect camera updates
 						disconnectPlayerCamera(player)
 						
-						-- CRITICAL: Destroy snake controls immediately
+						-- CRITICAL: Get snake references but DON'T destroy yet (wait to see if they revive)
 						local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
 						if not snakeInstance and character:FindFirstChild("__SnakeInstance") then
 							snakeInstance = character.__SnakeInstance.Value
 						end
 						
-						if snakeInstance then
-							if snakeInstance.destroy then
-								print("🐍 Destroying snake controls for", player.Name)
-								snakeInstance:destroy()
-							end
-							if _G.PlayerSnakes then
-								_G.PlayerSnakes[player] = nil
-							end
-						end
-						
-						-- Destroy visual snake model
-						local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
-						if snakeModel then
-							print("🗑️ Destroying visual snake model for", player.Name)
-							snakeModel:Destroy()
-						end
-						
-						-- Set humanoid health to 0
-						if humanoid then
-							humanoid.Health = 0
-						end
+						-- Store references but don't destroy yet
+						local snakeToDestroy = snakeInstance
+						local visualSnakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
+
+						-- DON'T set health to 0 yet - wait to see if they revive!
+						-- This prevents the menu from showing prematurely
 						
 						-- Handle character death animation
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -949,12 +937,12 @@ task.spawn(function()
 								end
 
 								-- Orb spawning is now ONLY in the normal death path
-								if segments and #segments > 0 then
-							print("💎 Spawning death orbs for", player.Name, "with", #segmentPositions, "segment positions")
-							
-							local totalSegments = #segmentPositions
-							local orbsPerSegment = 1 / 2.5
-							local totalOrbs = math.clamp(math.floor(snakeLength * orbsPerSegment), 3, 40)
+								if segmentPositions and #segmentPositions > 0 then
+									print("💎 Spawning death orbs for", player.Name, "with", #segmentPositions, "segment positions")
+									
+									local totalSegments = #segmentPositions
+									local orbsPerSegment = 1 / 2.5
+									local totalOrbs = math.clamp(math.floor(snakeLength * orbsPerSegment), 3, 40)
 							
 							-- Calculate orb value
 							local baseValue = 1
