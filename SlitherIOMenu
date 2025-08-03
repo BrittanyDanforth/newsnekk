@@ -348,13 +348,13 @@ BEAUTIFUL SLITHER.IO MENU V4.0 - PREMIUM EDITION
 			return particle
 		end
 
-		-- Create a glass effect panel
+		-- Create a glass effect panel (FIXED TRANSPARENCY)
 		local function createGlassPanel(parent, size, position, cornerRadius, transparency, zIndex)
 			local panel = Instance.new("Frame")
 			panel.Size = size
 			panel.Position = position
-			panel.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-			panel.BackgroundTransparency = transparency or 0.92
+			panel.BackgroundColor3 = Color3.fromRGB(10, 12, 20) -- Dark background
+			panel.BackgroundTransparency = transparency or 0.3 -- Much less transparent
 			panel.BorderSizePixel = 0
 
 			if zIndex then
@@ -364,14 +364,27 @@ BEAUTIFUL SLITHER.IO MENU V4.0 - PREMIUM EDITION
 			panel.Parent = parent
 
 			local corner = Instance.new("UICorner")
-			corner.CornerRadius = cornerRadius or UDim.new(0, 12)
+			corner.CornerRadius = cornerRadius or UDim.new(0, 16)
 			corner.Parent = panel
 
 			local stroke = Instance.new("UIStroke")
 			stroke.Color = Color3.fromRGB(255, 255, 255)
-			stroke.Transparency = 0.85
-			stroke.Thickness = 1
+			stroke.Transparency = 0.7 -- More visible stroke
+			stroke.Thickness = 2
 			stroke.Parent = panel
+			
+			-- Add gradient for depth
+			local gradient = Instance.new("UIGradient")
+			gradient.Color = ColorSequence.new{
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 200, 200))
+			}
+			gradient.Rotation = 90
+			gradient.Transparency = NumberSequence.new{
+				NumberSequenceKeypoint.new(0, 0.95),
+				NumberSequenceKeypoint.new(1, 0.98)
+			}
+			gradient.Parent = panel
 
 			return panel
 		end
