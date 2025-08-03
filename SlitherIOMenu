@@ -1704,6 +1704,18 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 			local humanoid = character:WaitForChild("Humanoid", 5)
 			if humanoid then
 				local deathConnection
+				local reviveConnection
+				
+				-- Cancel death handler if reviving
+				reviveConnection = LocalPlayer:GetAttributeChangedSignal("JustRevived"):Connect(function()
+					if LocalPlayer:GetAttribute("JustRevived") and activeDeathHandler then
+						pcall(function()
+							task.cancel(activeDeathHandler)
+						end)
+						activeDeathHandler = nil
+						isProcessingDeath = false
+					end
+				end)
 				
 				deathConnection = humanoid.Died:Connect(function()
 					-- Prevent multiple death handlers
@@ -1723,23 +1735,26 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 						-- Wait a bit for revive system
 						task.wait(1.5)
 						
-						-- Check if still dead
-						if humanoid.Health <= 0 then
-							-- Update stats if available
-							pcall(function()
-								local lastScore = LocalPlayer:GetAttribute("LastScore") or 0
-								if playerStats.highScore < lastScore then
-									playerStats.highScore = lastScore
-								end
-								playerStats.totalKills = playerStats.totalKills + (LocalPlayer:GetAttribute("LastKills") or 0)
-								playerStats.gamesPlayed = playerStats.gamesPlayed + 1
-								savePlayerStats()
-							end)
-							
-							-- Show menu
-							createMenu(function()
-								requestRespawn()
-							end)
+						-- Check if still dead AND not reviving
+						if humanoid.Health <= 0 and not LocalPlayer:GetAttribute("JustRevived") and not LocalPlayer:GetAttribute("RevivingNow") then
+							-- Double check we're still in the same character
+							if LocalPlayer.Character == character then
+								-- Update stats if available
+								pcall(function()
+									local lastScore = LocalPlayer:GetAttribute("LastScore") or 0
+									if playerStats.highScore < lastScore then
+										playerStats.highScore = lastScore
+									end
+									playerStats.totalKills = playerStats.totalKills + (LocalPlayer:GetAttribute("LastKills") or 0)
+									playerStats.gamesPlayed = playerStats.gamesPlayed + 1
+									savePlayerStats()
+								end)
+								
+								-- Show menu
+								createMenu(function()
+									requestRespawn()
+								end)
+							end
 						end
 						
 						-- Reset flag
@@ -1753,6 +1768,9 @@ BEAUTIFUL SLITHER.IO MENU V5.0 - ULTIMATE EDITION
 					if not character.Parent then
 						if deathConnection then
 							deathConnection:Disconnect()
+						end
+						if reviveConnection then
+							reviveConnection:Disconnect()
 						end
 						if activeDeathHandler then
 							pcall(function()
