@@ -1,4 +1,4 @@
--- SnakeCollisionHandler V8.0 FIXED
+-- SnakeCollisionHandler V8.0 ULTIMATE FIX
 -- FIXED: Death orbs now spawn correctly
 -- FIXED: Camera stops moving on death
 -- FIXED: Self-collision prevention
@@ -18,6 +18,12 @@ local OrbUtils = require(ReplicatedStorage:WaitForChild("OrbUtils"))
 
 -- Get remotes folder
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
+
+-- Get or create death notification event
+local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents") or Instance.new("Folder", ReplicatedStorage)
+remoteEvents.Name = "RemoteEvents"
+local deathNotifyEvent = remoteEvents:FindFirstChild("PlayerDeath") or Instance.new("RemoteEvent", remoteEvents)
+deathNotifyEvent.Name = "PlayerDeath"
 
 -- === PERFORMANCE CONSTANTS ===
 local SEGMENT_CHUNK_SIZE = 96
@@ -122,23 +128,18 @@ local function disconnectPlayerCamera(player)
 		if snake.move then
 			snake.move = function() end
 		end
+		
+		-- Stop the RunService connections if they exist
+		if snake.moveConnection then
+			snake.moveConnection:Disconnect()
+			snake.moveConnection = nil
+		end
+		if snake.updateConnection then
+			snake.updateConnection:Disconnect()
+			snake.updateConnection = nil
+		end
 	end
 
-	-- Fire remote to stop client camera AND movement
-	local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
-	if not remoteEvents then
-		remoteEvents = Instance.new("Folder")
-		remoteEvents.Name = "RemoteEvents"
-		remoteEvents.Parent = ReplicatedStorage
-	end
-	
-	local deathNotifyEvent = remoteEvents:FindFirstChild("PlayerDeath")
-	if not deathNotifyEvent then
-		deathNotifyEvent = Instance.new("RemoteEvent")
-		deathNotifyEvent.Name = "PlayerDeath"
-		deathNotifyEvent.Parent = remoteEvents
-	end
-	
 	-- Notify client about death
 	deathNotifyEvent:FireClient(player, "died")
 
@@ -175,6 +176,14 @@ local function disconnectPlayerCamera(player)
 				root.Velocity = Vector3.new(0, 0, 0)
 				root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
 				root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+			end
+		end
+		
+		-- Also disable all character scripts
+		local scripts = player.Character:GetDescendants()
+		for _, script in ipairs(scripts) do
+			if script:IsA("LocalScript") and script.Name:match("Snake") then
+				script.Disabled = true
 			end
 		end
 	end
@@ -771,46 +780,28 @@ local function queuePlayerDeath(player)
 	-- Disconnect camera IMMEDIATELY
 	disconnectPlayerCamera(player)
 	
-	-- IMMEDIATELY freeze all segments in their current positions
+	-- IMMEDIATELY disable collision on all segments to prevent timing issues
 	task.spawn(function()
 		if _G.PlayerSnakes and _G.PlayerSnakes[player] then
 			local snake = _G.PlayerSnakes[player]
 			if snake and snake.segments then
-				-- Store segment positions BEFORE any changes
-				local frozenPositions = {}
-				for i, segment in ipairs(snake.segments) do
+				for _, segment in ipairs(snake.segments) do
 					if segment and segment.Parent then
-						frozenPositions[i] = segment.CFrame
-						-- Immediately anchor and disable physics
-						segment.Anchored = true
 						segment.CanCollide = false
 						segment.CanQuery = false
 						segment.CanTouch = false
 					end
 				end
-				
-				-- Keep segments frozen at their positions
-				task.spawn(function()
-					for i = 1, 10 do
-						task.wait(0.1)
-						for idx, cframe in pairs(frozenPositions) do
-							if snake.segments[idx] and snake.segments[idx].Parent then
-								snake.segments[idx].CFrame = cframe
-								snake.segments[idx].Anchored = true
-							end
-						end
-					end
-				end)
 			end
 		end
-		
-		-- Also freeze visual snake model
-		local visualSnakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
-		if visualSnakeModel then
-			for _, part in pairs(visualSnakeModel:GetDescendants()) do
+
+		-- Also disable collision on character parts
+		if player.Character then
+			for _, part in ipairs(player.Character:GetDescendants()) do
 				if part:IsA("BasePart") then
-					part.Anchored = true
 					part.CanCollide = false
+					part.CanQuery = false
+					part.CanTouch = false
 				end
 			end
 		end
@@ -860,420 +851,412 @@ task.spawn(function()
 					local humanoid = character:FindFirstChild("Humanoid")
 					print("🔍 Processing death for", player.Name, "- Health:", humanoid and humanoid.Health or "nil")
 
-					if humanoid and humanoid.Health > 0 and not deadPlayers[player] then
-						-- Get snake length
-						local snakeLength = 55
-						if player:FindFirstChild("leaderstats") then
-							local lengthValue = player.leaderstats:FindFirstChild("Length")
-							if lengthValue then
-								snakeLength = lengthValue.Value or 55
+					-- Player already marked as dead and killed in queuePlayerDeath
+					if not deadPlayers[player] then
+						deadPlayers[player] = true
+					end
+
+					-- Get snake length
+					local snakeLength = 55
+					if player:FindFirstChild("leaderstats") then
+						local lengthValue = player.leaderstats:FindFirstChild("Length")
+						if lengthValue then
+							snakeLength = lengthValue.Value or 55
+						end
+					end
+
+					-- CRITICAL: Store segment positions BEFORE destroying snake
+					local segments = getActualSnakeSegments(player)
+					local segmentPositions = {}
+					if segments and #segments > 0 then
+						print("🔍 Found", #segments, "segments to store positions from")
+						for i, seg in ipairs(segments) do
+							if seg and seg:IsA("BasePart") and seg.Parent and seg.Position then
+								-- Create a copy of the position
+								segmentPositions[i] = Vector3.new(seg.Position.X, seg.Position.Y, seg.Position.Z)
 							end
 						end
+						print("📍 Stored", #segmentPositions, "segment positions for orb spawning")
+					else
+						print("⚠️ No segments found for", player.Name, "before death processing")
+					end
 
-						-- CRITICAL: Store segment positions BEFORE destroying snake
-						local segments = getActualSnakeSegments(player)
-						local segmentPositions = {}
-						if segments and #segments > 0 then
-							print("🔍 Found", #segments, "segments to store positions from")
-							for i, seg in ipairs(segments) do
-								if seg and seg:IsA("BasePart") and seg.Parent and seg.Position then
-									-- Create a copy of the position
-									segmentPositions[i] = Vector3.new(seg.Position.X, seg.Position.Y, seg.Position.Z)
+					-- Clear magnet effect immediately
+					player:SetAttribute("MagnetRange", 1)
+					player:SetAttribute("TempMagnetRange", 1)
+					player:SetAttribute("ActiveMagnet", false)
+
+					-- CAMERA AND MOVEMENT ALREADY STOPPED IN queuePlayerDeath
+
+					-- CRITICAL: Store snake references BEFORE checking revive
+					local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
+					if not snakeInstance and character:FindFirstChild("__SnakeInstance") then
+						snakeInstance = character.__SnakeInstance.Value
+					end
+
+					local visualSnakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
+
+					print("🐍 Snake references - Instance:", snakeInstance ~= nil, "Visual:", visualSnakeModel ~= nil)
+
+					-- SEGMENTS ALREADY FROZEN IN queuePlayerDeath
+					-- Store data for potential revive
+					local frozenSegmentData = {}
+					
+					-- Just fade out the already-frozen segments
+					if segments and #segments > 0 then
+						print("🧊 Fading out", #segments, "frozen snake segments")
+						for i, seg in ipairs(segments) do
+							if seg and seg:IsA("BasePart") and seg.Parent then
+								-- Store for potential revive
+								frozenSegmentData[seg] = {
+									transparency = seg.Transparency,
+									cframe = seg.CFrame
+								}
+								
+								-- IMMEDIATELY anchor segments to prevent movement
+								seg.Anchored = true
+								
+								-- Just fade them out
+								if seg.Transparency < 1 then
+									local tween = TweenService:Create(seg,
+										TweenInfo.new(0.5, Enum.EasingStyle.Linear),
+										{Transparency = 0.7}
+									)
+									tween:Play()
 								end
 							end
-							print("📍 Stored", #segmentPositions, "segment positions for orb spawning")
+						end
+					end
+
+					-- Also fade the visual snake model if it exists
+					if visualSnakeModel then
+						for _, part in pairs(visualSnakeModel:GetDescendants()) do
+							if part:IsA("BasePart") then
+								frozenSegmentData[part] = {
+									transparency = part.Transparency
+								}
+								-- Anchor immediately
+								part.Anchored = true
+								part.CanCollide = false
+								if part.Transparency < 1 then
+									local tween = TweenService:Create(part,
+										TweenInfo.new(0.5, Enum.EasingStyle.Linear),
+										{Transparency = 0.7}
+									)
+									tween:Play()
+								end
+							end
+						end
+					end
+
+					-- Handle character death animation
+					local rootPart = character:FindFirstChild("HumanoidRootPart")
+					if rootPart then
+						-- Mark as dead
+						rootPart:SetAttribute("Dead", true)
+
+						-- Anchor and disable collision
+						rootPart.Anchored = true
+						rootPart.CanCollide = false
+						rootPart.CanTouch = false
+						rootPart.CanQuery = false
+
+						-- Move down slightly
+						rootPart.CFrame = rootPart.CFrame * CFrame.new(0, -10, 0)
+
+						-- Fade out character
+						for _, part in pairs(character:GetDescendants()) do
+							if part:IsA("BasePart") then
+								part.CanCollide = false
+								part.CanTouch = false
+								part.CanQuery = false
+								if part.Transparency < 1 then
+									local tween = TweenService:Create(part, 
+										TweenInfo.new(0.5, Enum.EasingStyle.Linear),
+										{Transparency = 1}
+									)
+									tween:Play()
+								end
+							elseif part:IsA("Decal") or part:IsA("Texture") then
+								part.Transparency = 1
+							end
+						end
+					end
+
+					-- Store frozen segment data for potential revive
+					player:SetAttribute("FrozenSegmentData", true)
+
+					-- SPAWN DEATH ORBS IMMEDIATELY (before revive check)
+					if segmentPositions and #segmentPositions > 0 then
+						print("💎 Spawning death orbs for", player.Name, "with", #segmentPositions, "segment positions")
+
+						local totalSegments = #segmentPositions
+						local orbsPerSegment = 1 / 2.5
+						local totalOrbs = math.clamp(math.floor(snakeLength * orbsPerSegment), 3, 40)
+
+						-- Calculate orb value
+						local baseValue = 1
+						if snakeLength <= 50 then
+							local totalValue = math.floor(snakeLength * 0.6)
+							baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+						elseif snakeLength <= 200 then
+							local totalValue = math.floor(snakeLength * 0.45)
+							baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+						elseif snakeLength <= 500 then
+							local totalValue = math.floor(snakeLength * 0.35)
+							baseValue = math.max(1, math.floor(totalValue / totalOrbs))
 						else
-							print("⚠️ No segments found for", player.Name, "before death processing")
+							local totalValue = math.min(math.floor(snakeLength * 0.25), 200)
+							baseValue = math.max(1, math.floor(totalValue / totalOrbs))
 						end
 
-						-- Clear magnet effect immediately
-						player:SetAttribute("MagnetRange", 1)
-						player:SetAttribute("TempMagnetRange", 1)
-						player:SetAttribute("ActiveMagnet", false)
+						local spawnedOrbs = 0
+						local skipInterval = math.max(1, math.floor(totalSegments / totalOrbs))
 
-						-- CAMERA AND MOVEMENT ALREADY STOPPED IN queuePlayerDeath
-						-- No need to disconnect camera again as it's already done
+						print(string.format("[ORB SPAWN] Player %s - Length: %d, TotalOrbs: %d, Value: %d, Skip: %d",
+							player.Name, snakeLength, totalOrbs, baseValue, skipInterval))
 
-						-- CRITICAL: Store snake references BEFORE checking revive
-						local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
-						if not snakeInstance and character:FindFirstChild("__SnakeInstance") then
-							snakeInstance = character.__SnakeInstance.Value
-						end
+						-- Spawn orbs with delay
+						task.spawn(function()
+							task.wait(0.5) -- Wait for death animation
 
-						local visualSnakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
+							local startSegment = math.min(5, totalSegments)
+							for i = startSegment, totalSegments, skipInterval do
+								if spawnedOrbs >= totalOrbs then break end
 
-						print("🐍 Snake references - Instance:", snakeInstance ~= nil, "Visual:", visualSnakeModel ~= nil)
+								local pos = segmentPositions[i]
+								if pos then
+									local offset = Vector3.new(
+										(math.random() - 0.5) * 6,
+										0,
+										(math.random() - 0.5) * 6
+									)
 
-						-- DON'T set health to 0 yet - wait to see if they revive!
-						-- This prevents the menu from showing prematurely
-
-						-- SEGMENTS ALREADY FROZEN IN queuePlayerDeath
-						-- Store data for potential revive
-						local frozenSegmentData = {}
-						
-						-- Just fade out the already-frozen segments
-						if segments and #segments > 0 then
-							print("🧊 Fading out", #segments, "frozen snake segments")
-							for i, seg in ipairs(segments) do
-								if seg and seg:IsA("BasePart") and seg.Parent then
-									-- Store for potential revive
-									frozenSegmentData[seg] = {
-										transparency = seg.Transparency,
-										cframe = seg.CFrame
-									}
-									
-									-- Segments are already anchored from queuePlayerDeath
-									-- Just fade them out
-									if seg.Transparency < 1 then
-										local tween = TweenService:Create(seg,
-											TweenInfo.new(0.5, Enum.EasingStyle.Linear),
-											{Transparency = 0.7}
+									-- Extra spread for head segments
+									if i <= 10 then
+										local angle = math.random() * math.pi * 2
+										local distance = 15
+										offset = offset + Vector3.new(
+											math.cos(angle) * distance,
+											0,
+											math.sin(angle) * distance
 										)
-										tween:Play()
+									end
+
+									spawnDeathOrb(pos + offset, baseValue)
+									spawnedOrbs = spawnedOrbs + 1
+
+									if spawnedOrbs % 5 == 0 then
+										task.wait(0.03) -- Small delay between batches
 									end
 								end
 							end
-						end
 
-						-- Also fade the visual snake model if it exists
-						if visualSnakeModel then
-							for _, part in pairs(visualSnakeModel:GetDescendants()) do
-								if part:IsA("BasePart") then
-									frozenSegmentData[part] = {
-										transparency = part.Transparency
-									}
-									-- Already anchored from queuePlayerDeath
-									if part.Transparency < 1 then
-										local tween = TweenService:Create(part,
-											TweenInfo.new(0.5, Enum.EasingStyle.Linear),
-											{Transparency = 0.7}
+							-- Ensure minimum orbs spawn
+							if spawnedOrbs < 3 and #segmentPositions >= 5 then
+								local basePos = segmentPositions[5] or segmentPositions[1]
+								if basePos then
+									for j = 1, 3 - spawnedOrbs do
+										local angle = (j - 1) * 120 * math.pi / 180
+										local distance = 20
+										local offset = Vector3.new(
+											math.cos(angle) * distance,
+											0,
+											math.sin(angle) * distance
 										)
-										tween:Play()
+										spawnDeathOrb(basePos + offset, baseValue)
 									end
 								end
 							end
-						end
 
-						-- Handle character death animation
+							print(string.format("✅ [ORB SPAWN] Spawned %d death orbs for %s", spawnedOrbs, player.Name))
+						end)
+					else
+						-- Fallback: spawn orbs at death position
+						warn(string.format("⚠️ No segment positions for %s, spawning orbs at death position", player.Name))
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
 						if rootPart then
-							-- Mark as dead
-							rootPart:SetAttribute("Dead", true)
-
-							-- Anchor and disable collision
-							rootPart.Anchored = true
-							rootPart.CanCollide = false
-							rootPart.CanTouch = false
-							rootPart.CanQuery = false
-
-							-- Move down slightly
-							rootPart.CFrame = rootPart.CFrame * CFrame.new(0, -10, 0)
-
-							-- Fade out character
-							for _, part in pairs(character:GetDescendants()) do
-								if part:IsA("BasePart") then
-									part.CanCollide = false
-									part.CanTouch = false
-									part.CanQuery = false
-									if part.Transparency < 1 then
-										local tween = TweenService:Create(part, 
-											TweenInfo.new(0.5, Enum.EasingStyle.Linear),
-											{Transparency = 1}
-										)
-										tween:Play()
-									end
-								elseif part:IsA("Decal") or part:IsA("Texture") then
-									part.Transparency = 1
-								end
+							local orbCount = math.min(math.floor(snakeLength / 10), 20)
+							for i = 1, orbCount do
+								local angle = (i - 1) * (360 / orbCount) * math.pi / 180
+								local distance = 10
+								local offset = Vector3.new(
+									math.cos(angle) * distance,
+									0,
+									math.sin(angle) * distance
+								)
+								spawnDeathOrb(rootPart.Position + offset, 1)
 							end
 						end
+					end
 
-						-- Store frozen segment data for potential revive
-						player:SetAttribute("FrozenSegmentData", true)
+					-- Check for revive
+					local hasRevive = player:GetAttribute("HasRevive")
+					local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
+					print("🔍 Revive check - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
 
-						-- SPAWN DEATH ORBS IMMEDIATELY (before revive check)
-						if segmentPositions and #segmentPositions > 0 then
-							print("💎 Spawning death orbs for", player.Name, "with", #segmentPositions, "segment positions")
+					local reviveRemote = remotes:FindFirstChild("PromptRevive")
+					if reviveRemote then
+						reviveRemote:FireClient(player)
+						print("🚀 Revive prompt sent to client!")
 
-							local totalSegments = #segmentPositions
-							local orbsPerSegment = 1 / 2.5
-							local totalOrbs = math.clamp(math.floor(snakeLength * orbsPerSegment), 3, 40)
+						local revived = false
+						local reviveConnection
+						local responseReceived = false
 
-							-- Calculate orb value
-							local baseValue = 1
-							if snakeLength <= 50 then
-								local totalValue = math.floor(snakeLength * 0.6)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							elseif snakeLength <= 200 then
-								local totalValue = math.floor(snakeLength * 0.45)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							elseif snakeLength <= 500 then
-								local totalValue = math.floor(snakeLength * 0.35)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-							else
-								local totalValue = math.min(math.floor(snakeLength * 0.25), 200)
-								baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+						reviveConnection = reviveRemote.OnServerEvent:Connect(function(plr, response)
+							if plr == player and not responseReceived then
+								responseReceived = true
+								if response == "revive" then
+									revived = true
+									print("✅ Player chose to revive!")
+								elseif response == "decline" then
+									print("❌ Player declined revive")
+								end
+							end
+						end)
+
+						-- Wait for response
+						local timeWaited = 0
+						while not responseReceived and timeWaited < 60 do
+							task.wait(0.1)
+							timeWaited = timeWaited + 0.1
+						end
+
+						if reviveConnection then
+							reviveConnection:Disconnect()
+						end
+
+						if revived then
+							print("🎉 REVIVING", player.Name)
+
+							-- Flash frozen segments before respawn for visual continuity
+							if frozenSegmentData then
+								for seg, data in pairs(frozenSegmentData) do
+									if seg and seg.Parent then
+										-- Brief visibility flash
+										seg.Transparency = 0.3
+										task.wait(0.05)
+										seg.Transparency = 1
+									end
+								end
 							end
 
-							local spawnedOrbs = 0
-							local skipInterval = math.max(1, math.floor(totalSegments / totalOrbs))
+							-- CRITICAL: Set reviving flags IMMEDIATELY to prevent menu
+							player:SetAttribute("RevivingNow", true)
+							player:SetAttribute("JustRevived", true)
+							player:SetAttribute("NoReviveEffects", true) -- Tell GamepassHandler not to spawn effects
 
-							print(string.format("[ORB SPAWN] Player %s - Length: %d, TotalOrbs: %d, Value: %d, Skip: %d",
-								player.Name, snakeLength, totalOrbs, baseValue, skipInterval))
+							-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
+							isProcessingDeaths = false
 
-							-- Spawn orbs with delay
+							-- Only deduct if they had revives (not if they bought with Robux)
+							if revivesAvailable > 0 then
+								player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+							end
+
+							-- Store current position and snake length
+							local deathPosition = rootPart and rootPart.Position or Vector3.new(0, 10, 0)
+							if deathPosition.Y < 5 then
+								deathPosition = Vector3.new(deathPosition.X, 5, deathPosition.Z)
+							end
+
+							local currentSnakeLength = 500
+							local leaderstats = player:FindFirstChild("leaderstats")
+							if leaderstats then
+								local lengthValue = leaderstats:FindFirstChild("Length")
+								if lengthValue then
+									currentSnakeLength = lengthValue.Value
+								end
+							end
+
+							print("📍 Revive at position:", deathPosition, "with length:", currentSnakeLength)
+
+							-- Clear dead state and reset collision state
+							resetPlayerCollisionState(player)
+
+							-- Clear from death queue if any pending
+							for i = #deathQueue, 1, -1 do
+								if deathQueue[i].type == "player" and deathQueue[i].target == player then
+									table.remove(deathQueue, i)
+								end
+							end
+
+							print("🧹 Cleared collision caches for", player.Name)
+
+							-- Store revive data
+							player:SetAttribute("RevivePosition", tostring(deathPosition))
+							player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
+
+							-- Simple invincibility
+							setPlayerInvincible(player)
+
+							-- Respawn the player
+							player:LoadCharacter()
+
+							-- Clear the reviving flag and camera lock after character loads
 							task.spawn(function()
-								task.wait(0.5) -- Wait for death animation
-
-								local startSegment = math.min(5, totalSegments)
-								for i = startSegment, totalSegments, skipInterval do
-									if spawnedOrbs >= totalOrbs then break end
-
-									local pos = segmentPositions[i]
-									if pos then
-										local offset = Vector3.new(
-											(math.random() - 0.5) * 6,
-											0,
-											(math.random() - 0.5) * 6
-										)
-
-										-- Extra spread for head segments
-										if i <= 10 then
-											local angle = math.random() * math.pi * 2
-											local distance = 15
-											offset = offset + Vector3.new(
-												math.cos(angle) * distance,
-												0,
-												math.sin(angle) * distance
-											)
-										end
-
-										spawnDeathOrb(pos + offset, baseValue)
-										spawnedOrbs = spawnedOrbs + 1
-
-										if spawnedOrbs % 5 == 0 then
-											task.wait(0.03) -- Small delay between batches
-										end
-									end
-								end
-
-								-- Ensure minimum orbs spawn
-								if spawnedOrbs < 3 and #segmentPositions >= 5 then
-									local basePos = segmentPositions[5] or segmentPositions[1]
-									if basePos then
-										for j = 1, 3 - spawnedOrbs do
-											local angle = (j - 1) * 120 * math.pi / 180
-											local distance = 20
-											local offset = Vector3.new(
-												math.cos(angle) * distance,
-												0,
-												math.sin(angle) * distance
-											)
-											spawnDeathOrb(basePos + offset, baseValue)
-										end
-									end
-								end
-
-								print(string.format("✅ [ORB SPAWN] Spawned %d death orbs for %s", spawnedOrbs, player.Name))
-							end)
-						else
-							-- Fallback: spawn orbs at death position
-							warn(string.format("⚠️ No segment positions for %s, spawning orbs at death position", player.Name))
-							local rootPart = character:FindFirstChild("HumanoidRootPart")
-							if rootPart then
-								local orbCount = math.min(math.floor(snakeLength / 10), 20)
-								for i = 1, orbCount do
-									local angle = (i - 1) * (360 / orbCount) * math.pi / 180
-									local distance = 10
-									local offset = Vector3.new(
-										math.cos(angle) * distance,
-										0,
-										math.sin(angle) * distance
-									)
-									spawnDeathOrb(rootPart.Position + offset, 1)
-								end
-							end
-						end
-
-						-- Check for revive
-						local hasRevive = player:GetAttribute("HasRevive")
-						local revivesAvailable = player:GetAttribute("RevivesAvailable") or 0
-						print("🔍 Revive check - HasRevive:", hasRevive, "RevivesAvailable:", revivesAvailable)
-
-						local reviveRemote = remotes:FindFirstChild("PromptRevive")
-						if reviveRemote then
-							reviveRemote:FireClient(player)
-							print("🚀 Revive prompt sent to client!")
-
-							local revived = false
-							local reviveConnection
-							local responseReceived = false
-
-							reviveConnection = reviveRemote.OnServerEvent:Connect(function(plr, response)
-								if plr == player and not responseReceived then
-									responseReceived = true
-									if response == "revive" then
-										revived = true
-										print("✅ Player chose to revive!")
-									elseif response == "decline" then
-										print("❌ Player declined revive")
-									end
-								end
-							end)
-
-							-- Wait for response
-							local timeWaited = 0
-							while not responseReceived and timeWaited < 60 do
 								task.wait(0.1)
-								timeWaited = timeWaited + 0.1
-							end
+								player:SetAttribute("CameraLocked", false)
+								task.wait(1.9) -- Wait for character to fully load
+								player:SetAttribute("RevivingNow", false)
+								player:SetAttribute("NoReviveEffects", false) -- Re-enable effects
+							end)
 
-							if reviveConnection then
-								reviveConnection:Disconnect()
-							end
+							-- IMPORTANT: Continue to next iteration instead of exiting coroutine
+						else
+							-- Player didn't revive, proceed with normal death logic
 
-							if revived then
-								print("🎉 REVIVING", player.Name)
+							-- =============================================
+							--  NORMAL DEATH LOGIC (IF NOT REVIVED)
+							-- =============================================
 
-								-- Flash frozen segments before respawn for visual continuity
-								if frozenSegmentData then
-									for seg, data in pairs(frozenSegmentData) do
-										if seg and seg.Parent then
-											-- Brief visibility flash
-											seg.Transparency = 0.3
-											task.wait(0.05)
+							-- Unfreeze and destroy frozen segments before destroying snake
+							if frozenSegmentData then
+								for seg, data in pairs(frozenSegmentData) do
+									if seg and seg.Parent then
+										-- Quick fade to fully transparent before destruction
+										if seg.Transparency < 1 then
 											seg.Transparency = 1
 										end
 									end
 								end
+							end
 
-								-- CRITICAL: Set reviving flags IMMEDIATELY to prevent menu
-								player:SetAttribute("RevivingNow", true)
-								player:SetAttribute("JustRevived", true)
-								player:SetAttribute("NoReviveEffects", true) -- Tell GamepassHandler not to spawn effects
-
-								-- CRITICAL FIX: Reset death processing flag IMMEDIATELY
-								isProcessingDeaths = false
-
-								-- Only deduct if they had revives (not if they bought with Robux)
-								if revivesAvailable > 0 then
-									player:SetAttribute("RevivesAvailable", revivesAvailable - 1)
+							-- Destroy snake now that we know they're not reviving
+							if snakeInstance then
+								if snakeInstance.destroy then
+									print("🐍 Destroying snake controls for", player.Name)
+									snakeInstance:destroy()
 								end
-
-								-- Store current position and snake length
-								local deathPosition = rootPart and rootPart.Position or Vector3.new(0, 10, 0)
-								if deathPosition.Y < 5 then
-									deathPosition = Vector3.new(deathPosition.X, 5, deathPosition.Z)
+								if _G.PlayerSnakes then
+									_G.PlayerSnakes[player] = nil
 								end
+							end
 
-								local currentSnakeLength = 500
-								local leaderstats = player:FindFirstChild("leaderstats")
-								if leaderstats then
-									local lengthValue = leaderstats:FindFirstChild("Length")
-									if lengthValue then
-										currentSnakeLength = lengthValue.Value
-									end
-								end
+							-- Destroy visual snake model
+							if visualSnakeModel then
+								print("🐍 Destroying visual snake model for", player.Name)
+								visualSnakeModel:Destroy()
+							end
 
-								print("📍 Revive at position:", deathPosition, "with length:", currentSnakeLength)
+							-- Clear collision caches when dying
+							if CollisionCache and CollisionCache.playerSegments then
+								CollisionCache.playerSegments[player] = nil
+							end
 
-								-- Clear dead state and reset collision state
-								resetPlayerCollisionState(player)
+							-- Fire death event for menu system
+							local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
+							if deathEvent then
+								deathEvent:Fire(player)
+							end
 
-								-- Clear from death queue if any pending
-								for i = #deathQueue, 1, -1 do
-									if deathQueue[i].type == "player" and deathQueue[i].target == player then
-										table.remove(deathQueue, i)
-									end
-								end
-
-								print("🧹 Cleared collision caches for", player.Name)
-
-								-- Store revive data
-								player:SetAttribute("RevivePosition", tostring(deathPosition))
-								player:SetAttribute("ReviveSnakeLength", currentSnakeLength)
-
-								-- Simple invincibility
-								setPlayerInvincible(player)
-
-								-- Respawn the player
-								player:LoadCharacter()
-
-								-- Clear the reviving flag and camera lock after character loads
-								task.spawn(function()
-									task.wait(0.1)
-									player:SetAttribute("CameraLocked", false)
-									task.wait(1.9) -- Wait for character to fully load
-									player:SetAttribute("RevivingNow", false)
-									player:SetAttribute("NoReviveEffects", false) -- Re-enable effects
-								end)
-
-								-- IMPORTANT: Continue to next iteration instead of exiting coroutine
-							else
-								-- Player didn't revive, proceed with normal death logic
-
-								-- =============================================
-								--  NORMAL DEATH LOGIC (IF NOT REVIVED)
-								-- =============================================
-
-								-- Unfreeze and destroy frozen segments before destroying snake
-								if frozenSegmentData then
-									for seg, data in pairs(frozenSegmentData) do
-										if seg and seg.Parent then
-											-- Quick fade to fully transparent before destruction
-											if seg.Transparency < 1 then
-												seg.Transparency = 1
-											end
-										end
-									end
-								end
-
-								-- Destroy snake now that we know they're not reviving
-								if snakeInstance then
-									if snakeInstance.destroy then
-										print("🐍 Destroying snake controls for", player.Name)
-										snakeInstance:destroy()
-									end
-									if _G.PlayerSnakes then
-										_G.PlayerSnakes[player] = nil
-									end
-								end
-
-								-- Destroy visual snake model
-								if visualSnakeModel then
-									print("🐍 Destroying visual snake model for", player.Name)
-									visualSnakeModel:Destroy()
-								end
-
-								-- ONLY mark as dead if NOT reviving
-								deadPlayers[player] = true
-
-								-- Clear collision caches when dying
-								if CollisionCache and CollisionCache.playerSegments then
-									CollisionCache.playerSegments[player] = nil
-								end
-
-								-- NOW kill the player (since they didn't revive)
-								if humanoid and humanoid.Health > 0 then
-									print("💀 Setting health to 0 for", player.Name, "- No revive chosen")
-									humanoid.Health = 0
-								end
-
-								-- Fire death event for menu system
-								local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
-								if deathEvent then
-									deathEvent:Fire(player)
-								end
-
-								task.spawn(function()
-									task.wait(5)
-									deadPlayers[player] = nil
-								end)
-							end -- end of "if revived then ... else"
-						end -- end of "if reviveRemote then"
-					else
-						print("⚠️ Skipping death for", player.Name, "- Already dead or no humanoid")
-					end
+							task.spawn(function()
+								task.wait(5)
+								deadPlayers[player] = nil
+							end)
+						end -- end of "if revived then ... else"
+					end -- end of "if reviveRemote then"
 				end
 			elseif death.type == "ai" then
 				-- AI death processing (similar to original but with fixed orb spawning)
