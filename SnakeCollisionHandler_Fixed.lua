@@ -140,10 +140,23 @@ local function disconnectPlayerCamera(player)
 		end
 	end
 
-	-- Notify client about death
+	-- CRITICAL: Fire remote event to stop camera on client
+	local stopCameraRemote = remotes:FindFirstChild("StopCameraMovement")
+	if not stopCameraRemote then
+		-- Create it if it doesn't exist
+		stopCameraRemote = Instance.new("RemoteEvent")
+		stopCameraRemote.Name = "StopCameraMovement"
+		stopCameraRemote.Parent = remotes
+	end
+	
+	-- Fire to client to stop camera
+	stopCameraRemote:FireClient(player)
+	print("📷 Sent camera stop signal to", player.Name)
+
+	-- Notify client about death using the death notification event
 	deathNotifyEvent:FireClient(player, "died")
 
-	-- Set attribute to signal camera should stop
+	-- Set attributes to signal camera should stop
 	player:SetAttribute("CameraLocked", true)
 	player:SetAttribute("DeathCameraFreeze", true)
 
@@ -164,11 +177,6 @@ local function disconnectPlayerCamera(player)
 			humanoid.CameraOffset = Vector3.new(0, 0, 0)
 			humanoid.AutoRotate = false
 			
-			-- Kill the player immediately
-			if humanoid.Health > 0 then
-				humanoid.Health = 0
-			end
-
 			-- Anchor character to ensure no movement
 			local root = player.Character:FindFirstChild("HumanoidRootPart")
 			if root then
@@ -766,9 +774,7 @@ local function queuePlayerDeath(player)
 	print("💀 Queuing death for", player.Name)
 	deathTimestamps[player] = tick()
 	
-	-- IMMEDIATELY STOP ALL MOVEMENT BUT DON'T KILL YET
-	-- We need to check for revive first!
-	
+	-- IMMEDIATELY STOP ALL MOVEMENT AND FREEZE SNAKE
 	-- Disconnect camera IMMEDIATELY
 	disconnectPlayerCamera(player)
 	
@@ -810,6 +816,16 @@ local function queuePlayerDeath(player)
 					part.Anchored = true
 					part.CanCollide = false
 				end
+			end
+		end
+
+		-- Destroy the snake control script immediately to stop camera/movement
+		local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
+		if snakeInstance and snakeInstance.destroy then
+			print("❄️ Destroying snake controls immediately for", player.Name)
+			snakeInstance:destroy()
+			if _G.PlayerSnakes then
+				_G.PlayerSnakes[player] = nil -- Clear reference
 			end
 		end
 
@@ -929,6 +945,9 @@ task.spawn(function()
 						local visualSnakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
 
 						print("🐍 Snake references - Instance:", snakeInstance ~= nil, "Visual:", visualSnakeModel ~= nil)
+						
+						-- Note: Snake control may already be destroyed in queuePlayerDeath
+						-- but visual model should still exist for orb spawning
 
 						-- SEGMENTS ALREADY FROZEN IN queuePlayerDeath
 						-- Store data for potential revive
@@ -1263,14 +1282,12 @@ task.spawn(function()
 								end
 
 								-- Destroy snake now that we know they're not reviving
-								if snakeInstance then
-									if snakeInstance.destroy then
-										print("🐍 Destroying snake controls for", player.Name)
-										snakeInstance:destroy()
-									end
-									if _G.PlayerSnakes then
-										_G.PlayerSnakes[player] = nil
-									end
+								-- Note: Snake control was already destroyed in queuePlayerDeath
+								if snakeInstance and snakeInstance.destroy then
+									print("🐍 Snake controls already destroyed for", player.Name)
+								end
+								if _G.PlayerSnakes then
+									_G.PlayerSnakes[player] = nil -- Ensure it's cleared
 								end
 
 								-- Destroy visual snake model
@@ -1312,14 +1329,9 @@ task.spawn(function()
 								humanoid.Health = 0
 							end
 							
-							-- Destroy snake
-							if snakeInstance then
-								if snakeInstance.destroy then
-									snakeInstance:destroy()
-								end
-								if _G.PlayerSnakes then
-									_G.PlayerSnakes[player] = nil
-								end
+							-- Snake control already destroyed in queuePlayerDeath
+							if _G.PlayerSnakes then
+								_G.PlayerSnakes[player] = nil -- Ensure it's cleared
 							end
 							
 							-- Destroy visual snake model
@@ -1961,6 +1973,7 @@ print("🎯 FIXED: Duplicate death prevention")
 print("🧊 FIXED: Snake segments freeze INSTANTLY in death positions")
 print("🚫 FIXED: Dead players excluded from collision checks")
 print("⚙️ FIXED: Snake movement methods disabled on death")
+print("📡 FIXED: StopCameraMovement remote event fired to client")
 print("🔧 All optimizations and features preserved")
 
 -- Debug command
