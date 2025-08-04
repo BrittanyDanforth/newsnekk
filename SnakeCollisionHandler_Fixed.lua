@@ -250,9 +250,121 @@ local function resetPlayerCollisionState(player)
 	print("✅ Collision state reset complete for", player.Name)
 end
 
+-- === CLEANUP UTILITIES ===
+local function cleanupAllVFX(player)
+	print("🧹 Cleaning up all VFX for", player.Name)
+	
+	-- First, clean up anything in the character
+	if player.Character then
+		for _, descendant in ipairs(player.Character:GetDescendants()) do
+			if descendant:IsA("ParticleEmitter") then
+				descendant.Enabled = false
+				descendant:Destroy()
+			elseif descendant:IsA("PointLight") or descendant:IsA("SpotLight") then
+				descendant:Destroy()
+			elseif descendant:IsA("Fire") or descendant:IsA("Smoke") or descendant:IsA("Sparkles") then
+				descendant:Destroy()
+			elseif descendant:IsA("Trail") then
+				descendant.Enabled = false
+				descendant:Destroy()
+			elseif descendant:IsA("Beam") then
+				descendant.Enabled = false
+				descendant:Destroy()
+			elseif descendant:IsA("Sound") then
+				descendant:Stop()
+				descendant:Destroy()
+			end
+		end
+	end
+	
+	-- Clean up any lingering orbs
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj.Name:match("DeathOrb") or obj.Name:match("Orb") then
+			-- Check various ways orbs might be associated with a player
+			local shouldDestroy = false
+			
+			-- Check by attribute
+			local creator = obj:GetAttribute("Creator")
+			if creator == player.Name or creator == player.UserId then
+				shouldDestroy = true
+			end
+			
+			-- Check by ObjectValue
+			local creatorValue = obj:FindFirstChild("Creator")
+			if creatorValue and creatorValue:IsA("ObjectValue") and creatorValue.Value == player then
+				shouldDestroy = true
+			end
+			
+			-- Check by name pattern
+			if obj.Name:match(player.Name) then
+				shouldDestroy = true
+			end
+			
+			if shouldDestroy then
+				obj:Destroy()
+			end
+		end
+		
+		-- Clean up any VFX objects that might be related to the player
+		if obj:IsA("ParticleEmitter") or obj:IsA("PointLight") or obj:IsA("SpotLight") or 
+		   obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") or
+		   obj:IsA("Trail") or obj:IsA("Beam") then
+			local parent = obj.Parent
+			if parent then
+				-- Check if parent name contains player name
+				if parent.Name:match(player.Name) then
+					if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
+						obj.Enabled = false
+					end
+					obj:Destroy()
+				end
+				
+				-- Check if it's in a model that belongs to the player
+				local model = parent:FindFirstAncestorOfClass("Model")
+				if model and model.Name:match(player.Name) then
+					if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
+						obj.Enabled = false
+					end
+					obj:Destroy()
+				end
+			end
+		end
+	end
+	
+	-- Clean up any lingering snake models
+	local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
+	if snakeModel then
+		snakeModel:Destroy()
+	end
+	
+	-- Clean up any other models that might contain the player's name
+	for _, model in ipairs(workspace:GetChildren()) do
+		if model:IsA("Model") and model.Name:match(player.Name) and model ~= player.Character then
+			model:Destroy()
+		end
+	end
+	
+	-- Clean up any folders that might contain VFX
+	local vfxFolder = workspace:FindFirstChild("VFX")
+	if vfxFolder then
+		for _, obj in ipairs(vfxFolder:GetChildren()) do
+			if obj.Name:match(player.Name) then
+				obj:Destroy()
+			end
+		end
+	end
+	
+	-- Clear collision cache for this player
+	if CollisionCache and CollisionCache.playerSegments then
+		CollisionCache.playerSegments[player] = nil
+	end
+end
+
 -- Player spawn handling
 Players.PlayerAdded:Connect(function(player)
 	player.CharacterAdded:Connect(function()
+		-- Clean up any lingering VFX before spawning
+		cleanupAllVFX(player)
 		resetPlayerCollisionState(player)
 		setPlayerInvincible(player)
 		task.spawn(function()
@@ -270,12 +382,15 @@ Players.PlayerAdded:Connect(function(player)
 			deadPlayers[player] = nil
 			deathTimestamps[player] = nil
 			disconnectPlayerCamera(player)
+			cleanupAllVFX(player)
 		end
 	end)
 end)
 
 for _, player in Players:GetPlayers() do
 	player.CharacterAdded:Connect(function()
+		-- Clean up any lingering VFX before spawning
+		cleanupAllVFX(player)
 		resetPlayerCollisionState(player)
 		setPlayerInvincible(player)
 		task.spawn(function()
@@ -415,6 +530,12 @@ local function getPlayerHeads()
 				continue
 			end
 			
+			-- Skip if player is marked as dead via attribute
+			local root = player.Character:FindFirstChild("HumanoidRootPart")
+			if root and root:GetAttribute("Dead") then
+				continue
+			end
+			
 			local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
 			if snakeModel then
 				local snakeHead = snakeModel:FindFirstChild("Segment0_Head")
@@ -425,8 +546,7 @@ local function getPlayerHeads()
 				end
 			end
 
-			local root = player.Character:FindFirstChild("HumanoidRootPart")
-			if root and root.Parent and not root:GetAttribute("Dead") and not root.Anchored then
+			if root and root.Parent and not root.Anchored then
 				heads[#heads + 1] = {player = player, part = root}
 			end
 		end
@@ -774,6 +894,9 @@ local function queuePlayerDeath(player)
 	print("💀 Queuing death for", player.Name)
 	deathTimestamps[player] = tick()
 	
+	-- Mark as dead immediately to prevent collision issues
+	deadPlayers[player] = true
+	
 	-- IMMEDIATELY STOP ALL MOVEMENT AND FREEZE SNAKE
 	-- Disconnect camera IMMEDIATELY
 	disconnectPlayerCamera(player)
@@ -819,6 +942,47 @@ local function queuePlayerDeath(player)
 			end
 		end
 
+		-- CRITICAL: Clean up VFX and particles immediately
+		if player.Character then
+			-- Clean up any particle effects on character
+			for _, descendant in ipairs(player.Character:GetDescendants()) do
+				if descendant:IsA("ParticleEmitter") then
+					descendant.Enabled = false
+					descendant:Destroy()
+				elseif descendant:IsA("PointLight") or descendant:IsA("SpotLight") then
+					descendant:Destroy()
+				elseif descendant:IsA("Fire") or descendant:IsA("Smoke") or descendant:IsA("Sparkles") then
+					descendant:Destroy()
+				elseif descendant:IsA("Trail") then
+					descendant.Enabled = false
+					descendant:Destroy()
+				elseif descendant:IsA("Beam") then
+					descendant.Enabled = false
+					descendant:Destroy()
+				end
+			end
+		end
+		
+		-- Clean up VFX from visual snake model
+		if visualSnakeModel then
+			for _, descendant in ipairs(visualSnakeModel:GetDescendants()) do
+				if descendant:IsA("ParticleEmitter") then
+					descendant.Enabled = false
+					descendant:Destroy()
+				elseif descendant:IsA("PointLight") or descendant:IsA("SpotLight") then
+					descendant:Destroy()
+				elseif descendant:IsA("Fire") or descendant:IsA("Smoke") or descendant:IsA("Sparkles") then
+					descendant:Destroy()
+				elseif descendant:IsA("Trail") then
+					descendant.Enabled = false
+					descendant:Destroy()
+				elseif descendant:IsA("Beam") then
+					descendant.Enabled = false
+					descendant:Destroy()
+				end
+			end
+		end
+
 		-- Destroy the snake control script immediately to stop camera/movement
 		local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
 		if snakeInstance and snakeInstance.destroy then
@@ -827,6 +991,11 @@ local function queuePlayerDeath(player)
 			if _G.PlayerSnakes then
 				_G.PlayerSnakes[player] = nil -- Clear reference
 			end
+		end
+
+		-- Clear collision cache immediately
+		if CollisionCache and CollisionCache.playerSegments then
+			CollisionCache.playerSegments[player] = nil
 		end
 
 		-- Disable collision on character parts
@@ -903,7 +1072,7 @@ task.spawn(function()
 					print("🔍 Processing death for", player.Name, "- Health:", humanoid and humanoid.Health or "nil")
 
 					-- Only process if player isn't already marked as dead
-					if not deadPlayers[player] then
+					if not deadPlayers[player] or (humanoid and humanoid.Health > 0) then
 						-- Get snake length
 						local snakeLength = 55
 						if player:FindFirstChild("leaderstats") then
@@ -1177,6 +1346,9 @@ task.spawn(function()
 
 							if revived then
 								print("🎉 REVIVING", player.Name)
+								
+								-- CRITICAL: Clear dead state immediately on revive
+								deadPlayers[player] = nil
 
 								-- Flash frozen segments before respawn for visual continuity
 								if frozenSegmentData then
@@ -1238,6 +1410,15 @@ task.spawn(function()
 
 								-- Simple invincibility
 								setPlayerInvincible(player)
+								
+								-- Destroy the old, frozen snake model before respawning
+								if visualSnakeModel then
+									print("🧹 Destroying old visual snake model before revive")
+									visualSnakeModel:Destroy()
+								end
+								
+								-- Clean up all VFX before respawning
+								cleanupAllVFX(player)
 
 								-- Respawn the player
 								player:LoadCharacter()
@@ -1260,8 +1441,8 @@ task.spawn(function()
 								--  NORMAL DEATH LOGIC (IF NOT REVIVED)
 								-- =============================================
 
-								-- NOW mark as dead since they didn't revive
-								deadPlayers[player] = true
+								-- NOW mark as dead since they didn't revive - already done in queuePlayerDeath
+								-- deadPlayers[player] = true -- Already set in queuePlayerDeath
 
 								-- Kill the player now
 								if humanoid and humanoid.Health > 0 then
@@ -1321,8 +1502,8 @@ task.spawn(function()
 							-- No revive remote, just kill normally
 							print("⚠️ No revive remote found, proceeding with normal death")
 							
-							-- Mark as dead
-							deadPlayers[player] = true
+							-- Mark as dead - already done in queuePlayerDeath
+							-- deadPlayers[player] = true
 							
 							-- Kill the player
 							if humanoid and humanoid.Health > 0 then
