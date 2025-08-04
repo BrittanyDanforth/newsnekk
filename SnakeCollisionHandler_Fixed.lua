@@ -1,9 +1,10 @@
--- SnakeCollisionHandler V8.0 ULTIMATE FIX
+-- SnakeCollisionHandler V8.1 CORRECTED
 -- FIXED: Death orbs now spawn correctly
 -- FIXED: Camera stops moving on death
 -- FIXED: Self-collision prevention
 -- FIXED: Proper snake destruction on death
--- FIXED: Snake segments freeze in death positions (no bunching)
+-- FIXED: Snake segments no longer "bunch up" on death
+-- FIXED: Camera and snake movement stops immediately upon death registration
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -18,12 +19,6 @@ local OrbUtils = require(ReplicatedStorage:WaitForChild("OrbUtils"))
 
 -- Get remotes folder
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
-
--- Get or create death notification event
-local remoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents") or Instance.new("Folder", ReplicatedStorage)
-remoteEvents.Name = "RemoteEvents"
-local deathNotifyEvent = remoteEvents:FindFirstChild("PlayerDeath") or Instance.new("RemoteEvent", remoteEvents)
-deathNotifyEvent.Name = "PlayerDeath"
 
 -- === PERFORMANCE CONSTANTS ===
 local SEGMENT_CHUNK_SIZE = 96
@@ -102,65 +97,6 @@ end
 
 -- === CAMERA FIX: Disconnect camera on death ===
 local function disconnectPlayerCamera(player)
-	-- CRITICAL: Stop all snake camera tracking
-	if _G.PlayerSnakes and _G.PlayerSnakes[player] then
-		local snake = _G.PlayerSnakes[player]
-		-- Disable camera tracking in snake controller
-		if snake.cameraConnection then
-			snake.cameraConnection:Disconnect()
-			snake.cameraConnection = nil
-		end
-		if snake.updateCamera then
-			snake.updateCamera = function() end -- Override with empty function
-		end
-		-- Set flag to prevent camera updates
-		snake.disableCamera = true
-		
-		-- IMPORTANT: Stop the snake movement completely
-		if snake.stop then
-			snake:stop()
-		end
-		
-		-- Disable all movement methods
-		if snake.update then
-			snake.update = function() end
-		end
-		if snake.move then
-			snake.move = function() end
-		end
-		
-		-- Stop the RunService connections if they exist
-		if snake.moveConnection then
-			snake.moveConnection:Disconnect()
-			snake.moveConnection = nil
-		end
-		if snake.updateConnection then
-			snake.updateConnection:Disconnect()
-			snake.updateConnection = nil
-		end
-	end
-
-	-- CRITICAL: Fire remote event to stop camera on client
-	local stopCameraRemote = remotes:FindFirstChild("StopCameraMovement")
-	if not stopCameraRemote then
-		-- Create it if it doesn't exist
-		stopCameraRemote = Instance.new("RemoteEvent")
-		stopCameraRemote.Name = "StopCameraMovement"
-		stopCameraRemote.Parent = remotes
-	end
-	
-	-- Fire to client to stop camera
-	stopCameraRemote:FireClient(player)
-	print("📷 Sent camera stop signal to", player.Name)
-
-	-- Notify client about death using the death notification event
-	deathNotifyEvent:FireClient(player, "died")
-
-	-- Set attributes to signal camera should stop
-	player:SetAttribute("CameraLocked", true)
-	player:SetAttribute("DeathCameraFreeze", true)
-
-	-- Clear any stored connections
 	if cameraConnections[player] then
 		for _, connection in pairs(cameraConnections[player]) do
 			if connection then
@@ -170,28 +106,18 @@ local function disconnectPlayerCamera(player)
 		cameraConnections[player] = nil
 	end
 
-	-- Force humanoid camera offset reset and kill immediately
+	-- Also try to stop any camera scripts
 	if player.Character then
 		local humanoid = player.Character:FindFirstChild("Humanoid")
 		if humanoid then
 			humanoid.CameraOffset = Vector3.new(0, 0, 0)
-			humanoid.AutoRotate = false
-			
-			-- Anchor character to ensure no movement
-			local root = player.Character:FindFirstChild("HumanoidRootPart")
-			if root then
-				root.Anchored = true
-				root.Velocity = Vector3.new(0, 0, 0)
-				root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-				root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-			end
-		end
-		
-		-- Also disable all character scripts
-		local scripts = player.Character:GetDescendants()
-		for _, script in ipairs(scripts) do
-			if script:IsA("LocalScript") and script.Name:match("Snake") then
-				script.Disabled = true
+
+			-- Force camera to stop following
+			local camera = workspace.CurrentCamera
+			if camera and player == Players.LocalPlayer then
+				camera.CameraType = Enum.CameraType.Fixed
+				task.wait(0.1)
+				camera.CameraType = Enum.CameraType.Custom
 			end
 		end
 	end
@@ -250,121 +176,9 @@ local function resetPlayerCollisionState(player)
 	print("✅ Collision state reset complete for", player.Name)
 end
 
--- === CLEANUP UTILITIES ===
-local function cleanupAllVFX(player)
-	print("🧹 Cleaning up all VFX for", player.Name)
-	
-	-- First, clean up anything in the character
-	if player.Character then
-		for _, descendant in ipairs(player.Character:GetDescendants()) do
-			if descendant:IsA("ParticleEmitter") then
-				descendant.Enabled = false
-				descendant:Destroy()
-			elseif descendant:IsA("PointLight") or descendant:IsA("SpotLight") then
-				descendant:Destroy()
-			elseif descendant:IsA("Fire") or descendant:IsA("Smoke") or descendant:IsA("Sparkles") then
-				descendant:Destroy()
-			elseif descendant:IsA("Trail") then
-				descendant.Enabled = false
-				descendant:Destroy()
-			elseif descendant:IsA("Beam") then
-				descendant.Enabled = false
-				descendant:Destroy()
-			elseif descendant:IsA("Sound") then
-				descendant:Stop()
-				descendant:Destroy()
-			end
-		end
-	end
-	
-	-- Clean up any lingering orbs
-	for _, obj in ipairs(workspace:GetDescendants()) do
-		if obj.Name:match("DeathOrb") or obj.Name:match("Orb") then
-			-- Check various ways orbs might be associated with a player
-			local shouldDestroy = false
-			
-			-- Check by attribute
-			local creator = obj:GetAttribute("Creator")
-			if creator == player.Name or creator == player.UserId then
-				shouldDestroy = true
-			end
-			
-			-- Check by ObjectValue
-			local creatorValue = obj:FindFirstChild("Creator")
-			if creatorValue and creatorValue:IsA("ObjectValue") and creatorValue.Value == player then
-				shouldDestroy = true
-			end
-			
-			-- Check by name pattern
-			if obj.Name:match(player.Name) then
-				shouldDestroy = true
-			end
-			
-			if shouldDestroy then
-				obj:Destroy()
-			end
-		end
-		
-		-- Clean up any VFX objects that might be related to the player
-		if obj:IsA("ParticleEmitter") or obj:IsA("PointLight") or obj:IsA("SpotLight") or 
-		   obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") or
-		   obj:IsA("Trail") or obj:IsA("Beam") then
-			local parent = obj.Parent
-			if parent then
-				-- Check if parent name contains player name
-				if parent.Name:match(player.Name) then
-					if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
-						obj.Enabled = false
-					end
-					obj:Destroy()
-				end
-				
-				-- Check if it's in a model that belongs to the player
-				local model = parent:FindFirstAncestorOfClass("Model")
-				if model and model.Name:match(player.Name) then
-					if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
-						obj.Enabled = false
-					end
-					obj:Destroy()
-				end
-			end
-		end
-	end
-	
-	-- Clean up any lingering snake models
-	local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
-	if snakeModel then
-		snakeModel:Destroy()
-	end
-	
-	-- Clean up any other models that might contain the player's name
-	for _, model in ipairs(workspace:GetChildren()) do
-		if model:IsA("Model") and model.Name:match(player.Name) and model ~= player.Character then
-			model:Destroy()
-		end
-	end
-	
-	-- Clean up any folders that might contain VFX
-	local vfxFolder = workspace:FindFirstChild("VFX")
-	if vfxFolder then
-		for _, obj in ipairs(vfxFolder:GetChildren()) do
-			if obj.Name:match(player.Name) then
-				obj:Destroy()
-			end
-		end
-	end
-	
-	-- Clear collision cache for this player
-	if CollisionCache and CollisionCache.playerSegments then
-		CollisionCache.playerSegments[player] = nil
-	end
-end
-
 -- Player spawn handling
 Players.PlayerAdded:Connect(function(player)
 	player.CharacterAdded:Connect(function()
-		-- Clean up any lingering VFX before spawning
-		cleanupAllVFX(player)
 		resetPlayerCollisionState(player)
 		setPlayerInvincible(player)
 		task.spawn(function()
@@ -382,15 +196,12 @@ Players.PlayerAdded:Connect(function(player)
 			deadPlayers[player] = nil
 			deathTimestamps[player] = nil
 			disconnectPlayerCamera(player)
-			cleanupAllVFX(player)
 		end
 	end)
 end)
 
 for _, player in Players:GetPlayers() do
 	player.CharacterAdded:Connect(function()
-		-- Clean up any lingering VFX before spawning
-		cleanupAllVFX(player)
 		resetPlayerCollisionState(player)
 		setPlayerInvincible(player)
 		task.spawn(function()
@@ -518,35 +329,18 @@ local function getPlayerHeads()
 
 	local heads = {}
 	for _, player in Players:GetPlayers() do
-		-- Skip dead players completely
-		if deadPlayers[player] then
-			continue
-		end
-		
-		if player.Character then
-			local humanoid = player.Character:FindFirstChild("Humanoid")
-			-- Skip if player is actually dead
-			if humanoid and humanoid.Health <= 0 then
-				continue
-			end
-			
-			-- Skip if player is marked as dead via attribute
-			local root = player.Character:FindFirstChild("HumanoidRootPart")
-			if root and root:GetAttribute("Dead") then
-				continue
-			end
-			
+		if player.Character and not deadPlayers[player] then
 			local snakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
 			if snakeModel then
 				local snakeHead = snakeModel:FindFirstChild("Segment0_Head")
-				-- Don't include anchored heads (dead players)
-				if snakeHead and snakeHead.Parent and not snakeHead.Anchored then
+				if snakeHead and snakeHead.Parent and snakeHead.Anchored then
 					heads[#heads + 1] = {player = player, part = snakeHead}
 					continue
 				end
 			end
 
-			if root and root.Parent and not root.Anchored then
+			local root = player.Character:FindFirstChild("HumanoidRootPart")
+			if root and root.Parent and not root:GetAttribute("Dead") then
 				heads[#heads + 1] = {player = player, part = root}
 			end
 		end
@@ -560,7 +354,7 @@ end
 local function getAISnakeHeads()
 	local heads = {}
 	if AISnakeModule._activeSnakes then
-		for _, snake in ipairs(AISnakeModule._activeSnakes) do
+		for _, snake in AISnakeModule._activeSnakes do
 			if snake.HeadParts and snake.HeadParts.head and snake.HeadParts.head.Parent then
 				heads[#heads + 1] = snake.HeadParts.head
 			end
@@ -893,140 +687,6 @@ local function queuePlayerDeath(player)
 
 	print("💀 Queuing death for", player.Name)
 	deathTimestamps[player] = tick()
-	
-	-- Mark as dead immediately to prevent collision issues
-	deadPlayers[player] = true
-	
-	-- IMMEDIATELY STOP ALL MOVEMENT AND FREEZE SNAKE
-	-- Disconnect camera IMMEDIATELY
-	disconnectPlayerCamera(player)
-	
-	-- IMMEDIATELY freeze all segments to prevent bunching
-	task.spawn(function()
-		-- Get segments before we do anything else
-		local segments = getActualSnakeSegments(player)
-		if segments and #segments > 0 then
-			print("🧊 Immediately freezing", #segments, "snake segments")
-			for _, segment in ipairs(segments) do
-				if segment and segment.Parent then
-					-- Store original position
-					local originalCFrame = segment.CFrame
-					
-					-- Anchor immediately to freeze position
-					segment.Anchored = true
-					segment.CanCollide = false
-					segment.CanQuery = false
-					segment.CanTouch = false
-					
-					-- Force position for a bit to ensure it stays
-					task.spawn(function()
-						for i = 1, 10 do
-							task.wait(0.1)
-							if segment and segment.Parent then
-								segment.CFrame = originalCFrame
-							end
-						end
-					end)
-				end
-			end
-		end
-		
-		-- Also freeze visual snake model
-		local visualSnakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
-		if visualSnakeModel then
-			for _, part in pairs(visualSnakeModel:GetDescendants()) do
-				if part:IsA("BasePart") then
-					part.Anchored = true
-					part.CanCollide = false
-				end
-			end
-		end
-
-		-- CRITICAL: Clean up VFX and particles immediately
-		if player.Character then
-			-- Clean up any particle effects on character
-			for _, descendant in ipairs(player.Character:GetDescendants()) do
-				if descendant:IsA("ParticleEmitter") then
-					descendant.Enabled = false
-					descendant:Destroy()
-				elseif descendant:IsA("PointLight") or descendant:IsA("SpotLight") then
-					descendant:Destroy()
-				elseif descendant:IsA("Fire") or descendant:IsA("Smoke") or descendant:IsA("Sparkles") then
-					descendant:Destroy()
-				elseif descendant:IsA("Trail") then
-					descendant.Enabled = false
-					descendant:Destroy()
-				elseif descendant:IsA("Beam") then
-					descendant.Enabled = false
-					descendant:Destroy()
-				end
-			end
-		end
-		
-		-- Clean up VFX from visual snake model
-		if visualSnakeModel then
-			for _, descendant in ipairs(visualSnakeModel:GetDescendants()) do
-				if descendant:IsA("ParticleEmitter") then
-					descendant.Enabled = false
-					descendant:Destroy()
-				elseif descendant:IsA("PointLight") or descendant:IsA("SpotLight") then
-					descendant:Destroy()
-				elseif descendant:IsA("Fire") or descendant:IsA("Smoke") or descendant:IsA("Sparkles") then
-					descendant:Destroy()
-				elseif descendant:IsA("Trail") then
-					descendant.Enabled = false
-					descendant:Destroy()
-				elseif descendant:IsA("Beam") then
-					descendant.Enabled = false
-					descendant:Destroy()
-				end
-			end
-		end
-
-		-- Destroy the snake control script immediately to stop camera/movement
-		local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
-		if snakeInstance and snakeInstance.destroy then
-			print("❄️ Destroying snake controls immediately for", player.Name)
-			snakeInstance:destroy()
-			if _G.PlayerSnakes then
-				_G.PlayerSnakes[player] = nil -- Clear reference
-			end
-		end
-
-		-- Clear collision cache immediately
-		if CollisionCache and CollisionCache.playerSegments then
-			CollisionCache.playerSegments[player] = nil
-		end
-
-		-- Disable collision on character parts
-		if player.Character then
-			local humanoid = player.Character:FindFirstChild("Humanoid")
-			if humanoid then
-				-- Make humanoid unable to move but don't kill yet
-				humanoid.WalkSpeed = 0
-				humanoid.JumpPower = 0
-				humanoid.JumpHeight = 0
-				humanoid.AutoRotate = false
-			end
-			
-			local root = player.Character:FindFirstChild("HumanoidRootPart")
-			if root then
-				-- Stop all movement but don't anchor yet
-				root.Velocity = Vector3.new(0, 0, 0)
-				root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-				root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-			end
-			
-			for _, part in ipairs(player.Character:GetDescendants()) do
-				if part:IsA("BasePart") then
-					part.CanCollide = false
-					part.CanQuery = false
-					part.CanTouch = false
-				end
-			end
-		end
-	end)
-	
 	table.insert(deathQueue, {
 		type = "player",
 		target = player,
@@ -1071,8 +731,7 @@ task.spawn(function()
 					local humanoid = character:FindFirstChild("Humanoid")
 					print("🔍 Processing death for", player.Name, "- Health:", humanoid and humanoid.Health or "nil")
 
-					-- Only process if player isn't already marked as dead
-					if not deadPlayers[player] or (humanoid and humanoid.Health > 0) then
+					if humanoid and humanoid.Health > 0 and not deadPlayers[player] then
 						-- Get snake length
 						local snakeLength = 55
 						if player:FindFirstChild("leaderstats") then
@@ -1103,68 +762,42 @@ task.spawn(function()
 						player:SetAttribute("TempMagnetRange", 1)
 						player:SetAttribute("ActiveMagnet", false)
 
-						-- CAMERA AND MOVEMENT ALREADY STOPPED IN queuePlayerDeath
+						-- CAMERA FIX: Disconnect camera updates
+						disconnectPlayerCamera(player)
 
 						-- CRITICAL: Store snake references BEFORE checking revive
 						local snakeInstance = _G.PlayerSnakes and _G.PlayerSnakes[player]
 						if not snakeInstance and character:FindFirstChild("__SnakeInstance") then
 							snakeInstance = character.__SnakeInstance.Value
 						end
-
 						local visualSnakeModel = workspace:FindFirstChild("Snake_" .. player.Name)
-
 						print("🐍 Snake references - Instance:", snakeInstance ~= nil, "Visual:", visualSnakeModel ~= nil)
-						
-						-- Note: Snake control may already be destroyed in queuePlayerDeath
-						-- but visual model should still exist for orb spawning
 
-						-- SEGMENTS ALREADY FROZEN IN queuePlayerDeath
-						-- Store data for potential revive
-						local frozenSegmentData = {}
-						
-						-- Just fade out the already-frozen segments
-						if segments and #segments > 0 then
-							print("🧊 Fading out", #segments, "frozen snake segments")
-							for i, seg in ipairs(segments) do
-								if seg and seg:IsA("BasePart") and seg.Parent then
-									-- Store for potential revive
-									frozenSegmentData[seg] = {
-										transparency = seg.Transparency,
-										cframe = seg.CFrame
-									}
-									
-									-- Segments already anchored in queuePlayerDeath
-									
-									-- Just fade them out
-									if seg.Transparency < 1 then
-										local tween = TweenService:Create(seg,
-											TweenInfo.new(0.5, Enum.EasingStyle.Linear),
-											{Transparency = 0.7}
-										)
-										tween:Play()
-									end
-								end
+						-- =======================================================
+						-- === IMMEDIATE SNAKE FREEZE & CONTROL DESTRUCTION (FIX) ===
+						-- =======================================================
+						print("❄️ Freezing snake and destroying controls for", player.Name)
+
+						-- 1. Destroy the snake control script immediately to stop camera/movement
+						if snakeInstance and snakeInstance.destroy then
+							snakeInstance:destroy()
+							if _G.PlayerSnakes then
+								_G.PlayerSnakes[player] = nil -- Clear reference
 							end
 						end
 
-						-- Also fade the visual snake model if it exists
+						-- 2. Anchor every visual segment to prevent "bunching up"
 						if visualSnakeModel then
-							for _, part in pairs(visualSnakeModel:GetDescendants()) do
+							for _, part in ipairs(visualSnakeModel:GetChildren()) do
 								if part:IsA("BasePart") then
-									frozenSegmentData[part] = {
-										transparency = part.Transparency
-									}
-									-- Already anchored in queuePlayerDeath
-									if part.Transparency < 1 then
-										local tween = TweenService:Create(part,
-											TweenInfo.new(0.5, Enum.EasingStyle.Linear),
-											{Transparency = 0.7}
-										)
-										tween:Play()
-									end
+									part.Anchored = true
 								end
 							end
 						end
+						-- =======================================================
+
+						-- DON'T set health to 0 yet - wait to see if they revive!
+						-- This prevents the menu from showing prematurely
 
 						-- Handle character death animation
 						local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -1188,7 +821,7 @@ task.spawn(function()
 									part.CanTouch = false
 									part.CanQuery = false
 									if part.Transparency < 1 then
-										local tween = TweenService:Create(part, 
+										local tween = TweenService:Create(part,	
 											TweenInfo.new(0.5, Enum.EasingStyle.Linear),
 											{Transparency = 1}
 										)
@@ -1199,9 +832,6 @@ task.spawn(function()
 								end
 							end
 						end
-
-						-- Store frozen segment data for potential revive
-						player:SetAttribute("FrozenSegmentData", true)
 
 						-- SPAWN DEATH ORBS IMMEDIATELY (before revive check)
 						if segmentPositions and #segmentPositions > 0 then
@@ -1346,21 +976,6 @@ task.spawn(function()
 
 							if revived then
 								print("🎉 REVIVING", player.Name)
-								
-								-- CRITICAL: Clear dead state immediately on revive
-								deadPlayers[player] = nil
-
-								-- Flash frozen segments before respawn for visual continuity
-								if frozenSegmentData then
-									for seg, data in pairs(frozenSegmentData) do
-										if seg and seg.Parent then
-											-- Brief visibility flash
-											seg.Transparency = 0.3
-											task.wait(0.05)
-											seg.Transparency = 1
-										end
-									end
-								end
 
 								-- CRITICAL: Set reviving flags IMMEDIATELY to prevent menu
 								player:SetAttribute("RevivingNow", true)
@@ -1410,15 +1025,11 @@ task.spawn(function()
 
 								-- Simple invincibility
 								setPlayerInvincible(player)
-								
-								-- Destroy the old, frozen snake model before respawning
+
+								-- Destroy the old, frozen snake model before loading a new character
 								if visualSnakeModel then
-									print("🧹 Destroying old visual snake model before revive")
 									visualSnakeModel:Destroy()
 								end
-								
-								-- Clean up all VFX before respawning
-								cleanupAllVFX(player)
 
 								-- Respawn the player
 								player:LoadCharacter()
@@ -1427,7 +1038,6 @@ task.spawn(function()
 								task.spawn(function()
 									task.wait(0.1)
 									player:SetAttribute("CameraLocked", false)
-									player:SetAttribute("DeathCameraFreeze", false)
 									task.wait(1.9) -- Wait for character to fully load
 									player:SetAttribute("RevivingNow", false)
 									player:SetAttribute("NoReviveEffects", false) -- Re-enable effects
@@ -1441,56 +1051,30 @@ task.spawn(function()
 								--  NORMAL DEATH LOGIC (IF NOT REVIVED)
 								-- =============================================
 
-								-- NOW mark as dead since they didn't revive - already done in queuePlayerDeath
-								-- deadPlayers[player] = true -- Already set in queuePlayerDeath
-
-								-- Kill the player now
-								if humanoid and humanoid.Health > 0 then
-									print("💀 Setting health to 0 for", player.Name, "- No revive chosen")
-									humanoid.Health = 0
-								end
-
-								-- Unfreeze and destroy frozen segments before destroying snake
-								if frozenSegmentData then
-									for seg, data in pairs(frozenSegmentData) do
-										if seg and seg.Parent then
-											-- Quick fade to fully transparent before destruction
-											if seg.Transparency < 1 then
-												seg.Transparency = 1
-											end
-										end
-									end
-								end
-
-								-- Destroy snake now that we know they're not reviving
-								-- Note: Snake control was already destroyed in queuePlayerDeath
-								if snakeInstance and snakeInstance.destroy then
-									print("🐍 Snake controls already destroyed for", player.Name)
-								end
-								if _G.PlayerSnakes then
-									_G.PlayerSnakes[player] = nil -- Ensure it's cleared
-								end
-
-								-- Destroy visual snake model
+								-- Destroy visual snake model now that we know they're not reviving
 								if visualSnakeModel then
-									print("🐍 Destroying visual snake model for", player.Name)
+									print("🐍 Destroying final visual snake model for", player.Name)
 									visualSnakeModel:Destroy()
 								end
+
+								-- ONLY mark as dead if NOT reviving
+								deadPlayers[player] = true
 
 								-- Clear collision caches when dying
 								if CollisionCache and CollisionCache.playerSegments then
 									CollisionCache.playerSegments[player] = nil
 								end
 
-								-- Fire death event for menu system (RemoteEvent, not BindableEvent)
-								local playerDiedEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
-								if playerDiedEvent then
-									if playerDiedEvent:IsA("RemoteEvent") then
-										-- Don't fire to specific client, let other scripts handle it
-										print("📢 PlayerDied is a RemoteEvent, skipping Fire")
-									elseif playerDiedEvent:IsA("BindableEvent") then
-										playerDiedEvent:Fire(player)
-									end
+								-- NOW kill the player (since they didn't revive)
+								if humanoid and humanoid.Health > 0 then
+									print("💀 Setting health to 0 for", player.Name, "- No revive chosen")
+									humanoid.Health = 0
+								end
+
+								-- Fire death event for menu system
+								local deathEvent = ReplicatedStorage:FindFirstChild("PlayerDied")
+								if deathEvent then
+									deathEvent:Fire(player)
 								end
 
 								task.spawn(function()
@@ -1498,108 +1082,77 @@ task.spawn(function()
 									deadPlayers[player] = nil
 								end)
 							end -- end of "if revived then ... else"
-						else
-							-- No revive remote, just kill normally
-							print("⚠️ No revive remote found, proceeding with normal death")
-							
-							-- Mark as dead - already done in queuePlayerDeath
-							-- deadPlayers[player] = true
-							
-							-- Kill the player
-							if humanoid and humanoid.Health > 0 then
-								humanoid.Health = 0
-							end
-							
-							-- Snake control already destroyed in queuePlayerDeath
-							if _G.PlayerSnakes then
-								_G.PlayerSnakes[player] = nil -- Ensure it's cleared
-							end
-							
-							-- Destroy visual snake model
-							if visualSnakeModel then
-								visualSnakeModel:Destroy()
-							end
-							
-							-- Clear collision caches
-							if CollisionCache and CollisionCache.playerSegments then
-								CollisionCache.playerSegments[player] = nil
-							end
-							
-							task.spawn(function()
-								task.wait(5)
-								deadPlayers[player] = nil
-							end)
 						end -- end of "if reviveRemote then"
 					else
-						print("⚠️ Player", player.Name, "already marked as dead, skipping")
+						print("⚠️ Skipping death for", player.Name, "- Already dead or no humanoid")
 					end
-				elseif death.type == "ai" then
-					-- AI death processing (similar to original but with fixed orb spawning)
-					local head = death.target
-					if AISnakeModule._activeSnakes then
-						for _, snake in ipairs(AISnakeModule._activeSnakes) do
-							if snake.HeadParts and snake.HeadParts.head == head then
-								if snake.Segments then
-									local segments = snake.Segments
-									local totalLength = #segments
+				end
+			elseif death.type == "ai" then
+				-- AI death processing (similar to original but with fixed orb spawning)
+				local head = death.target
+				if AISnakeModule._activeSnakes then
+					for _, snake in AISnakeModule._activeSnakes do
+						if snake.HeadParts and snake.HeadParts.head == head then
+							if snake.Segments then
+								local segments = snake.Segments
+								local totalLength = #segments
 
-									local orbsPerSegment = 1 / 2.5
-									local totalOrbs = math.clamp(math.floor(totalLength * orbsPerSegment), 3, 30)
+								local orbsPerSegment = 1 / 2.5
+								local totalOrbs = math.clamp(math.floor(totalLength * orbsPerSegment), 3, 30)
 
-									local baseValue = 1
-									if totalLength <= 50 then
-										local totalValue = math.floor(totalLength * 0.6)
-										baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-									elseif totalLength <= 200 then
-										local totalValue = math.floor(totalLength * 0.45)
-										baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-									elseif totalLength <= 500 then
-										local totalValue = math.floor(totalLength * 0.35)
-										baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-									else
-										local totalValue = math.min(math.floor(totalLength * 0.25), 200)
-										baseValue = math.max(1, math.floor(totalValue / totalOrbs))
-									end
+								local baseValue = 1
+								if totalLength <= 50 then
+									local totalValue = math.floor(totalLength * 0.6)
+									baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+								elseif totalLength <= 200 then
+									local totalValue = math.floor(totalLength * 0.45)
+									baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+								elseif totalLength <= 500 then
+									local totalValue = math.floor(totalLength * 0.35)
+									baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+								else
+									local totalValue = math.min(math.floor(totalLength * 0.25), 200)
+									baseValue = math.max(1, math.floor(totalValue / totalOrbs))
+								end
 
-									local spawnedOrbs = 0
-									local skipInterval = math.max(1, math.floor(totalLength / totalOrbs))
+								local spawnedOrbs = 0
+								local skipInterval = math.max(1, math.floor(totalLength / totalOrbs))
 
-									for i = 1, totalLength, skipInterval do
-										if spawnedOrbs >= totalOrbs then break end
+								for i = 1, totalLength, skipInterval do
+									if spawnedOrbs >= totalOrbs then break end
 
-										local seg = segments[i]
-										if seg and seg.Parent and seg.Position then
-											local pos = seg.Position
-											local offset = Vector3.new(
-												(math.random() - 0.5) * 2,
-												0,
-												(math.random() - 0.5) * 2
-											)
+									local seg = segments[i]
+									if seg and seg.Parent and seg.Position then
+										local pos = seg.Position
+										local offset = Vector3.new(
+											(math.random() - 0.5) * 2,
+											0,
+											(math.random() - 0.5) * 2
+										)
 
-											spawnDeathOrb(pos + offset, baseValue)
-											spawnedOrbs = spawnedOrbs + 1
-										end
-									end
-
-									if spawnedOrbs < 3 and segments[1] then
-										local firstSeg = segments[1]
-										if firstSeg and firstSeg.Parent and firstSeg.Position then
-											spawnDeathOrb(firstSeg.Position, baseValue)
-										end
+										spawnDeathOrb(pos + offset, baseValue)
+										spawnedOrbs = spawnedOrbs + 1
 									end
 								end
 
-								if snake.Destroy then
-									snake:Destroy()
+								if spawnedOrbs < 3 and segments[1] then
+									local firstSeg = segments[1]
+									if firstSeg and firstSeg.Parent and firstSeg.Position then
+										spawnDeathOrb(firstSeg.Position, baseValue)
+									end
 								end
-								break
 							end
+
+							if snake.Destroy then
+								snake:Destroy()
+							end
+							break
 						end
 					end
 				end
-
-				isProcessingDeaths = false
 			end
+
+			isProcessingDeaths = false
 		end
 	end
 end)
@@ -1753,54 +1306,55 @@ RunService.Stepped:Connect(function()
 		local player = headData.player
 		local head = headData.part
 
-		-- Skip if player is dead, invincible, or not valid
-		if deadPlayers[player] or isPlayerInvincible(player) then
+		if isPlayerInvincible(player) then
 			continue
 		end
 
-		if not head or not head.Parent then
-			continue
-		end
-		
-		if head:GetAttribute("Dead") then
+		if deadPlayers[player] then
 			continue
 		end
 
-		local headPos = head.Position
+		if head and head.Parent then
+			if head:GetAttribute("Dead") then
+				continue
+			end
 
-		if AISnakeModule._activeSnakes then
-			for _, snake in ipairs(AISnakeModule._activeSnakes) do
-				if snake and snake._active then
-					if snake.HeadParts and snake.HeadParts.head and deadAISnakes[snake.HeadParts.head] then
-						continue
-					end
-					local segmentData = getAISnakeSegments(snake)
-					if segmentData and segmentData.segments then
-						if segmentData.bounds and not checkBoundsOverlap(
-							{min = headPos - Vector3.new(5,5,5), max = headPos + Vector3.new(5,5,5)},
-							segmentData.bounds,
-							BODY_COLLISION_DISTANCE
-							) then
+			local headPos = head.Position
+
+			if AISnakeModule._activeSnakes then
+				for _, snake in AISnakeModule._activeSnakes do
+					if snake and snake._active then
+						if snake.HeadParts and snake.HeadParts.head and deadAISnakes[snake.HeadParts.head] then
 							continue
 						end
+						local segmentData = getAISnakeSegments(snake)
+						if segmentData and segmentData.segments then
+							if segmentData.bounds and not checkBoundsOverlap(
+								{min = headPos - Vector3.new(5,5,5), max = headPos + Vector3.new(5,5,5)},
+								segmentData.bounds,
+								BODY_COLLISION_DISTANCE
+								) then
+								continue
+							end
 
-						local collision = false
-						if segmentData.chunks then
-							collision = findCollisionInChunks(headPos, segmentData.chunks, BODY_COLLISION_DISTANCE, false)
-						else
-							collision = findCollisionInSegments(
-								headPos,
-								segmentData.segments,
-								BODY_COLLISION_DISTANCE,
-								segmentData.length > 200,
-								false
-							)
-						end
+							local collision = false
+							if segmentData.chunks then
+								collision = findCollisionInChunks(headPos, segmentData.chunks, BODY_COLLISION_DISTANCE, false)
+							else
+								collision = findCollisionInSegments(
+									headPos,
+									segmentData.segments,
+									BODY_COLLISION_DISTANCE,
+									segmentData.length > 200,
+									false
+								)
+							end
 
-						if collision then
-							print(string.format("💥 [COLLISION] Player %s hit AI snake body!", player.Name))
-							queuePlayerDeath(player)
-							break
+							if collision then
+								print(string.format("💥 [COLLISION] Player %s hit AI snake body!", player.Name))
+								queuePlayerDeath(player)
+								break
+							end
 						end
 					end
 				end
@@ -2047,7 +1601,7 @@ RunService.Stepped:Connect(function()
 	-- AI vs other AI bodies
 	for _, aiHead in ipairs(aiHeads) do
 		if aiHead and aiHead.Parent and AISnakeModule._activeSnakes then
-			for _, snake in ipairs(AISnakeModule._activeSnakes) do
+			for _, snake in AISnakeModule._activeSnakes do
 				if snake and snake._active and snake.HeadParts and snake.HeadParts.head == aiHead then
 					continue
 				end
@@ -2145,16 +1699,13 @@ task.spawn(function()
 	end
 end)
 
-print("⚡ SnakeCollisionHandler V8.0 ULTIMATE FIX")
-print("✅ FIXED: Death orbs spawn correctly along snake path")
-print("📷 FIXED: Camera AND movement stop IMMEDIATELY on death")
+print("⚡ SnakeCollisionHandler V8.1 CORRECTED")
+print("✅ FIXED: Death orbs now spawn correctly along snake path")
+print("📷 FIXED: Camera stops moving immediately on death")
 print("🐍 FIXED: Self-collision prevention (ignores first 10 segments)")
-print("💀 FIXED: Instant death processing - no delay")
+print("💀 FIXED: Proper snake destruction on death")
 print("🎯 FIXED: Duplicate death prevention")
-print("🧊 FIXED: Snake segments freeze INSTANTLY in death positions")
-print("🚫 FIXED: Dead players excluded from collision checks")
-print("⚙️ FIXED: Snake movement methods disabled on death")
-print("📡 FIXED: StopCameraMovement remote event fired to client")
+print("🧊 FIXED: Snake segments now freeze instantly, preventing 'bunching'")
 print("🔧 All optimizations and features preserved")
 
 -- Debug command
