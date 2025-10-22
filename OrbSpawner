@@ -60,22 +60,22 @@ if not OrbCollectedEvent then
 	OrbCollectedEvent.Parent = ReplicatedStorage
 end
 
-local ORB_SPAWN_INTERVAL  = 0.5  -- Slower respawn for better performance
-local ORB_MAX             = 600  -- Reduced orb count for better FPS
-local UPGRADE_ORB_CHANCE  = 0.02  -- Reduced to 2% (very rare)
+local ORB_SPAWN_INTERVAL  = 0.05  -- Super fast respawn for instant orb replacement
+local ORB_MAX             = 1500  -- High orb count for great density
+local UPGRADE_ORB_CHANCE  = 0.01  -- Reduced to 1% (rare upgrade orbs)
 
 -- LOD (Level of Detail) settings for performance
 -- Server uses default high settings, clients handle their own graphics
-local RENDER_DISTANCE = 250  -- Increased from 150
-local FAR_DISTANCE = 400     -- Increased from 300
-local FADE_DISTANCE = 100    -- Increased from 50
+local RENDER_DISTANCE = 200  -- Optimized for more orbs
+local FAR_DISTANCE = 350     -- Reduced slightly for performance
+local FADE_DISTANCE = 80     -- Tighter fade for better performance
 local MIN_ORB_SIZE = 0.3
 local MAX_ORB_SIZE = 2.0
-local LOD_UPDATE_RATE = 0.2  -- Slower updates for better performance
+local LOD_UPDATE_RATE = 0.25  -- Slightly slower LOD updates to handle more orbs
 
 -- Performance settings
-local BATCH_PROCESS_COUNT = 50  -- Process orbs in batches
-local ORB_POOL_SIZE = 100  -- Pre-create orbs for pooling
+local BATCH_PROCESS_COUNT = 100  -- Process lots of orbs per batch
+local ORB_POOL_SIZE = 500  -- Much larger pool for instant orb creation
 
 ---------------------------------------------------------------------
 -- Dynamic spawn area
@@ -600,13 +600,18 @@ local function atomicCollectOrb(orb, collType, collObj)
 	if not orb or not orb.Parent or orbDebounce[orb] then return end
 	orbDebounce[orb] = true
 
-	-- Store orb data before destroying
+		-- Store orb data before destroying
 	local orbPos = orb.Position
 	local orbColor = orb.Color
 	local orbName = orb.Name
 	local valObj = orb:FindFirstChild("Value")
 	local orbValue = (valObj and valObj.Value) or 10
-	
+
+	-- Add position to respawn queue if it's a regular orb
+	if orbName == "Orb" and #respawnQueue < MAX_RESPAWN_QUEUE then
+		table.insert(respawnQueue, orbPos)
+	end
+
 	-- Remove orb immediately to prevent multiple collections
 	orb.Parent = nil
 	
@@ -882,30 +887,31 @@ end)
 ---------------------------------------------------------------------
 -- Orb spawning control
 ---------------------------------------------------------------------
+-- Queue for respawning orbs at collected locations
+local respawnQueue = {}
+local MAX_RESPAWN_QUEUE = 100
 local function randomPosition()
 	local a = getOrbSpawnArea()
-
-	-- Try to find a gap area (up to 5 attempts)
-	for attempt = 1, 5 do
-		local testX = math.random(a.minX, a.maxX)
-		local testZ = math.random(a.minZ, a.maxZ)
-		local testPos = Vector3.new(testX, a.y, testZ)
-
-		-- Use the existing getOrbsNearPosition function
-		local nearbyOrbs = getOrbsNearPosition(testPos, 40) -- Check within 40 studs
-
-		-- If this area has few orbs, use it (fills gaps)
-		if #nearbyOrbs < 3 then
-			return testPos
-		end
-	end
-
-	-- Fallback to completely random position
-	return Vector3.new(math.random(a.minX, a.maxX), a.y, math.random(a.minZ, a.maxZ))
+	
+	-- Just spawn randomly - checking for gaps is too expensive
+	-- The high spawn rate will naturally fill gaps anyway
+	return Vector3.new(
+		math.random(a.minX, a.maxX), 
+		a.y, 
+		math.random(a.minZ, a.maxZ)
+	)
 end
 
 local function createOrb()
 	local orb
+	local spawnPos
+	
+	-- Use respawn queue if available, otherwise random
+	if #respawnQueue > 0 then
+		spawnPos = table.remove(respawnQueue, 1)
+	else
+		spawnPos = randomPosition()
+	end
 	
 	-- Check if we should spawn an upgrade orb
 	if math.random() < UPGRADE_ORB_CHANCE then
@@ -919,12 +925,12 @@ local function createOrb()
 			orb.Material = Enum.Material.ForceField
 			orb.Transparency = 0.3  -- Make it semi-transparent
 			orb.Size = Vector3.new(5, 5, 5)  -- Slightly larger
-			orb.Position = randomPosition()
+			orb.Position = spawnPos
 			orb.Parent = workspace
 			local val = orb:FindFirstChild("Value")
 			if val then val.Value = 0 end
 		else
-			orb = createSafeOrb(randomPosition(), 0, "UpgradeOrb",
+			orb = createSafeOrb(spawnPos, 0, "UpgradeOrb",
 				Color3.fromRGB(0, 150, 255), Enum.Material.ForceField)
 		end
 		upgradeOrbs[#upgradeOrbs + 1] = orb
@@ -938,7 +944,7 @@ local function createOrb()
 			orb.Name = "Orb"
 			orb.Color = Color3.fromRGB(255, 255, 0)
 			orb.Material = Enum.Material.Neon
-			orb.Position = randomPosition()
+			orb.Position = spawnPos
 			orb.Parent = workspace
 			local val = orb:FindFirstChild("Value")
 			if val then val.Value = 5 end  -- Increased for faster growth
@@ -946,7 +952,7 @@ local function createOrb()
 			-- Add to OrbUtils tracking
 			-- OrbUtils.registerOrb(orb) -- Function doesn't exist
 		else
-			orb = OrbUtils.spawnOrbAt(randomPosition(), 1)
+			orb = OrbUtils.spawnOrbAt(spawnPos, 1)
 		end
 		
 		if orb then
@@ -1029,28 +1035,34 @@ task.spawn(function()
 		task.wait(0.1)
 	end
 	
-	-- Spawn initial orbs in batches
-	local batchSize = 50
+	-- Spawn initial orbs in huge batches for instant map fill
+	local batchSize = 200 -- Massive batch size
 	while #orbs < ORB_MAX do
 		for i = 1, batchSize do
 			if #orbs < ORB_MAX then
 				createOrb()
 			end
 		end
-		task.wait(0.1) -- Small delay between batches
+		task.wait() -- Minimal delay - just yield
 	end
 end)
 
+-- Simple fast respawn system
 task.spawn(function()
 	while true do 
 		task.wait(ORB_SPAWN_INTERVAL)
-		-- Batch spawn to reduce overhead
-		local orbsToSpawn = math.min(5, ORB_MAX - #orbs)
-		for i = 1, orbsToSpawn do
-			if #orbs < ORB_MAX then 
-				createOrb() 
-			else
-				break
+		-- Batch spawn to reduce overhead - spawn LOTS of orbs per batch
+		local orbsNeeded = ORB_MAX - #orbs
+		local orbsToSpawn = math.min(50, orbsNeeded) -- Spawn up to 50 orbs per batch!
+		
+		-- Always try to maintain max orbs (except leave 10% room for death orbs)
+		if #orbs < ORB_MAX * 0.9 then
+			for i = 1, orbsToSpawn do
+				if #orbs < ORB_MAX * 0.9 then 
+					createOrb() 
+				else
+					break
+				end
 			end
 		end
 	end
@@ -1095,6 +1107,7 @@ local OrbSpawner = {
 OrbUtils.attachOrbTouched = attachOrbTouched
 
 _G.OrbSpawner = OrbSpawner
-print("OrbSpawner loaded successfully - Fixed attachment and remote event issues")
+print("OrbSpawner loaded successfully - Enhanced with better density and respawn system")
+print("Settings: Max orbs:", ORB_MAX, "| Spawn interval:", ORB_SPAWN_INTERVAL, "| LOD distance:", RENDER_DISTANCE)
 
 return OrbSpawner
