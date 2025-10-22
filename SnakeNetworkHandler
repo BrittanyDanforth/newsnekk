@@ -43,8 +43,9 @@ function SnakeNetworkHandler.init()
 	local playerSnakeData = {}
 
 	-- Compression settings
-	local POSITION_PRECISION = 0.1 -- Round positions to nearest 0.1
-	local UPDATE_RATE = 15 -- Updates per second to clients
+	local POSITION_PRECISION = 0.5 -- Less precision for less data
+	local UPDATE_RATE = 10 -- Reduced update rate
+	local MIN_MOVE_DISTANCE = 1 -- Minimum distance before sending update
 
 	-- Handle position updates from clients
 	positionUpdate.OnServerEvent:Connect(function(player, data)
