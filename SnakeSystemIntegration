@@ -241,17 +241,15 @@ local function onCharacterAdded(character)
 		end)
 	end
 
-	-- Update loop
+	-- Update loop - V10 handles its own updates internally
+	-- We just need to monitor for character removal/death
 	local updateConnection
 	updateConnection = RunService.Heartbeat:Connect(function(dt)
 		if not character.Parent or humanoid.Health <= 0 then
 			updateConnection:Disconnect()
 			return
 		end
-
-		if snake and activeSnakes[player] == snake then
-			snake:update(dt)
-		end
+		-- V10 snake handles its own updates via startUpdateLoop()
 	end)
 
 	-- Handle skin changes
@@ -270,7 +268,8 @@ local function onCharacterAdded(character)
 	end)
 
 	-- Store connections on snake object for cleanup
-	snake.updateConnection = updateConnection
+	-- Note: V10 has its own internal updateConnection, this one just monitors character state
+	snake.monitorConnection = updateConnection
 	snake.skinConnection = skinConnection
 
 	-- Handle death
