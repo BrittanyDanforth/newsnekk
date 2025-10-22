@@ -21,7 +21,7 @@ else
 	Config = {
 		BaseSpeed = 50, -- Increased for proper speed
 		BoostSpeed = 100, -- Proper boost speed
-		TurnSpeed = 5.1, -- Slightly reduced
+		TurnSpeed = 3.8, -- Reduced from 5.1 for smoother turns
 		CrawlSpeed = 8,
 		SlowSpeed = 18,
 		SuperSpeed = 55,
@@ -31,8 +31,8 @@ else
 		SegmentSize = Vector3.new(1.5, 1.5, 1.5),
 		SegmentColor = Color3.fromRGB(0, 200, 0),
 		MaxSegments = 80, -- Reduced for better performance
-		SegmentGap = 3.0, -- Slightly increased for less dense updates
-		PathSmoothness = 0.85, -- Slightly reduced for better performance
+		SegmentGap = 2.5, -- Reduced from 3.0 for tighter segments
+		PathSmoothness = 0.92, -- Increased from 0.85 for smoother paths
 		UpdateRate = 30, -- Reduced from 60 to 30 FPS
 		LODDistance = 120 -- Increased for better culling
 	}
@@ -75,16 +75,20 @@ function PathSystem.new()
 
 		-- Network-optimized smoothing
 		smoothingBuffer = {},
-		smoothingRadius = 2.5, -- Reduced from 3
+		smoothingRadius = 3.5, -- Increased from 2.5 for smoother curves
+		
+		-- Enhanced smoothing parameters
+		smoothingFactor = 0.25, -- New: controls curve smoothness
+		tensionFactor = 0.5, -- New: controls curve tension for Catmull-Rom
 
 		-- Enhanced performance optimization
 		lastRecordedPos = nil,
-		minRecordDistance = 0.5, -- Increased from 0.35 for less network traffic
+		minRecordDistance = 0.3, -- Decreased from 0.5 for more precise path recording
 		networkUpdateCounter = 0,
 
 		-- Reduced memory usage
 		pointCount = 0,
-		maxPoints = 250, -- Reduced from 350 for better network performance
+		maxPoints = 350, -- Increased from 250 for better path history
 
 		-- Smaller interpolation cache
 		interpolationCache = {},
@@ -224,31 +228,58 @@ function PathSystem:getSmoothedPositionAtDistance(targetDistance)
 	local baseResult = self:getPositionAtDistance(targetDistance)
 	if not baseResult then return nil end
 
-	-- Simplified smoothing for better network performance
-	if #self.pathPoints < 3 then
+	-- Need at least 4 points for Catmull-Rom
+	if #self.pathPoints < 4 then
 		return baseResult
 	end
 
-	-- Simple linear smoothing instead of Catmull-Rom for better performance
+	-- Get surrounding points for Catmull-Rom spline
 	local segmentIndex = baseResult.segmentIndex or 1
-	local prevIndex = math.max(1, segmentIndex - 1)
-	local nextIndex = math.min(segmentIndex + 1, #self.pathPoints)
+	local p0Index = math.max(1, segmentIndex - 1)
+	local p1Index = segmentIndex
+	local p2Index = math.min(segmentIndex + 1, #self.pathPoints)
+	local p3Index = math.min(segmentIndex + 2, #self.pathPoints)
 
-	if prevIndex == segmentIndex or nextIndex == segmentIndex then
+	-- Ensure we have 4 distinct points
+	if p3Index <= p0Index then
 		return baseResult
 	end
 
-	local p0 = self.pathPoints[prevIndex].position
-	local p1 = self.pathPoints[segmentIndex].position
-	local p2 = self.pathPoints[nextIndex].position
+	local p0 = self.pathPoints[p0Index].position
+	local p1 = self.pathPoints[p1Index].position
+	local p2 = self.pathPoints[p2Index].position
+	local p3 = self.pathPoints[p3Index].position
 
-	-- Simple smoothing
+	-- Catmull-Rom spline interpolation
 	local t = baseResult.t or 0
-	local smoothedPosition = p0:Lerp(p1, 0.3):Lerp(p1:Lerp(p2, t), 0.7)
+	local t2 = t * t
+	local t3 = t2 * t
+	
+	-- Catmull-Rom basis functions with tension control
+	local tension = self.tensionFactor
+	local v0 = (p2 - p0) * tension
+	local v1 = (p3 - p1) * tension
+	
+	local a = p1
+	local b = v0
+	local c = (p2 - p1) * 3 - v0 * 2 - v1
+	local d = (p1 - p2) * 2 + v0 + v1
+	
+	-- Calculate smoothed position
+	local smoothedPosition = a + b * t + c * t2 + d * t3
+	
+	-- Apply additional smoothing factor
+	smoothedPosition = baseResult.position:Lerp(smoothedPosition, self.smoothingFactor)
+	
+	-- Calculate smoothed direction using derivative of Catmull-Rom
+	local smoothedDirection = (b + c * 2 * t + d * 3 * t2).Unit
+	if smoothedDirection.Magnitude < 0.1 then
+		smoothedDirection = baseResult.direction
+	end
 
 	return {
 		position = smoothedPosition,
-		direction = baseResult.direction,
+		direction = smoothedDirection,
 		speed = baseResult.speed
 	}
 end
@@ -717,14 +748,44 @@ local function initializeForCharacter(character)
 			turnRate = baseTurnRate * 0.6
 		end
 
-		-- PROPER DIRECTION INTERPOLATION - Never let it become invalid
+		-- SMOOTHER DIRECTION INTERPOLATION WITH EASING
 		if State.targetDirection.Magnitude > 0.001 and State.currentDirection.Magnitude > 0.001 then
-			-- Only interpolate if both directions are valid
-			local newDirection = State.currentDirection:Lerp(State.targetDirection, turnRate)
+			-- Calculate angle between directions for adaptive smoothing
+			local angleDiff = math.acos(math.clamp(State.currentDirection:Dot(State.targetDirection), -1, 1))
 			
-			-- Always normalize after lerp
+			-- Apply easing function for smoother turns
+			-- Use a cubic ease-in-out for natural acceleration/deceleration
+			local easedTurnRate = turnRate
+			if angleDiff > 0.1 then
+				-- For larger turns, use smoother easing
+				local t = math.min(turnRate * 1.5, 1)
+				easedTurnRate = t * t * (3 - 2 * t) -- Smoothstep function
+			end
+			
+			-- Spherical linear interpolation for smoother rotation
+			local function slerp(v1, v2, t)
+				local dot = v1:Dot(v2)
+				dot = math.clamp(dot, -1, 1)
+				local theta = math.acos(dot)
+				
+				if theta < 0.01 then
+					-- Vectors are very close, use linear interpolation
+					return v1:Lerp(v2, t).Unit
+				end
+				
+				local sinTheta = math.sin(theta)
+				local a = math.sin((1 - t) * theta) / sinTheta
+				local b = math.sin(t * theta) / sinTheta
+				
+				return (v1 * a + v2 * b).Unit
+			end
+			
+			-- Use spherical interpolation for smoother turning
+			local newDirection = slerp(State.currentDirection, State.targetDirection, easedTurnRate)
+			
+			-- Always normalize after interpolation
 			if newDirection.Magnitude > 0.001 then
-				State.currentDirection = newDirection.Unit
+				State.currentDirection = newDirection
 			end
 		end
 
