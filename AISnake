@@ -875,7 +875,8 @@ function AISnake:findNearbyThreats()
 	local myPos = myHead.Position
 	local threats = {}
 
-	local threatRadius = 80 -- INCREASED from 60
+	-- REDUCED threat radius to prevent constant fleeing from huge snakes
+	local threatRadius = 60 -- Reduced from 80
 	local nearbyEntities = SpatialGrid.QueryRadius(myPos, threatRadius)
 
 	for _, entity in nearbyEntities do
@@ -892,9 +893,19 @@ function AISnake:findNearbyThreats()
 			local lengthDiff = enemyLength - self.CurrentLength
 			local isThreat = false
 
-			-- More balanced threat detection
-			if lengthDiff > 20 or (dist < 20 and lengthDiff > 5) then
+			-- More balanced threat detection with HUGE SNAKE HANDLING
+			if enemyLength > 500 then
+				-- Special handling for massive snakes - only flee if VERY close
+				if dist < 15 and lengthDiff > 50 then
+					isThreat = true
+				end
+			elseif lengthDiff > 20 or (dist < 20 and lengthDiff > 5) then
 				isThreat = true
+			end
+
+			-- Don't consider far away huge snakes as threats
+			if dist > 40 and enemyLength > 300 then
+				isThreat = false
 			end
 
 			if not isThreat and dist < 30 and lengthDiff > 15 then
@@ -911,6 +922,11 @@ function AISnake:findNearbyThreats()
 
 			if isThreat then
 				local threatLevel = mathMax(lengthDiff + 10, 5) / mathMax(dist, 1)
+				-- Cap threat level for huge snakes to prevent panic
+				if enemyLength > 500 then
+					threatLevel = threatLevel * 0.5
+				end
+				
 				table.insert(threats, {
 					part = entity.part,
 					position = entity.part.Position,  -- Add position field for convenience
@@ -918,7 +934,8 @@ function AISnake:findNearbyThreats()
 					owner = entity.owner,
 					distance = dist,
 					threatLevel = threatLevel,
-					lengthDiff = lengthDiff
+					lengthDiff = lengthDiff,
+					enemyLength = enemyLength
 				})
 			end
 		end
@@ -1577,6 +1594,8 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	self.AvoidExpire = 0
 	self.AvoidDir = nil
 	self.FleeReason = ""
+	self.FleeStartTime = nil
+	self.ForceWanderUntil = nil
 
 	self.isConfident = false
 	self.confidenceEndTime = 0
