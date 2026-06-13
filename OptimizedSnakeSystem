@@ -20,10 +20,10 @@ local MAX_SEGMENTS = 500
 -- Spacing is expressed as a fraction of the segment DIAMETER so balls always
 -- overlap (no gaps) regardless of how fast the snake moves or the server FPS.
 local SEGMENTS_PER_LENGTH = 0.5        -- physical balls created per unit of length
-local SEGMENT_SPACING_RATIO = 0.5      -- gap between balls = diameter * ratio (<1 => overlap => seamless)
+local SEGMENT_SPACING_RATIO = 0.4      -- gap between balls = diameter * ratio (<1 => overlap => seamless)
 local MIN_RECORD_DISTANCE = 0.35       -- path resolution in studs (smaller = smoother, more memory)
 local PATH_BUFFER = 40                 -- extra studs of path kept behind the tail
-local MAX_SPACING_BOOST = 2.2          -- how much the body may stretch once segment cap is hit
+local MAX_SPACING_BOOST = 1.25         -- slight stretch for snakes past the cap (kept low so balls stay overlapped)
 local GROWTH_CHECK_INTERVAL = 10
 
 -- Visual Constants - UNIFIED RENDERING
@@ -32,8 +32,8 @@ local MAX_SIZE_MULTIPLIER = 3.5 -- Maximum size growth
 local GLOW_INTENSITY = 2 -- Professional glow intensity (research: 0.7-2.0 optimal)
 local GLOW_RANGE_BASE = 15
 local BEAM_SEGMENTS = 10 -- Optimal segments (research: >10 has diminishing returns)
-local BEAM_WIDTH_BASE = 0.95 -- Base beam width relative to segments
-local BEAM_TAPER_STRENGTH = 0.15 -- How much beams taper (reduced from part taper)
+local BEAM_WIDTH_BASE = 1.06 -- Beams slightly wider than balls so the tube reads as one solid surface (hides ball bumps)
+local BEAM_TAPER_STRENGTH = 0.06 -- Very gentle beam taper so the body stays a uniform tube
 local HEAD_SIZE_MULTIPLIER = 1.05 -- Reduced head size multiplier for consistency
 local HEAD_BLEND_SEGMENTS = 8 -- More segments for smoother blend
 local GLOW_FALLOFF_START = 50 -- Start reducing glow density after this many segments
