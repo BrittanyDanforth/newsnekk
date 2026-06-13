@@ -1853,6 +1853,12 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		-- Gradually move forward to create proper segment spacing
 		local startPos = self.Position
 		for step = 1, 20 do
+			-- Abort if the snake was destroyed during stabilization (prevents
+			-- "attempt to index nil with 'Position'" when RootPart is gone).
+			if self._destroyed or not self.RootPart or not self.RootPart.Parent then
+				return
+			end
+
 			-- Move forward slightly
 			local moveDistance = self.SegmentSpacing * 0.1
 			local newPos = self.Position + self.Direction * moveDistance
