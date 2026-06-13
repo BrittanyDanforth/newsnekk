@@ -436,8 +436,16 @@ end
 local function getAISnakeHeads()
     local heads = {}
     if AISnakeModule._activeSnakes then
+        local nowTick = tick()
         for _, snake in AISnakeModule._activeSnakes do
-            if snake.HeadParts and snake.HeadParts.head and snake.HeadParts.head.Parent then
+            -- Respect the AI's own spawn protection / stabilization so freshly
+            -- spawned AI (whose bodies are still arranging) are not instantly
+            -- killed by this handler. As an attacker-less snake it also can't die
+            -- in the AI-vs-* body/head passes during this window.
+            local protected = (snake._spawnProtection and nowTick < snake._spawnProtection)
+                or (snake._spawnStabilizing and nowTick < snake._spawnStabilizing)
+                or snake._destroyed or (snake._active == false)
+            if not protected and snake.HeadParts and snake.HeadParts.head and snake.HeadParts.head.Parent then
                 heads[#heads + 1] = snake.HeadParts.head
             end
         end
@@ -1432,9 +1440,16 @@ RunService.Stepped:Connect(function(_, deltaTime)
             local headPos = head.Position
 
             if AISnakeModule._activeSnakes then
+                local nowTick = tick()
                 for _, snake in AISnakeModule._activeSnakes do
                     if snake and snake._active then
                         if snake.HeadParts and snake.HeadParts.head and deadAISnakes[snake.HeadParts.head] then
+                            continue
+                        end
+                        -- Don't let a still-spawning AI's not-yet-arranged body
+                        -- unfairly kill the player.
+                        if (snake._spawnProtection and nowTick < snake._spawnProtection)
+                            or (snake._spawnStabilizing and nowTick < snake._spawnStabilizing) then
                             continue
                         end
                         local segmentData = getAISnakeSegments(snake)
