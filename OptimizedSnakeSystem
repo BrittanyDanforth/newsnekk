@@ -665,29 +665,32 @@ function Snake:recordPath()
 	end
 end
 
--- Position (and travel direction) at `distBack` studs behind the head, found by
--- interpolating along the recorded path. Guarantees exact, even spacing.
+-- Position `distBack` studs behind the LIVE head, interpolated along the path.
+-- Measuring from the live head (not the last recorded point) keeps segment 1
+-- exactly `spacing` behind the real head so the head never detaches from the
+-- body (no thin "neck" gap).
 function Snake:getPathPosition(distBack)
-	local targetDist = self.pathTotal - distBack
-
+	local newest = self.pathPoints[self.pathHead]
 	local tail = self.pathPoints[self.pathTail]
-	local head = self.pathPoints[self.pathHead]
-	if not tail or not head then
-		local p = self.rootPart.Position
-		return p, self.rootPart.CFrame.LookVector
+	if not newest or not tail then
+		return self.rootPart.Position
 	end
 
-	if targetDist <= tail.dist then
-		local nextPt = self.pathPoints[self.pathTail + 1]
-		local dir = nextPt and (nextPt.pos - tail.pos) or self.rootPart.CFrame.LookVector
-		if dir.Magnitude < 1e-4 then dir = self.rootPart.CFrame.LookVector end
-		return tail.pos, dir.Unit
+	local headPos = self.rootPart.Position
+	local headLead = (headPos - newest.pos).Magnitude
+	local effectiveTotal = self.pathTotal + headLead
+	local targetDist = effectiveTotal - distBack
+
+	-- Within the live segment between the newest recorded point and the head.
+	if targetDist >= self.pathTotal then
+		if headLead < 1e-5 then return headPos end
+		local t = (targetDist - self.pathTotal) / headLead
+		return newest.pos:Lerp(headPos, t < 0 and 0 or (t > 1 and 1 or t))
 	end
-	if targetDist >= head.dist then
-		local prevPt = self.pathPoints[self.pathHead - 1]
-		local dir = prevPt and (head.pos - prevPt.pos) or self.rootPart.CFrame.LookVector
-		if dir.Magnitude < 1e-4 then dir = self.rootPart.CFrame.LookVector end
-		return head.pos, dir.Unit
+
+	-- Behind the oldest retained point.
+	if targetDist <= tail.dist then
+		return tail.pos
 	end
 
 	-- Binary search for the bracketing pair [lo-1, lo].
@@ -705,11 +708,7 @@ function Snake:getPathPosition(distBack)
 	local p1 = self.pathPoints[lo - 1]
 	local span = p2.dist - p1.dist
 	local t = span > 1e-5 and (targetDist - p1.dist) / span or 0
-	local pos = p1.pos:Lerp(p2.pos, t)
-
-	local dir = p2.pos - p1.pos
-	if dir.Magnitude < 1e-4 then dir = self.rootPart.CFrame.LookVector end
-	return pos, dir.Unit
+	return p1.pos:Lerp(p2.pos, t)
 end
 
 -- The body is never distance-culled (see calculateLODLevel). The only per-frame
@@ -860,9 +859,14 @@ function Snake:updateUnifiedBody()
 	local rainbow = self.rainbowMode
 	local timeNow = tick()
 
-	-- Position every segment along the recorded path at a fixed distance behind
-	-- the head. Because spacing is a constant distance (not a number of frames),
-	-- the gaps between balls are always identical regardless of speed/FPS.
+	-- PERF: segment sizes, beam widths and glow ranges only change when the snake
+	-- grows or boosts. On a normal "just moving" frame we skip all those property
+	-- writes (hundreds per long snake) and only update positions. This is a large
+	-- CPU/replication saving with zero visual difference.
+	local refreshSizes = boosting or self.isGrowing
+		or (self.growthFactor ~= self._lastSizeGrowth)
+		or (self._wasBoosting and not boosting)
+
 	for i = 0, self.visibleSegmentCount do
 		local segment = self.segments[i]
 		if segment and segment.Parent then
@@ -881,32 +885,39 @@ function Snake:updateUnifiedBody()
 				)
 				segment.CFrame = cf
 
-				local headSize = self:getSegmentSize(0, currentBaseSize)
-				segment.Size = Vector3.new(headSize, headSize, headSize)
+				if refreshSizes then
+					local headSize = self:getSegmentSize(0, currentBaseSize)
+					segment.Size = Vector3.new(headSize, headSize, headSize)
 
-				local eyeScale = headSize / BASE_SIZE * 0.5
-				local eyeOffset = headSize * 0.3
-				local eyeForward = -headSize * 0.35
+					self._eyeScale = headSize / BASE_SIZE * 0.5
+					self._eyeOffset = headSize * 0.3
+					self._eyeForward = -headSize * 0.35
 
-				self.leftEye.Size = Vector3.new(eyeScale, eyeScale, eyeScale)
-				self.rightEye.Size = Vector3.new(eyeScale, eyeScale, eyeScale)
-				self.leftPupil.Size = Vector3.new(eyeScale * 0.5, eyeScale * 0.5, eyeScale * 0.5)
-				self.rightPupil.Size = Vector3.new(eyeScale * 0.5, eyeScale * 0.5, eyeScale * 0.5)
+					local es = self._eyeScale
+					self.leftEye.Size = Vector3.new(es, es, es)
+					self.rightEye.Size = Vector3.new(es, es, es)
+					self.leftPupil.Size = Vector3.new(es * 0.5, es * 0.5, es * 0.5)
+					self.rightPupil.Size = Vector3.new(es * 0.5, es * 0.5, es * 0.5)
+				end
 
+				local eyeOffset = self._eyeOffset or currentBaseSize * 0.3
+				local eyeForward = self._eyeForward or -currentBaseSize * 0.35
+				local eyeScale = self._eyeScale or 0.5
 				self.leftEye.CFrame = cf * CFrame.new(-eyeOffset, eyeOffset * 0.5, eyeForward)
 				self.rightEye.CFrame = cf * CFrame.new(eyeOffset, eyeOffset * 0.5, eyeForward)
 				self.leftPupil.CFrame = self.leftEye.CFrame * CFrame.new(0, 0, -eyeScale * 0.3)
 				self.rightPupil.CFrame = self.rightEye.CFrame * CFrame.new(0, 0, -eyeScale * 0.3)
 			else
 				-- Body segment: exact position on the path => no gaps, no bunching.
-				local targetPos = self:getPathPosition(i * spacing)
-				segment.Position = targetPos
+				segment.Position = self:getPathPosition(i * spacing)
 
-				local segmentSize = self:getSegmentSize(i, currentBaseSize)
-				if boosting then
-					segmentSize = segmentSize * (math.sin(timeNow * 10 + i * 0.1) * 0.03 + 1)
+				if refreshSizes then
+					local segmentSize = self:getSegmentSize(i, currentBaseSize)
+					if boosting then
+						segmentSize = segmentSize * (math.sin(timeNow * 10 + i * 0.1) * 0.03 + 1)
+					end
+					segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
 				end
-				segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
 			end
 
 			if self.attachments[i] then
@@ -915,34 +926,44 @@ function Snake:updateUnifiedBody()
 		end
 	end
 
-	-- Beams form the continuous tube between the balls. They are always enabled
-	-- for active segments so there is never a hole in the body.
-	local colorShift = boosting and (math.floor(timeNow * 3) % math.max(1, #self.config.BodyColors)) or 0
-	for i, beam in pairs(self.beams) do
-		if beam and beam.Parent and type(i) == "number" then
-			if i < self.visibleSegmentCount then
-				beam.Enabled = true
+	self._wasBoosting = boosting
+	if refreshSizes and not boosting then
+		self._lastSizeGrowth = self.growthFactor
+	end
+
+	-- Beam widths only need rewriting when sizes changed.
+	if refreshSizes then
+		for i, beam in pairs(self.beams) do
+			if beam and beam.Parent and type(i) == "number" and i < self.visibleSegmentCount then
 				local beamWidth = self:getBeamWidth(i, currentBaseSize)
 				beam.Width0 = beamWidth
 				beam.Width1 = beamWidth
+			end
+		end
+	end
 
+	-- Dynamic beam colours (rainbow / boost) are the only per-frame beam work.
+	if rainbow or boosting then
+		local colorShift = boosting and (math.floor(timeNow * 3) % math.max(1, #self.config.BodyColors)) or 0
+		for i, beam in pairs(self.beams) do
+			if beam and beam.Parent and type(i) == "number" and i < self.visibleSegmentCount then
 				if rainbow and i % 5 == 0 then
 					beam.Color = ColorSequence.new(self:getSegmentColor(i))
 				elseif boosting and i > HEAD_BLEND_SEGMENTS then
 					local colorIndex = ((i - 1 + colorShift) % #self.config.BodyColors) + 1
 					beam.Color = ColorSequence.new(self.config.BodyColors[colorIndex])
 				end
-			else
-				beam.Enabled = false
 			end
 		end
 	end
 
-	-- Glow range scales gently with body size (glows are sparse by construction).
-	for i, glow in pairs(self.glows) do
-		if glow and glow.Parent then
-			local glowScale = 1 - (i / math.max(1, self.visibleSegmentCount)) * 0.3
-			glow.Range = (GLOW_RANGE_BASE + (currentBaseSize - BASE_SIZE) * 2) * glowScale
+	-- Glow range only when sizes changed (glows are sparse by construction).
+	if refreshSizes then
+		for i, glow in pairs(self.glows) do
+			if glow and glow.Parent then
+				local glowScale = 1 - (i / math.max(1, self.visibleSegmentCount)) * 0.3
+				glow.Range = (GLOW_RANGE_BASE + (currentBaseSize - BASE_SIZE) * 2) * glowScale
+			end
 		end
 	end
 end
