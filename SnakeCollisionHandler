@@ -39,11 +39,12 @@ local COLLISION_GRID_SIZE = 120
 local ADAPTIVE_LOD_THRESHOLD = 100
 local EXTREME_LENGTH_THRESHOLD = 500
 local ULTRA_LENGTH_THRESHOLD = 1000
-local CACHE_EXPIRY = 1.5
-local YIELD_INTERVAL = 150
+local CACHE_EXPIRY = 0.25          -- segment list/bounds refresh rate (positions are read LIVE during checks)
+local YIELD_INTERVAL = 5000        -- effectively never yield mid-build for normal snakes (kept for safety)
 local NETWORK_COMPENSATION = 0.1
-local COLLISION_FRAME_SKIP = 5
-local MAX_CHECKS_PER_FRAME = 50
+local COLLISION_FRAME_SKIP = 1     -- run the collision pass every frame (the pass is lightweight now)
+local MAX_CHECKS_PER_FRAME = 400   -- high enough that a full pass completes in one frame
+local STALE_BOUNDS_MARGIN = 45     -- extra margin on the (slightly stale) bounds early-out so fast snakes are never wrongly skipped
 
 -- === COLLISION CONSTANTS ===
 local HEAD_COLLISION_DISTANCE = 3.5
@@ -76,6 +77,31 @@ local deathTimestamps = {}
 -- === INVINCIBILITY SYSTEM ===
 local INVINCIBILITY_DURATION = 5
 local invinciblePlayers = {}
+
+-- === GEOMETRY HELPERS (size-aware collision) ===
+-- The snake body parts scale up massively as the snake grows (a length-3500 snake
+-- has ~10 stud thick segments). Collision distances must scale with the actual
+-- part sizes, otherwise the head only "dies" when its centre is almost exactly on
+-- a segment centre and slips through the thick visible body the rest of the time.
+local function getPartRadius(part)
+    if not part or not part.Size then return 2 end
+    return math.max(part.Size.X, part.Size.Z) * 0.5
+end
+
+-- Representative body radius for a snake, sampled from a few real segments.
+local function computeSegmentRadius(parts)
+    local r = 0
+    local n = math.min(#parts, 12)
+    for i = 1, n do
+        local p = parts[i]
+        if p and p.Size then
+            local pr = math.max(p.Size.X, p.Size.Z) * 0.5
+            if pr > r then r = pr end
+        end
+    end
+    if r <= 0 then r = 2 end
+    return r
+end
 
 -- Forward declare caches
 local CollisionCache
@@ -613,25 +639,17 @@ local function getPlayerSegments(player)
 
     if #segmentParts == 0 then return nil end
 
-    local interpolatedSegments
-    if snakeLength > ULTRA_LENGTH_THRESHOLD then
-        interpolatedSegments = segmentParts
-    else
-        interpolatedSegments = interpolateSegments(segmentParts, snakeLength)
-    end
-
-    local chunks = nil
-    if snakeLength > EXTREME_LENGTH_THRESHOLD then
-        chunks = createSegmentChunks(interpolatedSegments, snakeLength)
-    end
-
+    -- Always use the LIVE segment parts (no virtual snapshots) so collision reads
+    -- current positions every frame. The cache only memoises the part list, a
+    -- coarse bounds box (used with a generous margin as an early-out) and the
+    -- body radius.
     local bounds = {
         min = Vector3.new(math.huge, math.huge, math.huge),
         max = Vector3.new(-math.huge, -math.huge, -math.huge)
     }
 
-    for _, seg in ipairs(interpolatedSegments) do
-        local pos = seg.Position or seg.position
+    for _, seg in ipairs(segmentParts) do
+        local pos = seg.Position
         if pos then
             bounds.min = Vector3.new(
                 math.min(bounds.min.X, pos.X),
@@ -647,11 +665,12 @@ local function getPlayerSegments(player)
     end
 
     local cacheData = {
-        segments = interpolatedSegments,
+        segments = segmentParts,
         realSegments = segmentParts,
-        chunks = chunks,
+        chunks = nil,
         bounds = bounds,
         length = snakeLength,
+        segmentRadius = computeSegmentRadius(segmentParts),
         lastUpdate = currentTime,
         player = player
     }
@@ -680,20 +699,13 @@ local function getAISnakeSegments(snake)
     local snakeLength = #segmentParts
     if snakeLength == 0 then return nil end
 
-    local interpolatedSegments = snakeLength > EXTREME_LENGTH_THRESHOLD and segmentParts or interpolateSegments(segmentParts, snakeLength)
-
-    local chunks = nil
-    if snakeLength > EXTREME_LENGTH_THRESHOLD then
-        chunks = createSegmentChunks(interpolatedSegments, snakeLength)
-    end
-
     local bounds = {
         min = Vector3.new(math.huge, math.huge, math.huge),
         max = Vector3.new(-math.huge, -math.huge, -math.huge)
     }
 
-    for _, seg in ipairs(interpolatedSegments) do
-        local pos = seg.Position or seg.position
+    for _, seg in ipairs(segmentParts) do
+        local pos = seg.Position
         if pos then
             bounds.min = Vector3.new(
                 math.min(bounds.min.X, pos.X),
@@ -709,11 +721,12 @@ local function getAISnakeSegments(snake)
     end
 
     local cacheData = {
-        segments = interpolatedSegments,
+        segments = segmentParts,
         realSegments = segmentParts,
-        chunks = chunks,
+        chunks = nil,
         bounds = bounds,
         length = snakeLength,
+        segmentRadius = computeSegmentRadius(segmentParts),
         lastUpdate = currentTime
     }
 
@@ -1289,114 +1302,79 @@ local function checkBoundsOverlap(bounds1, bounds2, margin)
     )
 end
 
-local function isValidCollision(headPos, segmentPos, collisionDist)
-    local dx = headPos.X - segmentPos.X
-    local dy = headPos.Y - segmentPos.Y
-    local dz = headPos.Z - segmentPos.Z
-
-    local distSq = dx*dx + dy*dy + dz*dz
-    local collisionDistSq = collisionDist * collisionDist
-
-    if distSq >= collisionDistSq then
-        return false
-    end
-
-    if dy*dy > 9 then
-        return false
-    end
-
-    return true
+-- The collision distance a head needs to be from a body segment to count as a
+-- hit. Scales with both the head radius and the target body radius so it works
+-- for a tiny starter snake and a 10-stud-thick giant alike.
+local function bodyCollisionDist(headPart, segmentData)
+    local headR = getPartRadius(headPart)
+    local bodyR = (segmentData and segmentData.segmentRadius) or BODY_COLLISION_DISTANCE
+    -- You die when your head clearly overlaps the body (not just grazes it).
+    local d = bodyR + headR * 0.6
+    return math.max(d, BODY_COLLISION_DISTANCE)
 end
 
--- === COLLISION DETECTION ===
-local function findCollisionInChunks(headPos, chunks, collisionDist, ignoreFirstSegments)
+-- Generous AABB early-out: head box vs the (slightly stale) body bounds, padded
+-- with the collision distance and a staleness margin so a fast snake is never
+-- wrongly skipped before the precise per-segment test runs.
+local function headNearBounds(headPos, bounds, collisionDist)
+    if not bounds then return true end
+    local pad = collisionDist + STALE_BOUNDS_MARGIN
+    return not (
+        headPos.X + pad < bounds.min.X or headPos.X - pad > bounds.max.X or
+        headPos.Z + pad < bounds.min.Z or headPos.Z - pad > bounds.max.Z
+    )
+end
+
+-- === COLLISION DETECTION (live positions, size-aware, no shared state) ===
+-- Scans the target's real segment parts using their CURRENT positions every call.
+-- Bounded part count (<=~800) makes a direct scan both simple and reliable -- no
+-- stale snapshots, no shared spatial grid, no cross-snake contamination.
+local function headHitsBody(headPos, segments, collisionDist, ignoreFirstSegments)
     local effectiveDist = collisionDist + NETWORK_COMPENSATION
     local effectiveDistSq = effectiveDist * effectiveDist
 
-    for _, chunk in ipairs(chunks) do
-        local centerDist = (headPos - chunk.center).Magnitude
-        if centerDist <= chunk.radius + effectiveDist then
-            for idx, seg in ipairs(chunk.segments) do
-                if ignoreFirstSegments and idx <= SELF_COLLISION_IGNORE_SEGMENTS then
-                    continue
-                end
-
-                local segPos = seg.Position or seg.position
-                if segPos then
-                    local dx = headPos.X - segPos.X
-                    local dy = headPos.Y - segPos.Y
-                    local dz = headPos.Z - segPos.Z
-                    if dx*dx + dy*dy + dz*dz < effectiveDistSq then
-                        if isValidCollision(headPos, segPos, effectiveDist) then
-                            return true
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return false
-end
-
-local function findCollisionInSegments(headPos, segments, collisionDist, useGrid, ignoreFirstSegments)
-    local effectiveDist = collisionDist + NETWORK_COMPENSATION
-    local effectiveDistSq = effectiveDist * effectiveDist
-
-    if useGrid and CollisionCache.spatialGrid.objectCount == 0 then
-        for _, seg in ipairs(segments) do
-            local pos = seg.Position or seg.position
-            if pos then
-                CollisionCache.spatialGrid:insert(seg, pos)
-            end
-        end
-    end
-
-    if useGrid then
-        local nearby = CollisionCache.spatialGrid:query(headPos, effectiveDist * 1.5)
-        for _, seg in ipairs(nearby) do
-            local segPos = seg.Position or seg.position
-            if segPos then
-                local dx = headPos.X - segPos.X
-                local dy = headPos.Y - segPos.Y
-                local dz = headPos.Z - segPos.Z
-                if dx*dx + dy*dy + dz*dz < effectiveDistSq then
-                    if isValidCollision(headPos, segPos, effectiveDist) then
-                        return true
-                    end
-                end
-            end
-        end
-    else
-        local checked = 0
-        local maxCheck = math.min(#segments, 300)
-
-        for i = 1, maxCheck do
-            if ignoreFirstSegments and i <= SELF_COLLISION_IGNORE_SEGMENTS then
-                continue
-            end
-
+    for i = 1, #segments do
+        if not (ignoreFirstSegments and i <= SELF_COLLISION_IGNORE_SEGMENTS) then
             local seg = segments[i]
             if seg then
                 local segPos = seg.Position or seg.position
                 if segPos then
                     local dx = headPos.X - segPos.X
-                    local dy = headPos.Y - segPos.Y
                     local dz = headPos.Z - segPos.Z
+                    local dy = headPos.Y - segPos.Y
                     if dx*dx + dy*dy + dz*dz < effectiveDistSq then
-                        if isValidCollision(headPos, segPos, effectiveDist) then
-                            return true
-                        end
+                        return true
                     end
                 end
-            end
-
-            checked = checked + 1
-            if checked % 50 == 0 then
-                task.wait()
             end
         end
     end
     return false
+end
+
+-- Head-on resolution for two heads. Snake heads are anchored (no velocity), so we
+-- use their facing direction (CFrame.LookVector = travel direction) to decide who
+-- ran into whom. Returns "A", "B", "both", or nil.
+local function headOnResult(headA, headB)
+    local delta = headB.Position - headA.Position
+    if delta.Magnitude < 1e-3 then return "both" end
+    local dirAB = delta.Unit
+    local dotA = headA.CFrame.LookVector:Dot(dirAB)
+    local dotB = headB.CFrame.LookVector:Dot(-dirAB)
+    local aIn = dotA > 0.2
+    local bIn = dotB > 0.2
+    if aIn and bIn then
+        return "both"
+    elseif aIn then
+        return "A"
+    elseif bIn then
+        return "B"
+    end
+    return nil
+end
+
+local function headOnDist(headA, headB)
+    return math.max(getPartRadius(headA) + getPartRadius(headB), HEAD_COLLISION_DISTANCE)
 end
 
 -- === MAIN COLLISION LOOP (unchanged from V8.1) ===
@@ -1411,7 +1389,7 @@ RunService.Stepped:Connect(function(_, deltaTime)
     if frameCounter % COLLISION_FRAME_SKIP ~= 0 then return end
 
     local currentTime = os.clock()
-    if currentTime - lastCollisionCheck < 0.05 then
+    if currentTime - lastCollisionCheck < 0.02 then
         return
     end
     lastCollisionCheck = currentTime
@@ -1461,29 +1439,15 @@ RunService.Stepped:Connect(function(_, deltaTime)
                         end
                         local segmentData = getAISnakeSegments(snake)
                         if segmentData and segmentData.segments then
-                            if segmentData.bounds and not checkBoundsOverlap(
-                                {min = headPos - Vector3.new(5,5,5), max = headPos + Vector3.new(5,5,5)},
-                                segmentData.bounds,
-                                BODY_COLLISION_DISTANCE
-                                ) then
+                            local collisionDist = bodyCollisionDist(head, segmentData)
+                            if not headNearBounds(headPos, segmentData.bounds, collisionDist) then
                                 continue
                             end
 
-                            local collision = false
-                            if segmentData.chunks then
-                                collision = findCollisionInChunks(headPos, segmentData.chunks, BODY_COLLISION_DISTANCE, false)
-                            else
-                                collision = findCollisionInSegments(
-                                    headPos,
-                                    segmentData.segments,
-                                    BODY_COLLISION_DISTANCE,
-                                    segmentData.length > 200,
-                                    false
-                                )
-                            end
-
-                            if collision then
-                                print(string.format("💥 [COLLISION] Player %s hit AI snake body!", player.Name))
+                            if headHitsBody(headPos, segmentData.segments, collisionDist, false) then
+                                if DEBUG_COLLISIONS then
+                                    print(string.format("💥 [COLLISION] Player %s hit AI snake body!", player.Name))
+                                end
                                 queuePlayerDeath(player)
                                 break
                             end
@@ -1524,30 +1488,14 @@ RunService.Stepped:Connect(function(_, deltaTime)
 
                     local segmentData = getPlayerSegments(playerB)
                     if segmentData and segmentData.segments then
-                        if segmentData.bounds and not checkBoundsOverlap(
-                            {min = headPosA - Vector3.new(5,5,5), max = headPosA + Vector3.new(5,5,5)},
-                            segmentData.bounds,
-                            BODY_COLLISION_DISTANCE
-                            ) then
+                        local isSelfCollision = (playerA == playerB)
+                        local collisionDist = bodyCollisionDist(headA, segmentData)
+
+                        if not headNearBounds(headPosA, segmentData.bounds, collisionDist) then
                             continue
                         end
 
-                        local isSelfCollision = (playerA == playerB)
-
-                        local collision = false
-                        if segmentData.chunks then
-                            collision = findCollisionInChunks(headPosA, segmentData.chunks, BODY_COLLISION_DISTANCE, isSelfCollision)
-                        else
-                            collision = findCollisionInSegments(
-                                headPosA,
-                                segmentData.segments,
-                                BODY_COLLISION_DISTANCE,
-                                segmentData.length > 200,
-                                isSelfCollision
-                            )
-                        end
-
-                        if collision then
+                        if headHitsBody(headPosA, segmentData.segments, collisionDist, isSelfCollision) then
                             if DEBUG_COLLISIONS then
                                 print(string.format("[COLLISION] %s hit %s's body", playerA.Name, playerB.Name))
                             end
@@ -1581,28 +1529,12 @@ RunService.Stepped:Connect(function(_, deltaTime)
                 if not isPlayerInvincible(player) then
                     local segmentData = getPlayerSegments(player)
                     if segmentData and segmentData.segments then
-                        if segmentData.bounds and not checkBoundsOverlap(
-                            {min = aiPos - Vector3.new(5,5,5), max = aiPos + Vector3.new(5,5,5)},
-                            segmentData.bounds,
-                            BODY_COLLISION_DISTANCE
-                            ) then
+                        local collisionDist = bodyCollisionDist(aiHead, segmentData)
+                        if not headNearBounds(aiPos, segmentData.bounds, collisionDist) then
                             continue
                         end
 
-                        local collision = false
-                        if segmentData.chunks then
-                            collision = findCollisionInChunks(aiPos, segmentData.chunks, BODY_COLLISION_DISTANCE, false)
-                        else
-                            collision = findCollisionInSegments(
-                                aiPos,
-                                segmentData.segments,
-                                BODY_COLLISION_DISTANCE,
-                                segmentData.length > 200,
-                                false
-                            )
-                        end
-
-                        if collision then
+                        if headHitsBody(aiPos, segmentData.segments, collisionDist, false) then
                             queueAIDeath(aiHead)
                             break
                         end
@@ -1637,20 +1569,13 @@ RunService.Stepped:Connect(function(_, deltaTime)
 
             local dist = (headA.Position - headB.Position).Magnitude
 
-            if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-                local velA = headA.AssemblyLinearVelocity or headA.Velocity
-                local velB = headB.AssemblyLinearVelocity or headB.Velocity
-                local dirAB = (headB.Position - headA.Position).Unit
-                local dirBA = -dirAB
-
-                local dotA = velA:Dot(dirAB)
-                local dotB = velB:Dot(dirBA)
-
-                if dotA > 2 and not (dotB > 2) then
+            if dist < headOnDist(headA, headB) + NETWORK_COMPENSATION then
+                local result = headOnResult(headA, headB)
+                if result == "A" then
                     queuePlayerDeath(playerA)
-                elseif dotB > 2 and not (dotA > 2) then
+                elseif result == "B" then
                     queuePlayerDeath(playerB)
-                elseif dotA > 2 and dotB > 2 then
+                elseif result == "both" then
                     queuePlayerDeath(playerA)
                     task.spawn(function()
                         task.wait(0.05)
@@ -1682,20 +1607,13 @@ RunService.Stepped:Connect(function(_, deltaTime)
                 end
 
                 local dist = (head.Position - aiHead.Position).Magnitude
-                if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-                    local velPlayer = head.AssemblyLinearVelocity or head.Velocity
-                    local velAI = aiHead.AssemblyLinearVelocity or aiHead.Velocity
-                    local dirPlayerToAI = (aiHead.Position - head.Position).Unit
-                    local dirAIToPlayer = -dirPlayerToAI
-
-                    local dotPlayer = velPlayer:Dot(dirPlayerToAI)
-                    local dotAI = velAI:Dot(dirAIToPlayer)
-
-                    if dotPlayer > 2 and not (dotAI > 2) then
+                if dist < headOnDist(head, aiHead) + NETWORK_COMPENSATION then
+                    local result = headOnResult(head, aiHead)
+                    if result == "A" then
                         queuePlayerDeath(player)
-                    elseif dotAI > 2 and not (dotPlayer > 2) then
+                    elseif result == "B" then
                         queueAIDeath(aiHead)
-                    elseif dotPlayer > 2 and dotAI > 2 then
+                    elseif result == "both" then
                         queuePlayerDeath(player)
                         task.spawn(function()
                             task.wait(0.05)
@@ -1715,20 +1633,13 @@ RunService.Stepped:Connect(function(_, deltaTime)
                 local headB = aiHeads[j]
                 if headB and headB.Parent then
                     local dist = (headA.Position - headB.Position).Magnitude
-                    if dist < HEAD_COLLISION_DISTANCE + NETWORK_COMPENSATION then
-                        local velA = headA.AssemblyLinearVelocity or headA.Velocity
-                        local velB = headB.AssemblyLinearVelocity or headB.Velocity
-                        local dirAB = (headB.Position - headA.Position).Unit
-                        local dirBA = -dirAB
-
-                        local dotA = velA:Dot(dirAB)
-                        local dotB = velB:Dot(dirBA)
-
-                        if dotA > 2 and not (dotB > 2) then
+                    if dist < headOnDist(headA, headB) + NETWORK_COMPENSATION then
+                        local result = headOnResult(headA, headB)
+                        if result == "A" then
                             queueAIDeath(headA)
-                        elseif dotB > 2 and not (dotA > 2) then
+                        elseif result == "B" then
                             queueAIDeath(headB)
-                        elseif dotA > 2 and dotB > 2 then
+                        elseif result == "both" then
                             queueAIDeath(headA)
                             task.spawn(function()
                                 task.wait(0.05)
@@ -1752,28 +1663,12 @@ RunService.Stepped:Connect(function(_, deltaTime)
                 if snake and snake._active then
                     local segmentData = getAISnakeSegments(snake)
                     if segmentData and segmentData.segments then
-                        if segmentData.bounds and not checkBoundsOverlap(
-                            {min = aiHead.Position - Vector3.new(5,5,5), max = aiHead.Position + Vector3.new(5,5,5)},
-                            segmentData.bounds,
-                            BODY_COLLISION_DISTANCE
-                            ) then
+                        local collisionDist = bodyCollisionDist(aiHead, segmentData)
+                        if not headNearBounds(aiHead.Position, segmentData.bounds, collisionDist) then
                             continue
                         end
 
-                        local collision = false
-                        if segmentData.chunks then
-                            collision = findCollisionInChunks(aiHead.Position, segmentData.chunks, BODY_COLLISION_DISTANCE, false)
-                        else
-                            collision = findCollisionInSegments(
-                                aiHead.Position,
-                                segmentData.segments,
-                                BODY_COLLISION_DISTANCE,
-                                segmentData.length > 200,
-                                false
-                            )
-                        end
-
-                        if collision then
+                        if headHitsBody(aiHead.Position, segmentData.segments, collisionDist, false) then
                             queueAIDeath(aiHead)
                             break
                         end
