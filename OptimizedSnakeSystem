@@ -15,8 +15,15 @@ local UserInputService = game:GetService("UserInputService")
 local SEGMENT_UPDATE_RATE = 75
 local NETWORK_UPDATE_RATE = 25
 local MAX_SEGMENTS = 500
-local SEGMENT_SPACING = 0.5 -- Tighter for seamless look
-local HISTORY_SIZE = 2000
+
+-- 🐍 SEAMLESS BODY (distance/arc-length based, framerate & speed independent)
+-- Spacing is expressed as a fraction of the segment DIAMETER so balls always
+-- overlap (no gaps) regardless of how fast the snake moves or the server FPS.
+local SEGMENTS_PER_LENGTH = 0.5        -- physical balls created per unit of length
+local SEGMENT_SPACING_RATIO = 0.5      -- gap between balls = diameter * ratio (<1 => overlap => seamless)
+local MIN_RECORD_DISTANCE = 0.35       -- path resolution in studs (smaller = smoother, more memory)
+local PATH_BUFFER = 40                 -- extra studs of path kept behind the tail
+local MAX_SPACING_BOOST = 2.2          -- how much the body may stretch once segment cap is hit
 local GROWTH_CHECK_INTERVAL = 10
 
 -- Visual Constants - UNIFIED RENDERING
@@ -176,9 +183,12 @@ function Snake.new(character, config)
 	self.pendingGrowth = 0
 	self.growthWaveOffset = 0
 
-	-- Movement history
-	self.positionHistory = {}
-	self.historyIndex = 0
+	-- Movement path (distance / arc-length based - the core of seamless rendering)
+	self.pathPoints = {}      -- indexed deque of { pos = Vector3, dist = number }
+	self.pathHead = 0         -- index of newest point (largest dist)
+	self.pathTail = 1         -- index of oldest retained point
+	self.pathTotal = 0        -- cumulative distance travelled (head distance)
+	self.requiredPathLength = 0
 
 	-- Visual components
 	self.model = Instance.new("Model")
@@ -202,16 +212,8 @@ function Snake.new(character, config)
 	self.lodStates = {} -- Track LOD level for each segment
 	self.forcedRenderSegments = {} -- Segments that should always render
 
-	-- Pre-fill history
-	local startPos = self.rootPart.Position
-	local startLook = self.rootPart.CFrame.LookVector
-	for i = 1, HISTORY_SIZE do
-		self.positionHistory[i] = {
-			position = startPos,
-			lookVector = startLook,
-			time = tick()
-		}
-	end
+	-- Pre-seed the path so the snake spawns fully extended (no "growing from a dot")
+	self:initPath()
 
 	-- Initialize snake
 	self:createUnifiedBody()
@@ -280,62 +282,20 @@ function Snake:getBeamWidth(index, baseSize)
 	return avgSize * BEAM_WIDTH_BASE * beamTaper
 end
 
--- ENHANCED: Calculate LOD level based on distance
-function Snake:calculateLODLevel(segmentIndex, cameraPosition)
-	if not cameraPosition then return "near" end
-
-	local segment = self.segments[segmentIndex]
-	if not segment or not segment.Parent then return "culled" end
-
-	-- Always full quality for first segments
-	if segmentIndex <= FORCE_RENDER_SEGMENTS then
-		return "near"
-	end
-
-	local distance = (segment.Position - cameraPosition).Magnitude
-
-	if distance <= LOD_DISTANCE_NEAR then
-		return "near"
-	elseif distance <= LOD_DISTANCE_MID then
-		return "mid"
-	elseif distance <= LOD_DISTANCE_FAR then
-		return "far"
-	else
-		return "culled"
-	end
+-- 🐍 IMPORTANT: This module renders on the SERVER and the parts replicate to
+-- every client. The server has no single camera, so distance-from-camera LOD is
+-- impossible here (the old code used the snake's OWN head as the "camera", which
+-- caused a long snake's own tail to fade out and its beams to be disabled -> the
+-- holes/gaps players reported). We therefore NEVER cull the body by distance.
+-- The body stays fully opaque and continuous at all times; LOD only thins out the
+-- expensive PointLight glows, and the engine handles distant rendering itself.
+function Snake:calculateLODLevel(_segmentIndex, _cameraPosition)
+	return "near"
 end
 
--- ENHANCED: Apply LOD settings to segment
-function Snake:applyLODToSegment(segment, lodLevel, index)
+function Snake:applyLODToSegment(segment, _lodLevel, index)
 	if not segment or not segment.Parent then return end
-
-	-- Store LOD state
-	self.lodStates[index] = lodLevel
-
-	if lodLevel == "culled" then
-		-- Don't actually hide the part, just reduce quality
-		segment.Transparency = 0.3
-		if self.glows[index] then
-			self.glows[index].Enabled = false
-		end
-	elseif lodLevel == "far" then
-		segment.Transparency = 0.1
-		if self.glows[index] then
-			self.glows[index].Enabled = false
-		end
-	elseif lodLevel == "mid" then
-		segment.Transparency = 0
-		if self.glows[index] then
-			self.glows[index].Enabled = (index % 3 == 0)
-		end
-	else -- near
-		segment.Transparency = 0
-		if self.glows[index] then
-			self.glows[index].Enabled = true
-		end
-	end
-
-	-- Mark as visible
+	self.lodStates[index] = "near"
 	self.segmentVisibility[index] = true
 end
 
@@ -562,177 +522,212 @@ function Snake:createUnifiedBody()
 		self.attachments[i] = attachment
 	end
 
-	-- Create seamless beams between all segments
+	-- Create the seamless tube: one beam between each pair of consecutive balls.
+	-- Beams are clean, fully-opaque neon (no flow texture) so the body reads as a
+	-- single solid glowing snake with no banding or visible seams.
 	for i = 0, segmentCount - 1 do
-		local beam = Instance.new("Beam")
-		beam.Name = "Beam" .. i
-		beam.Attachment0 = self.attachments[i]
-		beam.Attachment1 = self.attachments[i + 1]
-
-		-- 🎨 ENHANCED: Professional beam properties with advanced textures
-		local beamWidth = self:getBeamWidth(i, BASE_SIZE)
-		beam.Width0 = beamWidth
-		beam.Width1 = beamWidth
-		beam.CurveSize0 = 0
-		beam.CurveSize1 = 0
-		beam.FaceCamera = true
-		beam.Segments = BEAM_SEGMENTS
-		-- ENHANCED: Professional gradient texture choices
-		beam.Texture = BEAM_TEXTURES.gradient -- Superior gradient
-		beam.TextureMode = Enum.TextureMode.Wrap -- Research: Wrap + TextureSpeed = flowing motion
-		beam.TextureLength = 2
-		beam.TextureSpeed = BEAM_TEXTURE_SPEED -- Animated flow effect
-		beam.LightEmission = 1
-		beam.LightInfluence = 0
-		beam.Brightness = 2 -- Enhanced brightness for glow
-		beam.Transparency = NumberSequence.new{
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(0.5, 0),
-			NumberSequenceKeypoint.new(1, 0.1) -- Slight fade at edges
-		}
-
-		-- Color matching with smooth transitions
-		if i == 0 then
-			-- Head to first segment - smooth color transition
-			local headColor = self.segments[0].Color
-			local seg1Color = self.segments[1].Color
-			beam.Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, headColor),
-				ColorSequenceKeypoint.new(0.3, headColor:Lerp(seg1Color, 0.3)),
-				ColorSequenceKeypoint.new(0.7, headColor:Lerp(seg1Color, 0.7)),
-				ColorSequenceKeypoint.new(1, seg1Color)
-			})
-		else
-			beam.Color = ColorSequence.new(self:getSegmentColor(i))
-		end
-
-		beam.Parent = attachmentPart
-		self.beams[i] = beam
-	end
-
-	-- Create selective overlap beams for critical areas only
-	-- Focus on head blend area and early segments
-	for i = 0, math.min(segmentCount - 2, HEAD_BLEND_SEGMENTS * 2) do
-		if i % 2 == 0 then -- Every other segment
-			local overlapBeam = Instance.new("Beam")
-			overlapBeam.Name = "OverlapBeam" .. i
-			overlapBeam.Attachment0 = self.attachments[i]
-			overlapBeam.Attachment1 = self.attachments[i + 2]
-
-			-- Calculate overlap beam width
-			local overlapWidth = self:getBeamWidth(i, BASE_SIZE) * 1.15 -- Only 15% wider
-			overlapBeam.Width0 = overlapWidth
-			overlapBeam.Width1 = overlapWidth
-			overlapBeam.CurveSize0 = 0
-			overlapBeam.CurveSize1 = 0
-			overlapBeam.FaceCamera = true
-			overlapBeam.Segments = BEAM_SEGMENTS
-			overlapBeam.Texture = BEAM_TEXTURES.gradient
-			overlapBeam.TextureMode = Enum.TextureMode.Wrap
-			overlapBeam.TextureLength = 3
-			overlapBeam.TextureSpeed = BEAM_TEXTURE_SPEED * 0.7 -- Slower for variety
-			overlapBeam.LightEmission = 0.7
-			overlapBeam.LightInfluence = 0
-			overlapBeam.Transparency = NumberSequence.new(0.5) -- More transparent
-			overlapBeam.ZOffset = -0.1 -- Behind main beams
-
-			-- Color
-			overlapBeam.Color = ColorSequence.new(self:getSegmentColor(i))
-
-			overlapBeam.Parent = attachmentPart
-			self.beams["overlap" .. i] = overlapBeam
-		end
-	end
-
-	-- Add some strategic overlap beams for the mid-section
-	for i = HEAD_BLEND_SEGMENTS * 2, math.min(segmentCount - 3, 50), 3 do
-		local overlapBeam = Instance.new("Beam")
-		overlapBeam.Name = "OverlapBeamMid" .. i
-		overlapBeam.Attachment0 = self.attachments[i]
-		overlapBeam.Attachment1 = self.attachments[i + 3]
-
-		local overlapWidth = self:getBeamWidth(i, BASE_SIZE) * 1.1
-		overlapBeam.Width0 = overlapWidth
-		overlapBeam.Width1 = overlapWidth
-		overlapBeam.CurveSize0 = 0
-		overlapBeam.CurveSize1 = 0
-		overlapBeam.FaceCamera = true
-		overlapBeam.Segments = BEAM_SEGMENTS
-		overlapBeam.Texture = BEAM_TEXTURES.gradient
-		overlapBeam.TextureMode = Enum.TextureMode.Wrap
-		overlapBeam.TextureLength = 4
-		overlapBeam.TextureSpeed = BEAM_TEXTURE_SPEED * 0.5
-		overlapBeam.LightEmission = 0.6
-		overlapBeam.LightInfluence = 0
-		overlapBeam.Transparency = NumberSequence.new(0.6)
-		overlapBeam.ZOffset = -0.1
-
-		overlapBeam.Color = ColorSequence.new(self:getSegmentColor(i))
-
-		overlapBeam.Parent = attachmentPart
-		self.beams["overlapMid" .. i] = overlapBeam
+		self:createBodyBeam(i, attachmentPart)
 	end
 
 	self.attachmentPart = attachmentPart
 	self.visibleSegmentCount = segmentCount
 end
 
-function Snake:updatePositionHistory()
-	self.historyIndex = (self.historyIndex % HISTORY_SIZE) + 1
-	self.positionHistory[self.historyIndex] = {
-		position = self.rootPart.Position,
-		lookVector = self.rootPart.CFrame.LookVector,
-		time = tick()
-	}
-end
+-- Build a single clean body beam connecting segment i to i+1.
+function Snake:createBodyBeam(i, parent)
+	parent = parent or self.attachmentPart
+	if not (self.attachments[i] and self.attachments[i + 1]) then return end
 
-function Snake:getHistoricalPosition(stepsBack)
-	local index = self.historyIndex - stepsBack
-	if index < 1 then
-		index = index + HISTORY_SIZE
+	local beam = Instance.new("Beam")
+	beam.Name = "Beam" .. i
+	beam.Attachment0 = self.attachments[i]
+	beam.Attachment1 = self.attachments[i + 1]
+
+	local beamWidth = self:getBeamWidth(i, BASE_SIZE * self.growthFactor)
+	beam.Width0 = beamWidth
+	beam.Width1 = beamWidth
+	beam.CurveSize0 = 0
+	beam.CurveSize1 = 0
+	beam.FaceCamera = true
+	beam.Segments = BEAM_SEGMENTS
+	beam.Texture = "" -- Clean solid tube, no flowing noise
+	beam.LightEmission = 1
+	beam.LightInfluence = 0
+	beam.Brightness = 2
+	beam.Transparency = NumberSequence.new(0) -- Fully opaque => never looks gapped
+
+	if i == 0 and self.segments[1] then
+		-- Smooth colour blend from head into first body segment.
+		local headColor = self.segments[0].Color
+		local seg1Color = self.segments[1].Color
+		beam.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, headColor),
+			ColorSequenceKeypoint.new(0.5, headColor:Lerp(seg1Color, 0.5)),
+			ColorSequenceKeypoint.new(1, seg1Color),
+		})
+	else
+		beam.Color = ColorSequence.new(self:getSegmentColor(i))
 	end
-	return self.positionHistory[index]
+
+	beam.Parent = parent
+	self.beams[i] = beam
+	return beam
 end
 
--- ENHANCED: Update visibility for all segments
-function Snake:updateSegmentVisibility(cameraPosition)
+-- 🐍 Compute how many physical balls to render and the constant arc-length
+-- spacing between them. Spacing is tied to the segment diameter so balls always
+-- overlap (seamless). For snakes longer than the segment cap, spacing is gently
+-- stretched so the body stays proportionally long instead of looking stubby.
+function Snake:getBodyMetrics()
+	local fullCount = math.ceil(self.actualLength * SEGMENTS_PER_LENGTH)
+	local count = math.max(1, math.min(fullCount, MAX_SEGMENTS))
+
+	local diameter = BASE_SIZE * (self.growthFactor or 1)
+
+	local boost = 1
+	if fullCount > MAX_SEGMENTS then
+		boost = math.min(math.sqrt(fullCount / MAX_SEGMENTS), MAX_SPACING_BOOST)
+	end
+
+	local spacing = diameter * SEGMENT_SPACING_RATIO * boost
+	return count, spacing
+end
+
+-- Pre-seed the path with a straight tail behind the head so the body is fully
+-- formed the instant the snake spawns.
+function Snake:initPath()
+	self.pathPoints = {}
+	self.growthFactor = self:calculateGrowthFactor()
+
+	local count, spacing = self:getBodyMetrics()
+	local seedLen = count * spacing + PATH_BUFFER
+	self.requiredPathLength = count * spacing
+
+	local pos = self.rootPart.Position
+	local look = self.rootPart.CFrame.LookVector
+
+	local steps = math.max(1, math.ceil(seedLen / MIN_RECORD_DISTANCE))
+	local idx = 1
+	-- Oldest point (farthest behind, dist = 0) first, head (dist = seedLen) last.
+	for k = steps, 0, -1 do
+		local d = math.min(k * MIN_RECORD_DISTANCE, seedLen)
+		self.pathPoints[idx] = {
+			pos = pos - look * d,
+			dist = seedLen - d,
+		}
+		idx = idx + 1
+	end
+
+	self.pathTail = 1
+	self.pathHead = idx - 1
+	self.pathTotal = seedLen
+end
+
+-- Record the head's movement as a distance-parameterised path. A point is only
+-- added once the head has actually travelled MIN_RECORD_DISTANCE, which makes the
+-- spacing independent of server FPS and replication jitter.
+function Snake:recordPath()
+	local pos = self.rootPart.Position
+	local newest = self.pathPoints[self.pathHead]
+	if not newest then
+		self:initPath()
+		return
+	end
+
+	local moved = (pos - newest.pos).Magnitude
+	if moved < MIN_RECORD_DISTANCE then
+		return
+	end
+
+	self.pathTotal = self.pathTotal + moved
+	self.pathHead = self.pathHead + 1
+	self.pathPoints[self.pathHead] = { pos = pos, dist = self.pathTotal }
+
+	-- Trim the tail to just beyond what the body needs.
+	local minDist = self.pathTotal - (self.requiredPathLength + PATH_BUFFER)
+	while self.pathTail < self.pathHead - 1 and self.pathPoints[self.pathTail].dist < minDist do
+		self.pathPoints[self.pathTail] = nil
+		self.pathTail = self.pathTail + 1
+	end
+
+	-- Compact the deque occasionally so indices don't grow without bound over a
+	-- very long session (keeps the table small and the array part dense).
+	if self.pathTail > 4096 then
+		local compact = {}
+		local n = 0
+		for idx = self.pathTail, self.pathHead do
+			n = n + 1
+			compact[n] = self.pathPoints[idx]
+		end
+		self.pathPoints = compact
+		self.pathTail = 1
+		self.pathHead = n
+	end
+end
+
+-- Position (and travel direction) at `distBack` studs behind the head, found by
+-- interpolating along the recorded path. Guarantees exact, even spacing.
+function Snake:getPathPosition(distBack)
+	local targetDist = self.pathTotal - distBack
+
+	local tail = self.pathPoints[self.pathTail]
+	local head = self.pathPoints[self.pathHead]
+	if not tail or not head then
+		local p = self.rootPart.Position
+		return p, self.rootPart.CFrame.LookVector
+	end
+
+	if targetDist <= tail.dist then
+		local nextPt = self.pathPoints[self.pathTail + 1]
+		local dir = nextPt and (nextPt.pos - tail.pos) or self.rootPart.CFrame.LookVector
+		if dir.Magnitude < 1e-4 then dir = self.rootPart.CFrame.LookVector end
+		return tail.pos, dir.Unit
+	end
+	if targetDist >= head.dist then
+		local prevPt = self.pathPoints[self.pathHead - 1]
+		local dir = prevPt and (head.pos - prevPt.pos) or self.rootPart.CFrame.LookVector
+		if dir.Magnitude < 1e-4 then dir = self.rootPart.CFrame.LookVector end
+		return head.pos, dir.Unit
+	end
+
+	-- Binary search for the bracketing pair [lo-1, lo].
+	local lo, hi = self.pathTail + 1, self.pathHead
+	while lo < hi do
+		local mid = math.floor((lo + hi) / 2)
+		if self.pathPoints[mid].dist < targetDist then
+			lo = mid + 1
+		else
+			hi = mid
+		end
+	end
+
+	local p2 = self.pathPoints[lo]
+	local p1 = self.pathPoints[lo - 1]
+	local span = p2.dist - p1.dist
+	local t = span > 1e-5 and (targetDist - p1.dist) / span or 0
+	local pos = p1.pos:Lerp(p2.pos, t)
+
+	local dir = p2.pos - p1.pos
+	if dir.Magnitude < 1e-4 then dir = self.rootPart.CFrame.LookVector end
+	return pos, dir.Unit
+end
+
+-- The body is never distance-culled (see calculateLODLevel). The only per-frame
+-- visibility concern is making sure every beam that connects two active segments
+-- stays enabled and fully opaque so the tube reads as one continuous body.
+function Snake:updateSegmentVisibility(_cameraPosition)
 	for i = 0, self.visibleSegmentCount do
 		local segment = self.segments[i]
 		if segment and segment.Parent then
-			local lodLevel = self:calculateLODLevel(i, cameraPosition)
-			self:applyLODToSegment(segment, lodLevel, i)
+			self.segmentVisibility[i] = true
 		end
 	end
 end
 
--- ENHANCED: Synchronize beam visibility with segments
 function Snake:syncBeamVisibility()
 	for i, beam in pairs(self.beams) do
-		if beam and beam.Parent then
-			if type(i) == "number" then
-				-- Regular beams
-				local seg1Visible = self.segmentVisibility[i] ~= false
-				local seg2Visible = self.segmentVisibility[i + 1] ~= false
-
-				-- Beam is visible if both segments are visible
-				beam.Enabled = seg1Visible and seg2Visible and i <= self.visibleSegmentCount
-
-				-- Adjust transparency based on segment LOD
-				local lod1 = self.lodStates[i] or "near"
-				local lod2 = self.lodStates[i + 1] or "near"
-
-				if lod1 == "culled" or lod2 == "culled" then
-					beam.Transparency = NumberSequence.new(0.5)
-				elseif lod1 == "far" or lod2 == "far" then
-					beam.Transparency = NumberSequence.new(0.2)
-				else
-					beam.Transparency = NumberSequence.new{
-						NumberSequenceKeypoint.new(0, 0),
-						NumberSequenceKeypoint.new(0.5, 0),
-						NumberSequenceKeypoint.new(1, 0.1)
-					}
-				end
-			end
+		if beam and beam.Parent and type(i) == "number" then
+			beam.Enabled = (i < self.visibleSegmentCount)
 		end
 	end
 end
@@ -757,8 +752,8 @@ function Snake:startUpdateLoop()
 
 		frameCount = frameCount + 1
 
-		-- Update position history
-		self:updatePositionHistory()
+		-- Record the head's travel as a distance-based path (seamless body).
+		self:recordPath()
 
 		-- 🌈 ENHANCED: Update rainbow mode
 		if self.rainbowMode then
@@ -845,31 +840,33 @@ function Snake:startUpdateLoop()
 end
 
 function Snake:updateUnifiedBody()
-	-- Calculate required segments
-	local requiredSegments = math.min(math.ceil(self.actualLength / 2), MAX_SEGMENTS)
+	-- How many balls we need and the constant arc-length between them.
+	local requiredSegments, spacing = self:getBodyMetrics()
+	self.requiredPathLength = requiredSegments * spacing
 
-	-- Add new segments if grown with smooth animation
+	-- Grow the physical body toward the required count. We add several at once so
+	-- the body never lags behind the score, but keep it framerate-bounded.
 	if requiredSegments > self.visibleSegmentCount then
 		local now = tick()
 		if now - self.lastSegmentAddTime > SEGMENT_GROWTH_DELAY then
-			self:addSegments(1) -- Add one at a time for smooth growth
+			local deficit = requiredSegments - self.visibleSegmentCount
+			self:addSegments(math.min(deficit, 8))
 			self.lastSegmentAddTime = now
 		end
 	end
 
-	-- Calculate sizes based on growth
 	local currentBaseSize = BASE_SIZE * self.growthFactor
-	local spacing = currentBaseSize * SEGMENT_SPACING
+	local boosting = self.isBoosting
+	local rainbow = self.rainbowMode
+	local timeNow = tick()
 
-	-- Update all segments including head (segment 0)
+	-- Position every segment along the recorded path at a fixed distance behind
+	-- the head. Because spacing is a constant distance (not a number of frames),
+	-- the gaps between balls are always identical regardless of speed/FPS.
 	for i = 0, self.visibleSegmentCount do
 		local segment = self.segments[i]
 		if segment and segment.Parent then
-			-- ENHANCED: Only update visible segments for performance
-			local isVisible = self.segmentVisibility[i] ~= false
-
-			-- 🎨 ENHANCED: Update colors for rainbow mode
-			if self.rainbowMode and i % 3 == 0 then -- Update every 3rd segment for performance
+			if rainbow and i % 3 == 0 then
 				segment.Color = self:getSegmentColor(i)
 				if self.glows[i] then
 					self.glows[i].Color = segment.Color
@@ -877,18 +874,16 @@ function Snake:updateUnifiedBody()
 			end
 
 			if i == 0 then
-				-- Head positioning
+				-- Head tracks the root part directly.
 				local cf = CFrame.lookAt(
 					self.rootPart.Position,
 					self.rootPart.Position + self.rootPart.CFrame.LookVector
 				)
 				segment.CFrame = cf
 
-				-- Use calculated head size
 				local headSize = self:getSegmentSize(0, currentBaseSize)
 				segment.Size = Vector3.new(headSize, headSize, headSize)
 
-				-- Update eyes with proper scaling
 				local eyeScale = headSize / BASE_SIZE * 0.5
 				local eyeOffset = headSize * 0.3
 				local eyeForward = -headSize * 0.35
@@ -902,103 +897,51 @@ function Snake:updateUnifiedBody()
 				self.rightEye.CFrame = cf * CFrame.new(eyeOffset, eyeOffset * 0.5, eyeForward)
 				self.leftPupil.CFrame = self.leftEye.CFrame * CFrame.new(0, 0, -eyeScale * 0.3)
 				self.rightPupil.CFrame = self.rightEye.CFrame * CFrame.new(0, 0, -eyeScale * 0.3)
-			elseif isVisible or i <= FORCE_RENDER_SEGMENTS then
-				-- Body segment positioning
-				local stepsBack = math.floor(i * spacing / 2)
-				local histData = self:getHistoricalPosition(stepsBack)
-				local nextHistData = self:getHistoricalPosition(stepsBack + 1)
+			else
+				-- Body segment: exact position on the path => no gaps, no bunching.
+				local targetPos = self:getPathPosition(i * spacing)
+				segment.Position = targetPos
 
-				if histData and nextHistData then
-					-- Smooth interpolation
-					local alpha = (i * spacing / 2) % 1
-					local targetPos = histData.position:Lerp(nextHistData.position, alpha)
-					local currentPos = segment.Position
-
-					-- Use higher smoothing during growth for smoother transitions
-					local smoothingFactor = self.isGrowing and VISUAL_SMOOTHING_FACTOR * 1.2 or VISUAL_SMOOTHING_FACTOR
-					segment.Position = currentPos:Lerp(targetPos, smoothingFactor)
-
-					-- Use calculated segment size
-					local segmentSize = self:getSegmentSize(i, currentBaseSize)
-					segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
-
-					-- Pulse effect during boost
-					if self.isBoosting then
-						local pulse = math.sin(tick() * 10 + i * 0.1) * 0.03 + 1 -- Reduced pulse
-						segment.Size = segment.Size * pulse
-					end
+				local segmentSize = self:getSegmentSize(i, currentBaseSize)
+				if boosting then
+					segmentSize = segmentSize * (math.sin(timeNow * 10 + i * 0.1) * 0.03 + 1)
 				end
+				segment.Size = Vector3.new(segmentSize, segmentSize, segmentSize)
 			end
 
-			-- Update attachment position
 			if self.attachments[i] then
 				self.attachments[i].WorldPosition = segment.Position
 			end
 		end
 	end
 
-	-- Update all beams with calculated widths
+	-- Beams form the continuous tube between the balls. They are always enabled
+	-- for active segments so there is never a hole in the body.
+	local colorShift = boosting and (math.floor(timeNow * 3) % math.max(1, #self.config.BodyColors)) or 0
 	for i, beam in pairs(self.beams) do
-		if beam and beam.Parent then
-			if type(i) == "number" then
-				-- Regular beams
-				if i <= self.visibleSegmentCount then
-					local beamWidth = self:getBeamWidth(i, currentBaseSize)
-					beam.Width0 = beamWidth
-					beam.Width1 = beamWidth
+		if beam and beam.Parent and type(i) == "number" then
+			if i < self.visibleSegmentCount then
+				beam.Enabled = true
+				local beamWidth = self:getBeamWidth(i, currentBaseSize)
+				beam.Width0 = beamWidth
+				beam.Width1 = beamWidth
 
-					-- 🎨 ENHANCED: Update beam colors for rainbow mode
-					if self.rainbowMode and i % 5 == 0 then
-						beam.Color = ColorSequence.new(self:getSegmentColor(i))
-					end
-
-					-- Dynamic color during boost
-					if self.isBoosting and i > HEAD_BLEND_SEGMENTS and not self.rainbowMode then
-						local colorShift = math.floor(tick() * 3) % #self.config.BodyColors
-						local colorIndex = ((i - 1 + colorShift) % #self.config.BodyColors) + 1
-						beam.Color = ColorSequence.new(self.config.BodyColors[colorIndex])
-					end
-				else
-					beam.Enabled = false
+				if rainbow and i % 5 == 0 then
+					beam.Color = ColorSequence.new(self:getSegmentColor(i))
+				elseif boosting and i > HEAD_BLEND_SEGMENTS then
+					local colorIndex = ((i - 1 + colorShift) % #self.config.BodyColors) + 1
+					beam.Color = ColorSequence.new(self.config.BodyColors[colorIndex])
 				end
-			elseif string.find(i, "overlap") then
-				-- Overlap beams
-				local index = tonumber(string.match(i, "%d+"))
-				if index and index <= self.visibleSegmentCount - 2 then
-					local overlapWidth = self:getBeamWidth(index, currentBaseSize) * 1.15
-					beam.Width0 = overlapWidth
-					beam.Width1 = overlapWidth
-
-					-- Update colors for rainbow mode
-					if self.rainbowMode and index % 5 == 0 then
-						beam.Color = ColorSequence.new(self:getSegmentColor(index))
-					end
-				else
-					beam.Enabled = false
-				end
-			elseif string.find(i, "overlapMid") then
-				-- Mid overlap beams
-				local index = tonumber(string.match(i, "%d+"))
-				if index and index <= self.visibleSegmentCount - 3 then
-					local overlapWidth = self:getBeamWidth(index, currentBaseSize) * 1.1
-					beam.Width0 = overlapWidth
-					beam.Width1 = overlapWidth
-
-					-- Update colors for rainbow mode
-					if self.rainbowMode and index % 5 == 0 then
-						beam.Color = ColorSequence.new(self:getSegmentColor(index))
-					end
-				else
-					beam.Enabled = false
-				end
+			else
+				beam.Enabled = false
 			end
 		end
 	end
 
-	-- Update glow ranges based on size
+	-- Glow range scales gently with body size (glows are sparse by construction).
 	for i, glow in pairs(self.glows) do
 		if glow and glow.Parent then
-			local glowScale = 1 - (i / self.visibleSegmentCount) * 0.3 -- Gradual glow reduction
+			local glowScale = 1 - (i / math.max(1, self.visibleSegmentCount)) * 0.3
 			glow.Range = (GLOW_RANGE_BASE + (currentBaseSize - BASE_SIZE) * 2) * glowScale
 		end
 	end
@@ -1078,90 +1021,9 @@ function Snake:addSegments(count)
 		attachment.Parent = self.attachmentPart
 		self.attachments[i] = attachment
 
-		-- Create beam from previous segment
-		if self.attachments[i - 1] then
-			local beam = Instance.new("Beam")
-			beam.Name = "Beam" .. (i - 1)
-			beam.Attachment0 = self.attachments[i - 1]
-			beam.Attachment1 = self.attachments[i]
-
-			-- Calculate beam width for new segment
-			local beamWidth = self:getBeamWidth(i - 1, BASE_SIZE * self.growthFactor)
-			beam.Width0 = beamWidth * 0.1 -- Start thin
-			beam.Width1 = beamWidth * 0.1
-			beam.CurveSize0 = 0
-			beam.CurveSize1 = 0
-			beam.FaceCamera = true
-			beam.Segments = BEAM_SEGMENTS
-			beam.Texture = BEAM_TEXTURES.gradient
-			beam.TextureMode = Enum.TextureMode.Wrap
-			beam.TextureLength = 2
-			beam.TextureSpeed = BEAM_TEXTURE_SPEED
-			beam.LightEmission = 1
-			beam.LightInfluence = 0
-			beam.Brightness = 2
-			beam.Transparency = NumberSequence.new(0.8) -- Start more transparent
-
-			beam.Color = ColorSequence.new(self:getSegmentColor(i))
-
-			beam.Parent = self.attachmentPart
-			self.beams[i - 1] = beam
-
-			-- Animate beam growth (width only - transparency needs custom animation)
-			TweenService:Create(beam, TweenInfo.new(0.3), {
-				Width0 = beamWidth,
-				Width1 = beamWidth
-			}):Play()
-
-			-- Custom transparency animation for NumberSequence
-			local startTime = tick()
-			local transparencyConnection
-			transparencyConnection = RunService.Heartbeat:Connect(function()
-				local elapsed = tick() - startTime
-				local progress = math.min(elapsed / 0.3, 1) -- 0.3 second duration
-
-				-- Interpolate from 0.8 to final transparency
-				local transparency = 0.8 * (1 - progress)
-				beam.Transparency = NumberSequence.new{
-					NumberSequenceKeypoint.new(0, transparency),
-					NumberSequenceKeypoint.new(0.5, transparency),
-					NumberSequenceKeypoint.new(1, transparency + 0.1)
-				}
-
-				if progress >= 1 then
-					transparencyConnection:Disconnect()
-				end
-			end)
-		end
-
-		-- Add strategic overlap beams for new segments in critical areas
-		if i <= HEAD_BLEND_SEGMENTS * 2 and i > 2 and i % 2 == 0 then
-			local overlapBeam = Instance.new("Beam")
-			overlapBeam.Name = "OverlapBeam" .. (i - 2)
-			overlapBeam.Attachment0 = self.attachments[i - 2]
-			overlapBeam.Attachment1 = self.attachments[i]
-
-			local overlapWidth = self:getBeamWidth(i - 2, BASE_SIZE * self.growthFactor) * 1.15
-			overlapBeam.Width0 = overlapWidth
-			overlapBeam.Width1 = overlapWidth
-			overlapBeam.CurveSize0 = 0
-			overlapBeam.CurveSize1 = 0
-			overlapBeam.FaceCamera = true
-			overlapBeam.Segments = BEAM_SEGMENTS
-			overlapBeam.Texture = BEAM_TEXTURES.gradient
-			overlapBeam.TextureMode = Enum.TextureMode.Wrap
-			overlapBeam.TextureLength = 3
-			overlapBeam.TextureSpeed = BEAM_TEXTURE_SPEED * 0.7
-			overlapBeam.LightEmission = 0.7
-			overlapBeam.LightInfluence = 0
-			overlapBeam.Transparency = NumberSequence.new(0.5)
-			overlapBeam.ZOffset = -0.1
-
-			overlapBeam.Color = ColorSequence.new(self:getSegmentColor(i - 2))
-
-			overlapBeam.Parent = self.attachmentPart
-			self.beams["overlap" .. (i - 2)] = overlapBeam
-		end
+		-- Connect to the body with a solid full-width beam right away so there is
+		-- never a gap or thin spot while the new ball grows in.
+		self:createBodyBeam(i - 1, self.attachmentPart)
 	end
 
 	self.visibleSegmentCount = math.min(self.visibleSegmentCount + count, MAX_SEGMENTS)
