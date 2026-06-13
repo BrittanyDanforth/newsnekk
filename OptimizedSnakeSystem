@@ -1152,6 +1152,16 @@ function Snake:updateLength(newLength)
 	self.targetLength = math.min(newLength, 50000)
 end
 
+-- Backwards-compatibility shim. Older versions of SnakeSystemIntegration drove
+-- the snake with a per-frame `snake:update(dt)` call. This system now runs its
+-- own RunService.Heartbeat loop internally (see startUpdateLoop), so an external
+-- update call is unnecessary. We keep a safe no-op here so any legacy caller
+-- cannot error with "attempt to call missing method 'update'".
+function Snake:update(_dt)
+	return self
+end
+Snake.Update = Snake.update
+
 function Snake:GetSegments()
 	local collisionSegments = {}
 	for i = 1, math.min(50, self.visibleSegmentCount) do
