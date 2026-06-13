@@ -1686,6 +1686,10 @@ function AISnake.new(startPosition, preservedPersonalityType)
 	-- Calculate initial growth factor
 	self.growthFactor = self:calculateGrowthFactor()
 
+	-- Distance-based body path, pre-seeded straight behind the head so the snake
+	-- spawns already laid out (no unfurling/teleporting from a single point).
+	self:initPath()
+
 	-- FIXED: Proper position history initialization
 	self.MaxHistorySize = mathCeil(self.Config.MaxSegments * 1.2) + 20
 	self.PositionHistory = table.create(self.MaxHistorySize)
@@ -1849,6 +1853,12 @@ function AISnake.new(startPosition, preservedPersonalityType)
 		-- Gradually move forward to create proper segment spacing
 		local startPos = self.Position
 		for step = 1, 20 do
+			-- Abort if the snake was destroyed during stabilization (prevents
+			-- "attempt to index nil with 'Position'" when RootPart is gone).
+			if self._destroyed or not self.RootPart or not self.RootPart.Parent then
+				return
+			end
+
 			-- Move forward slightly
 			local moveDistance = self.SegmentSpacing * 0.1
 			local newPos = self.Position + self.Direction * moveDistance
@@ -2586,26 +2596,8 @@ function AISnake:updateMovement(dt)
 		end
 	end
 
-	-- History management
-	local lastHistoryPoint = self:getFromHistory(1)
-	local dist = (self.Position - lastHistoryPoint.position).Magnitude
-
-	-- EXACT same interpolation as CharacterSetup
-	if dist > 0.02 then
-		-- Balanced interpolations (from CharacterSetup)
-		if dist > self.Config.SegmentSpacing * 0.7 then
-			local isBoosting = self.Speed > 16  -- AI boost check
-			local maxInterp = isBoosting and 6 or 3
-			local numInterpolations = mathMin(mathFloor(dist / (self.Config.SegmentSpacing * 0.35)), maxInterp)
-			for i = 1, numInterpolations do
-				local fraction = i / (numInterpolations + 1)
-				local interpPos = lastHistoryPoint.position:Lerp(self.Position, fraction)
-				local interpLook = lastHistoryPoint.lookVector:Lerp(self.Direction, fraction).Unit
-				self:addToHistory({ position = interpPos, lookVector = interpLook })
-			end
-		end
-		self:addToHistory({ position = self.Position, lookVector = self.Direction })
-	end
+	-- Record the head's travel as a distance-based path (seamless, gap-free body).
+	self:recordPath()
 
 	-- Segment following (OPTIMIZED)
 	local followSpeed = self.IsBoosting and self.BoostFollowSpeed or self.FollowSpeed
@@ -2649,64 +2641,25 @@ function AISnake:updateMovement(dt)
 	-- Only update visible segments
 	local maxSegmentToUpdate = math.min(self.visibleSegmentCount, DYNAMIC_SEGMENT_LIMIT)
 
-	-- Build list of segments to update based on visibility
-	local segmentsToUpdate = {}
-	for i = 1, math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT) do
-		if self.segmentVisibility[i] ~= false then
-			table.insert(segmentsToUpdate, i)
-		end
-	end
+	-- Update segments by placing each at an exact arc-length behind the head.
+	-- Constant distance spacing => identical gaps at any speed (no boost gaps),
+	-- and exact path positions mean frame-skipping for long snakes no longer
+	-- causes drift/desync.
+	local spacing = self:aiSpacing()
+	self.aiRequiredPathLength = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT) * spacing
 
-	-- Update segments with adaptive skipping and LOD
 	for i = 1 + updateOffset, maxSegmentToUpdate, segmentSkip do
-		-- Ensure segment exists (dynamic creation)
 		local segment = self:ensureSegmentExists(i)
 		if segment and segment.Parent then
-			-- Skip if culled
 			if self.lodStates[i] == "culled" then
 				continue
 			end
-			
-			local delay = mathFloor(i * 1.2)
-			local targetData = self:getFromHistory(delay)
-			if targetData then
-				-- Use EXACT same spacing as CharacterSetup
-				local spacingMultiplier = 0.15  -- Base spacing from CharacterSetup
-				if self.CurrentLength > 1500 then
-					spacingMultiplier = 0.2  -- More spacing to show pattern
-				end
-				local segmentPos = targetData.position - targetData.lookVector * (self.Config.SegmentSpacing * spacingMultiplier)
-				local currentSegmentPos = segment.Position
 
-				-- Anti-gap check (from CharacterSetup)
-				if i > 1 then
-					local prevSegment = self.Segments[i - 1]
-					if prevSegment and prevSegment.Parent then
-						local gap = (currentSegmentPos - prevSegment.Position).Magnitude
-						if gap > self.Config.SegmentSpacing * 1.5 then
-							-- Too far, pull it closer
-							local dir = (prevSegment.Position - currentSegmentPos).Unit
-							segmentPos = prevSegment.Position - dir * self.Config.SegmentSpacing
-						end
-					end
-				end
+			local segmentPos = self:getPathPosition(i * spacing)
+			segment.CFrame = CFramenew(segmentPos)
 
-				-- Use different follow speeds based on LOD
-				local lodState = self.lodStates[i]
-				local lodFollowSpeed = followSpeed
-				if lodState == "far" then
-					lodFollowSpeed = 1 -- Instant update for far segments
-				elseif lodState == "mid" then
-					lodFollowSpeed = math.min(followSpeed * 1.2, 0.99)
-				end
-
-				local newPos = currentSegmentPos:Lerp(segmentPos, lodFollowSpeed)
-				segment.CFrame = CFramenew(newPos)
-
-				-- Update attachment position for this segment
-				if self.Attachments and self.Attachments[i] then
-					self.Attachments[i].WorldPosition = newPos
-				end
+			if self.Attachments and self.Attachments[i] then
+				self.Attachments[i].WorldPosition = segmentPos
 			end
 		end
 	end
@@ -3051,11 +3004,122 @@ function AISnake:getBeamWidth(index, baseSize)
 	local visibleSegmentCount = self.CurrentLength
 	local beamTaper = 1 - (index / visibleSegmentCount) * BEAM_TAPER_STRENGTH
 
-	-- For AI snakes, use slightly smaller beam width to prevent showing outside
+	-- Beams a touch wider than the balls so the body reads as one solid tube
+	-- (matches the player snake; hides the individual ball bumps).
 	local aiConfig = self.Config.AI or {}
-	local beamWidthBase = aiConfig.BeamWidthMultiplier or BEAM_WIDTH_BASE * 0.9
+	local beamWidthBase = aiConfig.BeamWidthMultiplier or (BEAM_WIDTH_BASE * 1.12)
 
 	return avgSize * beamWidthBase * beamTaper
+end
+
+-- === DISTANCE-BASED BODY PATH (matches OptimizedSnakeSystem) ===
+-- Constant arc-length spacing makes the body seamless and gap-free at any speed
+-- (the old frame-delay spacing produced visible gaps while boosting).
+local AI_PATH_RESOLUTION = 0.35
+local AI_PATH_BUFFER = 40
+
+function AISnake:aiSpacing()
+	local diameter = BASE_SIZE * (self.growthFactor or 1)
+	return diameter * 0.4
+end
+
+function AISnake:aiHeadPos()
+	if self.HeadParts and self.HeadParts.head and self.HeadParts.head.Parent then
+		return self.HeadParts.head.Position
+	end
+	return self.Position
+end
+
+function AISnake:initPath()
+	self.pathPoints = {}
+	local spacing = self:aiSpacing()
+	local count = math.min(self.CurrentLength or 1, DYNAMIC_SEGMENT_LIMIT)
+	local seedLen = count * spacing + AI_PATH_BUFFER
+	self.aiRequiredPathLength = count * spacing
+
+	local pos = self:aiHeadPos()
+	local look = self.Direction
+	if look.Magnitude < 1e-4 then look = Vector3new(0, 0, 1) end
+	look = look.Unit
+
+	local steps = math.max(1, math.ceil(seedLen / AI_PATH_RESOLUTION))
+	local idx = 1
+	for k = steps, 0, -1 do
+		local d = math.min(k * AI_PATH_RESOLUTION, seedLen)
+		self.pathPoints[idx] = { pos = pos - look * d, dist = seedLen - d }
+		idx = idx + 1
+	end
+	self.pathTail = 1
+	self.pathHead = idx - 1
+	self.pathTotal = seedLen
+end
+
+function AISnake:recordPath()
+	local pts = self.pathPoints
+	if not pts then self:initPath(); return end
+	local pos = self:aiHeadPos()
+	local newest = pts[self.pathHead]
+	if not newest then self:initPath(); return end
+
+	local moved = (pos - newest.pos).Magnitude
+	if moved < AI_PATH_RESOLUTION then return end
+
+	self.pathTotal = self.pathTotal + moved
+	self.pathHead = self.pathHead + 1
+	pts[self.pathHead] = { pos = pos, dist = self.pathTotal }
+
+	local minDist = self.pathTotal - ((self.aiRequiredPathLength or 0) + AI_PATH_BUFFER)
+	while self.pathTail < self.pathHead - 1 and pts[self.pathTail].dist < minDist do
+		pts[self.pathTail] = nil
+		self.pathTail = self.pathTail + 1
+	end
+
+	if self.pathTail > 4096 then
+		local compact = {}
+		local n = 0
+		for i = self.pathTail, self.pathHead do
+			n = n + 1
+			compact[n] = pts[i]
+		end
+		self.pathPoints = compact
+		self.pathTail = 1
+		self.pathHead = n
+	end
+end
+
+function AISnake:getPathPosition(distBack)
+	local pts = self.pathPoints
+	if not pts then return self:aiHeadPos() end
+	local newest = pts[self.pathHead]
+	local tail = pts[self.pathTail]
+	if not newest or not tail then return self:aiHeadPos() end
+
+	local headPos = self:aiHeadPos()
+	local headLead = (headPos - newest.pos).Magnitude
+	local effectiveTotal = self.pathTotal + headLead
+	local targetDist = effectiveTotal - distBack
+
+	if targetDist >= self.pathTotal then
+		if headLead < 1e-5 then return headPos end
+		local t = (targetDist - self.pathTotal) / headLead
+		return newest.pos:Lerp(headPos, t < 0 and 0 or (t > 1 and 1 or t))
+	end
+	if targetDist <= tail.dist then return tail.pos end
+
+	local lo, hi = self.pathTail + 1, self.pathHead
+	while lo < hi do
+		local mid = mathFloor((lo + hi) / 2)
+		if pts[mid].dist < targetDist then
+			lo = mid + 1
+		else
+			hi = mid
+		end
+	end
+	local p2 = pts[lo]
+	local p1 = pts[lo - 1]
+	local span = p2.dist - p1.dist
+	local t = span > 1e-5 and (targetDist - p1.dist) / span or 0
+	return p1.pos:Lerp(p2.pos, t)
 end
 
 -- Calculate LOD level based on distance (from OptimizedSnakeSystem)
@@ -3133,122 +3197,27 @@ function AISnake:shouldHaveGlow(index)
 	end
 end
 
--- Update visibility for all segments
-function AISnake:updateSegmentVisibility(cameraPosition)
-	if not cameraPosition then return end
-	
-	-- Calculate distance from camera to snake head
-	local headDistance = (self.HeadParts.head.Position - cameraPosition).Magnitude
-	
-	-- Determine how many segments to show based on distance
-	local segmentsToShow
-	if headDistance < 200 then
-		segmentsToShow = self.CurrentLength  -- Show all
-	elseif headDistance < 400 then
-		segmentsToShow = math.floor(self.CurrentLength * 0.8)  -- 80%
-	elseif headDistance < 600 then
-		segmentsToShow = math.floor(self.CurrentLength * 0.5)  -- 50%
-	elseif headDistance < 800 then
-		segmentsToShow = math.max(30, math.floor(self.CurrentLength * 0.3))  -- 30% but at least 30
-	else
-		segmentsToShow = math.max(15, math.floor(self.CurrentLength * 0.15))  -- 15% but at least 15
-	end
-	
-	-- Clamp to limits
-	segmentsToShow = math.min(segmentsToShow, self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
-	
-	-- Always show head at full quality
+-- Update visibility for all segments.
+-- AI snakes are rendered on the SERVER (no single camera), so distance-based
+-- culling/fading is meaningless and previously faded the AI's own last 30% of
+-- segments -- which read as gaps/holes in the body. We keep the whole body fully
+-- opaque and continuous; the engine handles far-away rendering on each client.
+function AISnake:updateSegmentVisibility(_cameraPosition)
+	local maxIndex = math.min(self.CurrentLength, DYNAMIC_SEGMENT_LIMIT)
+	self.visibleSegmentCount = maxIndex
+
 	if self.Segments[0] then
-		self:applyLODToSegment(self.Segments[0], "near", 0)
-		self.Segments[0].Transparency = 0  -- Head always fully opaque
+		self.Segments[0].Transparency = 0
 	end
-	
-	-- Update eye visibility based on head distance
-	if self.HeadParts then
-		local eyeVisible = headDistance < 600  -- Hide eyes when far away
-		if self.HeadParts.leftEye then
-			self.HeadParts.leftEye.Transparency = eyeVisible and 0 or 1
-		end
-		if self.HeadParts.rightEye then
-			self.HeadParts.rightEye.Transparency = eyeVisible and 0 or 1
-		end
-		if self.HeadParts.leftPupil then
-			self.HeadParts.leftPupil.Transparency = eyeVisible and 0 or 1
-		end
-		if self.HeadParts.rightPupil then
-			self.HeadParts.rightPupil.Transparency = eyeVisible and 0 or 1
-		end
-	end
-	
-	-- Update segments continuously from head
-	for i = 1, self.CurrentLength do
+
+	for i = 1, maxIndex do
 		local segment = self.Segments[i]
-		
-		if i <= segmentsToShow then
-			-- This segment should be visible
-			if segment and segment.Parent then
-				-- Calculate segment-specific distance
-				local segmentDistance = (segment.Position - cameraPosition).Magnitude
-				
-				-- Determine LOD level
-				local lodLevel
-				if segmentDistance < LOD_DISTANCE_NEAR then
-					lodLevel = "near"
-				elseif segmentDistance < LOD_DISTANCE_MID then
-					lodLevel = "mid"
-				else
-					lodLevel = "far"
-				end
-				
-				self:applyLODToSegment(segment, lodLevel, i)
-				
-				-- Calculate transparency - NEVER make segments fully invisible when they should be shown
-				local baseTransparency = 0
-				if headDistance < 200 then
-					baseTransparency = 0
-				elseif headDistance < 400 then
-					baseTransparency = 0.1
-				elseif headDistance < 600 then
-					baseTransparency = 0.2
-				else
-					baseTransparency = 0.3  -- Max 30% transparent, not 50%
-				end
-				
-				-- Fade out segments near the cutoff point
-				local fadeStart = segmentsToShow * 0.7  -- Start fading at 70%
-				if i > fadeStart and i < segmentsToShow then
-					-- Gradual fade for last 30% of visible segments
-					local fadeProgress = (i - fadeStart) / (segmentsToShow - fadeStart)
-					segment.Transparency = math.min(0.7, baseTransparency + fadeProgress * 0.5)
-				else
-					segment.Transparency = baseTransparency
-				end
-				
-				-- Update glow based on distance and visibility
-				local glow = segment:FindFirstChild("Glow")
-				if glow then
-					if headDistance < 600 and self:shouldHaveGlow(i) then
-						-- Scale down glow with distance
-						local glowScale = math.max(0, 1 - (headDistance / 600))
-						glow.Enabled = true
-						glow.Brightness = GLOW_INTENSITY * glowScale * (1 - segment.Transparency)
-						glow.Range = GLOW_RANGE_BASE * glowScale
-					else
-						glow.Enabled = false
-					end
-				end
-			end
-		else
-			-- This segment should be completely hidden
-			if segment and segment.Parent then
-				self:applyLODToSegment(segment, "culled", i)
-			end
-			self.segmentVisibility[i] = false
+		if segment and segment.Parent then
+			segment.Transparency = 0
+			self.lodStates[i] = "near"
+			self.segmentVisibility[i] = true
 		end
 	end
-	
-	-- Store visible count
-	self.visibleSegmentCount = segmentsToShow
 end
 
 -- Sync beam visibility with segments (Continuous visibility)
